@@ -171,6 +171,31 @@ def test_a_gap_in_the_data_does_not_shift_later_buckets():
     ]
 
 
+def test_volume_is_summed_across_a_bucket_but_open_interest_is_the_last_value():
+    """Volume is a flow and adds up; open interest is a level and does not."""
+    bars = [
+        Candle(time=_epoch("2026-09-16", "09:00"), open=1, high=1, low=1, close=1,
+               volume=10.0, open_interest=500.0),
+        Candle(time=_epoch("2026-09-16", "09:01"), open=1, high=1, low=1, close=1,
+               volume=25.0, open_interest=520.0),
+    ]
+
+    merged = aggregate_intraday(bars, 300)[0]
+
+    assert merged.volume == 35.0
+    assert merged.open_interest == 520.0
+
+
+def test_a_bucket_with_no_reported_volume_stays_unknown_rather_than_zero():
+    """The chart omits an unknown volume; it must not arrive here as 0."""
+    bars = [
+        Candle(time=_epoch("2026-09-16", "09:00"), open=1, high=1, low=1, close=1),
+        Candle(time=_epoch("2026-09-16", "09:01"), open=1, high=1, low=1, close=1),
+    ]
+
+    assert aggregate_intraday(bars, 300)[0].volume is None
+
+
 def test_aggregating_an_empty_series_returns_an_empty_series():
     assert aggregate_intraday([], 300) == []
     assert aggregate_calendar([], "week") == []
@@ -433,6 +458,15 @@ async def test_the_endpoint_returns_candles_for_the_near_future(auth_client):
     assert len(body["candles"]) > 1
     for candle in body["candles"][:5]:
         assert {"time", "open", "high", "low", "close"} <= set(candle)
+
+
+async def test_candles_carry_the_volume_the_chart_pane_draws(auth_client):
+    response = await auth_client.get(
+        "/api/market/candles?securityId=565899&timeframe=5m"
+    )
+
+    candles = response.json()["candles"]
+    assert all(candle["volume"] > 0 for candle in candles[:20])
 
 
 async def test_the_endpoint_rejects_a_timeframe_it_does_not_serve(auth_client):

@@ -122,7 +122,19 @@ v4.
 - **Candles never enter React state.** History goes into the series once with
   `setData`; after that only `series.update()` is called, which is an imperative
   call rather than a render. Putting candle arrays in state would re-render the
-  page on every tick and break section 2's contract.
+  page on every tick and break section 2's contract. The raw bars are kept in a
+  `useRef` so the volume pane's per-point colours can be rebuilt on a theme
+  toggle without refetching.
+- **The volume pane is chart pane 1** (`chart.addSeries(HistogramSeries, opts, 1)`),
+  coloured per bar from `theme.market.upVolume` / `downVolume` — the `*Soft`
+  tokens are row tints and vanish when drawn as a thin bar. The feed publishes
+  the session's cumulative volume, so the forming bar's volume is the growth in
+  that counter since the bar opened, rebased on rollover and whenever the
+  counter goes backwards (a new session).
+- **The chart pauses rather than inventing.** A stale feed *or* a closed
+  exchange stops the forming bar entirely, and a chip in the chart header says
+  which. Without the market-hours guard the last bar of the session grows
+  forever in synthetic mode, since there is no rollover to end it.
 - **`<LiveCandle>` renders `null`.** It is the only part of the chart that
   subscribes to the feed, so the chart chrome does not re-render at ~10/sec.
   Keep the subscription there.
@@ -138,8 +150,8 @@ v4.
 - **Honesty applies to the chart too** (section 3). Synthetic bars are labelled
   on the chart itself, not only by the page banner — a chart is exactly the
   thing that gets screenshotted away from its banner. An aggregated timeframe
-  says it was aggregated. A stale feed stops the forming bar rather than
-  painting the last price into new buckets.
+  says it was aggregated, a series with no volume says so, and a bar with no
+  reported volume is left out of the pane rather than drawn as zero.
 
 ---
 

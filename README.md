@@ -18,7 +18,7 @@ source.
 | | |
 |---|---|
 | **Live price** | CRUDEOIL near-month future — LTP, OHLC, volume, OI, 5-level depth, with connection health and last-tick age always on screen |
-| **Price chart** | Candlestick chart of the near-month future at ten timeframes (1m to 1M), history from Dhan's read-only chart endpoints, newest bar updating live from the existing feed |
+| **Price chart** | Candlestick chart of the near-month future with a volume pane, at ten timeframes (1m to 1M), history from Dhan's read-only chart endpoints, newest bar updating live from the existing feed |
 | **Option chain** | Full CE/PE ladder in the conventional Indian broker layout, with IV and greeks, OI change, ATM highlighting and click-to-trade |
 | **Order entry** | Market and limit, from the chain or a standalone ticket, with estimated charges and net debit/credit shown **before** confirmation |
 | **Fill simulation** | Orders cross the spread, walk the book level by level, and partially fill when depth runs out |
@@ -200,7 +200,14 @@ To go live: set `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN`, set
 ## Price chart
 
 The Live Price page carries a candlestick chart of the near-month CRUDEOIL
-future, below the stat tiles. Timeframes: `1m 3m 5m 15m 30m 1h 4h 1D 1W 1M`.
+future, below the stat tiles, with a volume pane beneath the candles.
+Timeframes: `1m 3m 5m 15m 30m 1h 4h 1D 1W 1M`.
+
+It opens on the most recent ~180 bars rather than the whole series — scroll or
+zoom out for the rest. **The chart pauses when there is nothing to draw**: a
+stale feed or a closed exchange freezes the forming bar rather than extending
+it, and a chip in the chart header says which. Volume bars whose volume the
+server did not report are omitted rather than drawn as zero.
 
 **Where the bars come from.** This application persists no price history at all
 — `MarketBook` holds one current row per instrument in memory and nothing writes
@@ -609,6 +616,16 @@ not carried over.
   deterministic per instrument and anchored so the newest close equals the live
   price, but they are fake and labelled as such. Real Dhan data has no such
   problem.
+* **The volume pane's units are whatever Dhan returns.** The feed's volume for
+  CRUDEOIL is barrels, and the chart endpoints are assumed to agree, but with no
+  token that has never been checked — if the pane's numbers disagree with the
+  Volume tile by a factor of the lot size, this is why.
+* **The forming bar's volume is derived from a cumulative counter.** The feed
+  publishes the session's running volume, not a per-bar figure, so the live
+  bar's volume is the growth in that counter since the bar opened. It is exact
+  while the page stays open and the counter only rises; a counter that goes
+  backwards is treated as a new session. Reloading replaces it with the
+  server's own figure.
 * **The chart's live bar reflects the last traded price only.** The forming
   candle is updated from the feed's LTP, so its high and low are the extremes
   this browser has *seen* since the bar opened, not the true extremes of every

@@ -78,6 +78,10 @@ export const market = {
     down: '#D13438',
     upSoft: 'rgba(11, 138, 91, 0.10)',
     downSoft: 'rgba(209, 52, 56, 0.10)',
+    // Volume histogram bars. Heavier than *Soft, which is a row tint and
+    // disappears entirely when drawn as a one-pixel-wide bar.
+    upVolume: 'rgba(11, 138, 91, 0.45)',
+    downVolume: 'rgba(209, 52, 56, 0.45)',
     atm: 'rgba(53, 75, 187, 0.10)',
     itm: 'rgba(255, 196, 0, 0.09)',
   },
@@ -86,6 +90,8 @@ export const market = {
     down: '#FF8A7A',
     upSoft: 'rgba(94, 214, 160, 0.12)',
     downSoft: 'rgba(255, 138, 122, 0.12)',
+    upVolume: 'rgba(94, 214, 160, 0.45)',
+    downVolume: 'rgba(255, 138, 122, 0.45)',
     atm: 'rgba(53, 75, 187, 0.28)',
     itm: 'rgba(255, 196, 0, 0.10)',
   },
