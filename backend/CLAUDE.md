@@ -324,6 +324,37 @@ added to `ALLOWED_DHAN_URLS`.
 
 ---
 
+## 10b. Chart trading
+
+`src/chart_trading/` turns a click on the FUTURE's chart into an OPTION
+position. Everything in it exists to keep that translation honest.
+
+- **Buy buys the ATM call, Sell buys the ATM put, and neither writes one.** The
+  service always submits `OrderSide.BUY`. A code path that sells to open would
+  turn a capped premium into unlimited risk; there is a test asserting every
+  order the feature places is a BUY.
+- **The two buttons net**, so at most one chart trade is open per underlying and
+  `get_open_for_underlying` can assume it. The opposite click closes rather than
+  opening a second leg.
+- **The ATM strike is resolved against the FUTURE's live price**, not the option
+  chain's own underlying figure, because the future is what the user is reading
+  levels off.
+- **Bracket levels are prices of the FUTURE**, stored on the chart trade, and
+  they start null -- a trade opens unarmed. `validate_levels` refuses a level on
+  the wrong side of the market: armed there it would fire on the tick that
+  armed it, which looks like the chart closing the trade by itself.
+- **`bracket_monitor` is server-side and off the tick path**, its own 250 ms
+  task with its own session, modelled on `OrderMatcher`. A stop that lived in
+  the browser would die with the tab. It never acts on a `None` price.
+- **Exits go through `submit_paper_order` like everything else**, so they cross
+  the spread and can partially fill. Do not give the chart a privileged fill
+  path; see section 4.
+- The rupee figures attached to a level are **estimates from the option's
+  current delta**, not limits. Keep them labelled as estimates wherever they
+  surface.
+
+---
+
 ## 11. Tests
 
 - `pytest.ini` sets `asyncio_mode = auto` — async tests need no decorator.

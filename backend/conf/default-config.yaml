@@ -183,6 +183,21 @@ market_hours:
   close_us_dst: "23:55"
   trading_days: [0, 1, 2, 3, 4]     # Mon-Fri (Python weekday numbering)
 
+chart_trading:
+  # One-click trading from the futures chart. A Buy buys the nearest ATM CALL
+  # and a Sell the nearest ATM PUT -- never a written option, so the worst case
+  # is always the premium paid. The stop-loss and take-profit lines dragged onto
+  # the chart are levels of the FUTURE; bracket_monitor watches the future and
+  # closes the OPTION at market when one is crossed.
+  #
+  # A stop at a futures level does NOT bound the loss in rupees: what the option
+  # is worth when the level is reached depends on delta, decay and IV.
+  enabled: true
+  default_lots: 1
+  # Bracket levels are checked on this cadence, on their own task with their own
+  # database session -- never on the tick path.
+  bracket_interval_ms: 250
+
 trading:
   # Fill simulation. See src/orders/services/fill_simulator.py.
   default_lots: 1

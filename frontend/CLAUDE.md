@@ -159,6 +159,36 @@ v4.
 
 ---
 
+## 5b. Trading from the chart
+
+`ChartTradeHud.jsx` is the buttons and the position strip, `BracketLines.jsx`
+the draggable SL/TP lines, `useChartTrading.js` the state.
+
+- **The cost is shown before the click, because there is no confirm step.**
+  One-click entry does not exempt this from section 3's rule -- it moves it.
+  The contract, premium, estimated charges and net debit for each button are on
+  screen continuously, from `/chart-trading/preview`.
+- **`useChartTrading` polls at 2 s, the same as Positions and for the same
+  reason**: charges and realised P&L are server-computed. Prices still come from
+  the socket. The unrealised leg is recomputed in the HUD from the live option
+  mark so the number moves with the feed, using the server's own inputs and the
+  same formula -- the server's figure replaces it on the next poll.
+- **lightweight-charts has no draggable price line.** The line is a native
+  price line; the handle is an HTML chip positioned with `priceToCoordinate()`
+  and dragged back through `coordinateToPrice()`. Handles are repositioned by
+  mutating `style.top` on an animation frame -- through React state that would
+  be a 60 fps re-render of the chart chrome.
+- **Nothing is armed mid-drag.** The server is told the new level on pointer-up.
+  A poll that lands during a drag must not yank the line out of the hand, which
+  is what the `draggingRef` guard is for.
+- **A level that scrolls out of the visible range pins to the edge of the price
+  pane**, rather than drifting down over the volume pane.
+- **`+ SL` places, the handle moves.** A button that says "Move" but jumps the
+  line to a default distance is a lie; when a level exists the button reads
+  "Reset".
+
+---
+
 ## 6. Conventions
 
 - API access goes through `src/api/` (`client.js` wraps fetch and raises

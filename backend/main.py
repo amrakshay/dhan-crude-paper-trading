@@ -81,6 +81,12 @@ async def lifespan(app: FastAPI):
         get_order_matcher,
         shutdown_order_matcher,
     )
+    # Chart stop-loss / take-profit levels are watched server-side: a stop that
+    # lives in the browser dies with the tab.
+    from src.chart_trading.services.bracket_monitor import (
+        get_bracket_monitor,
+        shutdown_bracket_monitor,
+    )
 
     try:
         await get_feed_manager().start()
@@ -92,12 +98,21 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Order matcher failed to start; resting limits will not fill")
 
+    try:
+        await get_bracket_monitor().start()
+    except Exception:
+        logger.exception(
+            "Bracket monitor failed to start; chart stop-loss and take-profit "
+            "levels will NOT be watched"
+        )
+
     logger.info("Startup complete; the API is accepting requests")
 
     yield
 
     logger.info("Crude paper-trading backend shutting down")
     try:
+        await shutdown_bracket_monitor()
         await shutdown_order_matcher()
         await shutdown_feed_manager()
         clear_singletons()
@@ -223,6 +238,7 @@ async def health_check() -> JSONResponse:
 from src.auth import auth_main_router  # noqa: E402
 from src.instruments import instruments_main_router  # noqa: E402
 from src.charges import charges_main_router  # noqa: E402
+from src.chart_trading import chart_trading_main_router  # noqa: E402
 from src.orders import orders_main_router  # noqa: E402
 from src.notes import notes_main_router  # noqa: E402
 from src.positions import positions_main_router  # noqa: E402
@@ -236,6 +252,7 @@ app.include_router(instruments_main_router, prefix="/api")
 app.include_router(market_main_router, prefix="/api")
 app.include_router(charges_main_router, prefix="/api")
 app.include_router(orders_main_router, prefix="/api")
+app.include_router(chart_trading_main_router, prefix="/api")
 app.include_router(positions_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")

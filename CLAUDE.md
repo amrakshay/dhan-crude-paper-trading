@@ -73,7 +73,7 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (448 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (475 tests)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
@@ -126,6 +126,11 @@ endpoints (`dhan_charts_client` → `candle_service`), and the browser updates o
 the newest bar from the WebSocket it already has. If you are tempted to persist
 ticks to back a chart, read the "Price chart" section of `README.md` first — that
 option was considered and rejected.
+
+**A chart click never writes an option.** `src/chart_trading/` translates a
+click on the FUTURE's chart into a long ATM option: Buy buys the call, Sell buys
+the put. A "Sell" is a long put, never a short call, so the worst case stays the
+premium paid. Do not add a code path that sells an option to open.
 
 **Never invent prices.** If credentials are missing and
 `DHAN_SYNTHETIC_FEED` is false, the feed reports an error. It must never
@@ -180,6 +185,8 @@ backend/src/market/services/       feed protocol, book, feed client, broadcaster
 backend/src/market/services/dhan_charts_client.py   candle history (market data only)
 backend/src/market/services/candle_service.py       timeframes, aggregation, cache
 frontend/src/components/PriceChart.jsx              the chart; see frontend/NOTICE
+backend/src/chart_trading/                         one-click trading from the chart
+backend/src/chart_trading/services/bracket_monitor.py   server-side SL/TP watcher
 backend/tests/test_no_real_orders.py   the safety suite
 frontend/src/theme/tokens.js       palette ported from the Privacera portal
 frontend/src/market/               the single shared WebSocket context

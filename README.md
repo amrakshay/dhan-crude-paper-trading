@@ -19,6 +19,7 @@ source.
 |---|---|
 | **Live price** | CRUDEOIL near-month future — LTP, OHLC, volume, OI, 5-level depth, with connection health and last-tick age always on screen |
 | **Price chart** | Candlestick chart of the near-month future with a volume pane, at ten timeframes (1m to 1M), history from Dhan's read-only chart endpoints, newest bar updating live from the existing feed |
+| **Chart trading** | One-click Buy/Sell on the futures chart, draggable stop-loss and take-profit lines, live P&L net of charges — trading futures levels while the book holds ATM options |
 | **Option chain** | Full CE/PE ladder in the conventional Indian broker layout, with IV and greeks, OI change, ATM highlighting and click-to-trade |
 | **Order entry** | Market and limit, from the chain or a standalone ticket, with estimated charges and net debit/credit shown **before** confirmation |
 | **Fill simulation** | Orders cross the spread, walk the book level by level, and partially fill when depth runs out |
@@ -264,6 +265,55 @@ The chart is [TradingView Lightweight Charts](https://github.com/tradingview/lig
 (Apache-2.0, pinned to 5.2.1). Its licence requires attribution and a link to
 tradingview.com: the built-in `attributionLogo` is left enabled and the notice
 is repeated under the chart. See `frontend/NOTICE` — do not remove either.
+
+---
+
+## Trading from the chart
+
+The price chart is also the order ticket. One click on **Buy** or **Sell**, one
+lot, no confirmation dialog.
+
+**A Buy buys the nearest ATM call; a Sell buys the nearest ATM put.** Neither
+ever *writes* an option, so the worst case is always the premium paid. You are
+reading and trading levels on the FUTURE while the book holds OPTIONS — that
+translation is the whole feature, and `src/chart_trading/` is where it lives.
+
+**The two buttons net.** A Sell while long a call closes the call rather than
+stacking a put on top of it; click Sell again once flat and it buys the put.
+So one click can never leave you in a straddle you did not intend, and at most
+one chart trade is open per contract.
+
+```
+long 1 CE  --Sell-->  flat        (closes the call)
+flat       --Sell-->  long 1 PE   (opens the put)
+long 1 PE  --Buy -->  flat        (closes the put)
+```
+
+**The cost is on screen before the click, not after it.** There is no confirm
+step, so the row above each button continuously shows the contract that button
+would buy, its premium, the estimated charges and the net debit — priced
+through the same fill simulation the order ticket uses, and warning when an
+order would only partially fill. That is how one-click entry still satisfies the
+rule that the cost of an order is visible before it is sent.
+
+**Stop-loss and take-profit lines are levels of the FUTURE.** Nothing is armed
+until you place a line: `+ SL` / `+ TP` drop one at a default distance and you
+drag its handle from there. `bracket_monitor` watches the future server-side on
+its own 250 ms task and sells the option at market when a level is crossed — a
+stop that lived in the browser would die with the tab. A level dropped on the
+wrong side of the market is refused rather than armed, because it would fire on
+the tick that armed it.
+
+> **A stop does not bound your loss in rupees.** What the option is worth when
+> the future reaches your level depends on delta, time decay and implied
+> volatility. The rupee figure on each line is a first-order estimate from the
+> option's *current* delta and is labelled `est.` — it is not a limit.
+
+Live P&L sits on the chart, net of every charge accrued so far. The exit's own
+charges are not in it: they are only known once the exit fills.
+
+Configuration lives under `chart_trading:` in `conf/default-config.yaml`
+(`enabled`, `default_lots`, `bracket_interval_ms`).
 
 ---
 
@@ -631,6 +681,12 @@ not carried over.
   while the page stays open and the counter only rises; a counter that goes
   backwards is treated as a new session. Reloading replaces it with the
   server's own figure.
+* **A chart exit can partially fill, and then the remainder rests.**
+  `reject_market_order_on_insufficient_depth` is false, so a triggered stop
+  takes whatever the visible book offers and leaves the rest as an open order —
+  the honest simulation, but it means "stopped out" does not always mean
+  "flat". The chart trade is marked closed either way; check Positions and
+  Order History if the numbers look odd.
 * **The chart's live bar reflects the last traded price only.** The forming
   candle is updated from the feed's LTP, so its high and low are the extremes
   this browser has *seen* since the bar opened, not the true extremes of every

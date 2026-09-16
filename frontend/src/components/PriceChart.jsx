@@ -57,7 +57,10 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { chartsApi } from '../api/charts';
 import { useFeedHealth, useMarketRow } from '../market/MarketFeedContext';
+import { useChartTrading } from '../market/useChartTrading';
 import { toChartTime } from '../utils/chartTime';
+import BracketLines from './BracketLines';
+import ChartTradeHud from './ChartTradeHud';
 
 const CHART_HEIGHT = 500;
 const VOLUME_PANE_HEIGHT = 110;
@@ -65,6 +68,10 @@ const VOLUME_PANE_HEIGHT = 110;
 // pane into a solid block, so the chart opens on the recent end and the rest
 // is a scroll away.
 const DEFAULT_VISIBLE_BARS = 180;
+// Where a freshly placed SL/TP line lands before it is dragged. Far enough
+// from the market that it cannot fire on the tick that armed it; the server
+// refuses a level on the wrong side anyway.
+const NEW_LEVEL_OFFSET_FRACTION = 0.005;
 const SECONDS_PER_DAY = 86400;
 
 function layoutOptions(theme) {
@@ -231,6 +238,16 @@ export default function PriceChart({ securityId, title = 'Price chart', subtitle
   // The bars as the server sent them, kept so the volume pane's per-point
   // colours can be rebuilt when the theme flips without refetching.
   const historyRef = useRef([]);
+
+  const [expiry, setExpiry] = useState(null);
+  const trading = useChartTrading(securityId, expiry);
+
+  // Show which expiry a click would buy rather than an empty selector. The
+  // nearest is the default; the server picks the same one when none is sent.
+  useEffect(() => {
+    const available = trading.preview?.expiries;
+    if (!expiry && available?.length) setExpiry(available[0]);
+  }, [expiry, trading.preview]);
 
   const [timeframes, setTimeframes] = useState([]);
   const [timeframe, setTimeframe] = useState(null);
@@ -399,6 +416,41 @@ export default function PriceChart({ securityId, title = 'Price chart', subtitle
     ? `These bars are generated locally and are not market data.${aggregated}${noVolume}`
     : `Bars come from Dhan; the newest one updates from the live feed.${aggregated}${noVolume}`;
 
+  // --- placing and moving the bracket lines -------------------------------
+  const placeLevel = (kind) => {
+    const trade = trading.trade;
+    const price = Number(trading.underlyingPrice ?? 0);
+    if (!trade || !price) return;
+    const offset = price * NEW_LEVEL_OFFSET_FRACTION;
+    // A stop sits on the losing side of the market, a target on the winning
+    // one -- reversed for a Sell, which is a long put.
+    const long = trade.chartSide === 'BUY';
+    const level =
+      kind === 'stop'
+        ? long ? price - offset : price + offset
+        : long ? price + offset : price - offset;
+    commitLevel(kind, Math.round(level * 100) / 100);
+  };
+
+  const commitLevel = (kind, level) => {
+    const trade = trading.trade;
+    if (!trade) return;
+    trading
+      .setLevels(trade.id, kind === 'stop' ? { stopLoss: level } : { takeProfit: level })
+      .catch(() => {});
+  };
+
+  const removeLevel = (kind) => {
+    const trade = trading.trade;
+    if (!trade) return;
+    trading
+      .setLevels(
+        trade.id,
+        kind === 'stop' ? { clearStopLoss: true } : { clearTakeProfit: true },
+      )
+      .catch(() => {});
+  };
+
   return (
     <Card>
       <CardContent sx={{ p: 3 }}>
@@ -459,6 +511,16 @@ export default function PriceChart({ securityId, title = 'Price chart', subtitle
         <Box sx={{ position: 'relative', height: CHART_HEIGHT }}>
           <Box ref={containerRef} sx={{ position: 'absolute', inset: 0 }} />
 
+          <BracketLines
+            chartRef={chartRef}
+            seriesRef={seriesRef}
+            containerRef={containerRef}
+            trade={trading.trade}
+            underlyingPrice={trading.underlyingPrice}
+            onCommit={commitLevel}
+            onRemove={removeLevel}
+          />
+
           {loading ? (
             <Box
               sx={{
@@ -513,6 +575,21 @@ export default function PriceChart({ securityId, title = 'Price chart', subtitle
             </Link>
           </Typography>
         </Stack>
+
+        <ChartTradeHud
+          trade={trading.trade}
+          preview={trading.preview}
+          expiry={expiry}
+          onExpiryChange={setExpiry}
+          busy={trading.busy}
+          error={trading.error}
+          onClick={(side) => trading.click(side).catch(() => {})}
+          onClose={(tradeId) => trading.close(tradeId).catch(() => {})}
+          onAddStop={() => placeLevel('stop')}
+          onAddTarget={() => placeLevel('target')}
+          disabled={!!error || meta?.count === 0}
+          disabledReason={error ? 'No chart data, so nothing can be traded from here.' : null}
+        />
       </CardContent>
 
       <LiveCandle
