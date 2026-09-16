@@ -205,9 +205,12 @@ Timeframes: `1m 3m 5m 15m 30m 1h 4h 1D 1W 1M`.
 
 It opens on the most recent ~180 bars rather than the whole series — scroll or
 zoom out for the rest. **The chart pauses when there is nothing to draw**: a
-stale feed or a closed exchange freezes the forming bar rather than extending
-it, and a chip in the chart header says which. Volume bars whose volume the
-server did not report are omitted rather than drawn as zero.
+stale feed freezes the forming bar rather than extending it, as does a closed
+exchange when the prices are real, and a chip in the chart header says which.
+The synthetic feed is deliberately exempt from the market-hours rule — it exists
+to exercise the stack outside MCX hours, so the chart keeps moving there.
+Volume bars whose volume the server did not report are omitted rather than drawn
+as zero.
 
 **Where the bars come from.** This application persists no price history at all
 — `MarketBook` holds one current row per instrument in memory and nothing writes
@@ -612,7 +615,9 @@ not carried over.
   second per series and caches responses, both of which are guesses.
 * **Synthetic candles are per-timeframe, not mutually consistent.** In synthetic
   mode each timeframe's bars are generated independently, so the synthetic 1h
-  series is not exactly the aggregate of the synthetic 5m series. Bars are
+  series is not exactly the aggregate of the synthetic 5m series. The synthetic
+  feed's tick volume is not calibrated against the synthetic history's volume
+  either, so live bars can stand a couple of times taller than historical ones. Bars are
   deterministic per instrument and anchored so the newest close equals the live
   price, but they are fake and labelled as such. Real Dhan data has no such
   problem.

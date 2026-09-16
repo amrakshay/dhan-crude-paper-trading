@@ -131,10 +131,14 @@ v4.
   the session's cumulative volume, so the forming bar's volume is the growth in
   that counter since the bar opened, rebased on rollover and whenever the
   counter goes backwards (a new session).
-- **The chart pauses rather than inventing.** A stale feed *or* a closed
-  exchange stops the forming bar entirely, and a chip in the chart header says
-  which. Without the market-hours guard the last bar of the session grows
-  forever in synthetic mode, since there is no rollover to end it.
+- **The chart pauses rather than inventing, except where pausing is the bug.**
+  A stale feed stops the forming bar entirely. A closed exchange stops it too
+  *only when the prices are real* — the SYNTHETIC feed exists to exercise the
+  stack outside MCX hours (see `synthetic_feed.py`), so freezing it there
+  freezes the chart exactly when it is most useful. A chip in the chart header
+  says which of the two paused it, because a chart that stops silently looks
+  broken. Rollover is what bounds a bar's volume: block it and the last bar of
+  the session grows forever.
 - **`<LiveCandle>` renders `null`.** It is the only part of the chart that
   subscribes to the feed, so the chart chrome does not re-render at ~10/sec.
   Keep the subscription there.

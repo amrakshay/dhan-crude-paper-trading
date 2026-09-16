@@ -130,7 +130,7 @@ const LiveCandle = memo(function LiveCandle({
   theme,
 }) {
   const row = useMarketRow(securityId);
-  const { stale, marketOpen } = useFeedHealth();
+  const { stale, marketOpen, state } = useFeedHealth();
   const ltp = row?.ltp ?? null;
   const cumulativeVolume = row?.volume ?? null;
 
@@ -140,10 +140,12 @@ const LiveCandle = memo(function LiveCandle({
     if (!series || !live || !live.last || ltp == null) return;
     // A stale book must not keep drawing bars. See the honesty rules above.
     if (stale) return;
-    // Nor must a closed exchange. Outside MCX hours the last bar is finished:
-    // extending it would keep growing its volume without bound and move a
-    // close that the session already settled. The chart says it is paused.
-    if (marketOpen === false) return;
+    // Nor must a closed exchange -- but only when the prices are real. Outside
+    // MCX hours a real session is finished, and extending its last bar would
+    // move a close the exchange already settled. The SYNTHETIC feed is the
+    // opposite case: it exists to exercise the stack outside market hours, so
+    // pausing it there would freeze the chart exactly when it is most useful.
+    if (state !== 'SYNTHETIC' && marketOpen === false) return;
 
     const price = Number(ltp);
     if (!Number.isFinite(price)) return;
@@ -206,6 +208,7 @@ const LiveCandle = memo(function LiveCandle({
     cumulativeVolume,
     stale,
     marketOpen,
+    state,
     theme,
     seriesRef,
     volumeSeriesRef,
@@ -219,7 +222,7 @@ export default function PriceChart({ securityId, title = 'Price chart', subtitle
   const theme = useTheme();
   // Only for the header chip. A paused chart that does not say it is paused
   // looks broken, which is the same failure as a stale book that looks live.
-  const { marketOpen, stale } = useFeedHealth();
+  const { marketOpen, stale, state } = useFeedHealth();
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
@@ -425,16 +428,16 @@ export default function PriceChart({ securityId, title = 'Price chart', subtitle
                 label="SYNTHETIC — generated locally"
               />
             ) : null}
-            {marketOpen === false ? (
-              <Chip size="small" variant="outlined" label="MCX closed — chart paused" />
-            ) : null}
-            {stale && marketOpen !== false ? (
+            {stale ? (
               <Chip
                 size="small"
                 color="error"
                 variant="outlined"
                 label="feed stale — chart paused"
               />
+            ) : null}
+            {!stale && state !== 'SYNTHETIC' && marketOpen === false ? (
+              <Chip size="small" variant="outlined" label="MCX closed — chart paused" />
             ) : null}
             <ToggleButtonGroup
               size="small"
