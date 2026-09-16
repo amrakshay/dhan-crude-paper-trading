@@ -163,15 +163,33 @@ app.add_middleware(LogRequestsMiddleware)
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc) -> JSONResponse:
-    logger.debug("404 for %s %s", request.method, request.url.path)
+    """JSON for every 404, preserving whatever the endpoint actually said.
+
+    This used to flatten every 404 to "Path not found", which meant a real
+    answer ("No near-month future -- refresh the instrument master") reached
+    the UI as a routing error. The SPA catch-all in static_serving.py is what
+    answers for a genuinely unknown path now, so this handler no longer has to
+    speak for both cases.
+    """
+    detail = getattr(exc, "detail", None)
+    message = str(detail) if detail else "Path not found"
+    logger.debug("404 for %s %s: %s", request.method, request.url.path, message)
     return JSONResponse(
         status_code=404,
-        content={"success": False, "message": "Path not found", "path": request.url.path},
+        content={
+            "success": False,
+            "message": message,
+            "detail": message,
+            "path": request.url.path,
+        },
     )
 
 
-@app.get("/", include_in_schema=False)
-async def root() -> JSONResponse:
+# NOTE: no `@app.get("/")` here. In single-port mode `/` must return the SPA
+# shell, and a route registered at import time would win over the catch-all
+# that mount_spa() adds at the bottom of this file. When the frontend is not
+# built, that same catch-all serves the JSON identity response below instead.
+async def service_identity() -> JSONResponse:
     return JSONResponse({"service": "crude-paper-trading", "status": "running"})
 
 
@@ -201,3 +219,16 @@ app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")
 app.include_router(market_ws_router)   # /ws/market -- not under /api
+
+
+# --- static frontend (single-port mode) -----------------------------------
+# MUST come after every router above: mount_spa() registers a `/{path:path}`
+# catch-all, and anything added after it would never be reached.
+from src.static_serving import mount_spa  # noqa: E402
+
+SPA_MOUNTED = mount_spa(app)
+
+if not SPA_MOUNTED:
+    # Two-port dev, or a checkout with no build. Keep the original behaviour:
+    # `/` identifies the service, and unknown paths get the JSON 404.
+    app.get("/", include_in_schema=False)(service_identity)

@@ -214,7 +214,35 @@ a handler at a call site.
 
 ---
 
-## 9. Tests
+## 9. Serving the frontend (single-port mode)
+
+`src/static_serving.py` lets the backend serve `frontend/dist` so one port gives
+both UI and API. It is additive — two-port dev (Vite on :5173 proxying to :8000)
+is unchanged and is still the development default.
+
+- **`mount_spa(app)` must be the last thing `main.py` does.** It registers a
+  `/{path:path}` catch-all, and FastAPI matches in registration order, so
+  anything added after it is unreachable.
+- **The catch-all refuses `/api/*` and `/ws/*`** and returns the JSON 404
+  itself. Without that, a typo'd endpoint returns 200 and an HTML page, which
+  is a miserable way to debug a frontend. `tests/test_single_port_mode.py`
+  asserts this directly.
+- **There is no `@app.get("/")`.** It would win over the catch-all, so `/` could
+  never serve the SPA shell. When the frontend is not built, `main.py`
+  registers `service_identity` at `/` instead to preserve the old JSON response.
+- The global `exception_handler(404)` now passes through an endpoint's own
+  `detail`. It used to flatten every 404 to "Path not found", so a real answer
+  ("Refresh the instrument master") reached the UI as a routing error.
+- Hashed assets get `immutable` for a year; `index.html` gets `no-store`, or a
+  rebuild is masked by the cached shell.
+- A missing `dist/` logs how to build it and serves the API only. Do not make
+  it fatal — that is what a fresh checkout looks like.
+- `_safe_join` refuses any path escaping the dist root. `/{path:path}` will
+  otherwise happily deliver `../../.env`.
+
+---
+
+## 10. Tests
 
 - `pytest.ini` sets `asyncio_mode = auto` — async tests need no decorator.
 - `tests/conftest.py` sets env vars **before** anything imports the app, and

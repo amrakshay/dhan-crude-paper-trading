@@ -18,6 +18,21 @@ server:
     - "http://localhost:5173"
     - "http://127.0.0.1:5173"
 
+  # ---------------------------------------------------------------------
+  # SINGLE-PORT MODE. When this directory holds a built frontend
+  # (frontend/npm run build), the backend serves the UI as well as the API,
+  # so http://localhost:8000 is the whole application and no Node process is
+  # needed. Relative paths resolve against the backend directory.
+  #
+  # This is additive: the two-port dev setup (Vite on :5173 proxying /api and
+  # /ws to :8000) keeps working exactly as before and is still the
+  # development default. If the directory has no index.html, the app logs how
+  # to build it and serves the API only -- it does not fail.
+  #
+  # Set this to "" to turn single-port serving off entirely.
+  # ---------------------------------------------------------------------
+  static_dir: "${STATIC_DIR:../frontend/dist}"
+
 logging:
   # Levels here (and LOG_LEVEL in the environment) override whatever
   # conf/logging-config.ini sets. LOG_LEVEL wins only when these are blank.

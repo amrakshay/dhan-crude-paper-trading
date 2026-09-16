@@ -65,7 +65,7 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (339 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (368 tests)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
@@ -77,6 +77,10 @@ cd frontend
 npm run dev                                                # Vite on :5173
 npm run build
 ```
+
+Two-port dev (Vite :5173 + backend :8000) is the default. `./run-single-port.sh`
+from the project root builds the frontend and serves UI + API from :8000 alone;
+see `backend/CLAUDE.md` §9 for the route-ordering rules that make that safe.
 
 `server.py` forces `workers=1`. Do not "fix" that — see §4.
 

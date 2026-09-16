@@ -85,6 +85,7 @@ Settings page is stored in the database and takes priority — see *Settings* be
 | `DATABASE_URL` | SQLite file | Connection URL. See *Switching to MySQL*. |
 | `LOG_LEVEL` | `INFO` | Logging level for both the app and access loggers. Overrides `conf/logging-config.ini`. |
 | `LOG_DIR` | `./logs` | Where `app.log` and `access.log` are written (relative to `backend/`). |
+| `STATIC_DIR` | `../frontend/dist` | Built frontend to serve in single-port mode. Set to `""` to disable. |
 
 ## Settings page
 
@@ -130,6 +131,54 @@ reports an error rather than inventing prices.
 
 To go live: set `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN`, set
 `DHAN_SYNTHETIC_FEED=false`, and restart.
+
+---
+
+## Running it on one port
+
+By default the app runs on two ports in development: Vite on `:5173` for the UI,
+the backend on `:8000` for the API, with Vite proxying `/api` and `/ws` so the
+browser sees one origin. **That setup is unchanged and is still the development
+default** — it is what gives you hot reload.
+
+The backend can also serve the built frontend itself, so one port is the whole
+application and no Node process is left running:
+
+```bash
+./run-single-port.sh          # builds the frontend, migrates, then serves
+./run-single-port.sh --skip-build   # reuse an existing frontend/dist
+```
+
+or by hand:
+
+```bash
+cd frontend && npm run build
+cd ../backend && CONFIG_PATH=conf .venv/bin/python server.py
+```
+
+Then <http://localhost:8000> serves both the UI and the API.
+
+| | Two-port (dev) | Single-port |
+|---|---|---|
+| UI | Vite `:5173` | FastAPI `:8000` |
+| API | `:8000` via the Vite proxy | `:8000` directly |
+| Hot reload | yes | no — rebuild to see changes |
+| Node running | yes | no |
+
+**How it works.** `server.static_dir` (default `../frontend/dist`, resolved
+against `backend/`) is mounted by `src/static_serving.py` *after* every API and
+WebSocket router, because FastAPI matches routes in registration order. The
+catch-all deliberately refuses to answer for `/api/*` and `/ws/*`, so a typo'd
+endpoint still returns a JSON 404 rather than 200 and an HTML page. Hashed
+assets under `/assets` are served `immutable` for a year; `index.html` is
+`no-store`, or a rebuild would be masked by the shell the browser cached.
+
+**If the frontend is not built**, the app logs how to build it and serves the
+API only — it does not fail. Set `server.static_dir: ""` to turn single-port
+serving off entirely.
+
+`server.py` still forces `workers=1` in both modes: more than one worker means
+more than one upstream Dhan connection.
 
 ---
 
@@ -291,7 +340,7 @@ since every order carries its own auditable charges row.
 cd backend && .venv/bin/python -m pytest tests/ -q
 ```
 
-339 tests. Two of them are safety suites rather than feature tests:
+368 tests. Two files are safety suites rather than feature tests:
 
 `tests/test_no_real_orders.py` parses every Python file's AST (comments and
 docstrings exempt, everything else in scope) and fails if any Dhan URL outside
@@ -363,6 +412,7 @@ equity curve possible.
 
 ```
 CLAUDE.md       working notes for Claude Code (safety rules, invariants, gotchas)
+run-single-port.sh  build the frontend, then serve UI + API from one port
 backend/
   CLAUDE.md     backend conventions: layering, async SQLAlchemy traps, charges
   conf/         default-config.yaml (app), charges.yaml (rate card),
