@@ -269,7 +269,9 @@ equity curve possible.
 ### Layout
 
 ```
+CLAUDE.md       working notes for Claude Code (safety rules, invariants, gotchas)
 backend/
+  CLAUDE.md     backend conventions: layering, async SQLAlchemy traps, charges
   conf/         default-config.yaml (app) + charges.yaml (rate card)
   alembic/      migrations
   src/
@@ -279,11 +281,18 @@ backend/
                 each: routes/ controllers/ services/ api_schemas/ database/
   tests/
 frontend/
+  CLAUDE.md     frontend conventions: theme port, feed context, UI honesty rules
   src/
     theme/      Privacera palette ported to MUI v6 (light + dark)
     market/     one shared WebSocket context
     pages/ components/ api/
 ```
+
+The three `CLAUDE.md` files are instructions for Claude Code sessions working on
+this repo. They cover the no-real-orders constraint, the invariants that must not
+be broken (single upstream connection, cheap tick path, pessimistic fills), and
+the Dhan data quirks that produce silently wrong numbers if ignored. Worth a read
+before making changes by hand too.
 
 The frontend theme is ported from the Privacera SaaS portal's MUI v4 theme —
 palette, typography, spacing and shape tokens re-expressed for a current
