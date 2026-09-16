@@ -2,11 +2,16 @@
 
 Values saved here are stored in the database and take priority over `.env`.
 The Dhan access token is encrypted at rest and is never returned to the browser.
+
+**ROLE_ACCOUNT_ADMIN only.** `conf/role-pages.json` also keeps Settings out of
+a ROLE_USER's sidebar, but that is presentation. `require_admin` here is what
+actually refuses the request, and tests/test_users_api.py asserts a ROLE_USER
+calling these endpoints directly gets a 403.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import require_session
+from src.auth.dependencies import SessionPrincipal, require_admin
 from src.core.singleton_utils import SingletonDepends
 from src.database.session import get_async_session
 from src.settings.api_schemas.settings_schemas import (
@@ -30,7 +35,7 @@ async def get_settings_controller(
 @settings_router.get("", response_model=SettingsResponse)
 async def get_settings(
     controller: SettingsController = Depends(get_settings_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_admin),
 ) -> SettingsResponse:
     """Current effective settings, and whether each came from the database or .env.
 
@@ -44,7 +49,7 @@ async def get_settings(
 async def save_settings(
     request: SaveSettingsRequest,
     controller: SettingsController = Depends(get_settings_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_admin),
 ) -> SaveSettingsResponse:
     """Save settings and restart the market feed so they take effect.
 
@@ -57,7 +62,7 @@ async def save_settings(
 async def validate_credentials(
     request: ValidateCredentialsRequest,
     controller: SettingsController = Depends(get_settings_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_admin),
 ) -> ValidateCredentialsResponse:
     """Check credentials against Dhan without saving them.
 

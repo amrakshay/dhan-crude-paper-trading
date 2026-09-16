@@ -242,7 +242,51 @@ is unchanged and is still the development default.
 
 ---
 
-## 10. Tests
+## 10. Users, auth and roles
+
+`src/users/` owns the users table; `src/auth/` owns sessions. The two depend on
+each other, so **the `auth` package never imports `users` at module scope** --
+every such import is inside a function or under `TYPE_CHECKING`, the same way
+orders <-> positions is handled (section 1). Importing `src.users.anything`
+runs `src/users/__init__.py`, which imports the router, which imports
+`src.auth.dependencies`; a module-scope import in the other direction closes
+the loop and the app will not start.
+
+- **`require_session` returns a `SessionPrincipal`, not a username**, and
+  re-reads the user from the database on every request. That is what makes
+  deactivation, deletion and demotion take effect on the *next request* rather
+  than at token expiry. Do not "optimise" it by trusting the role in the JWT.
+- **`require_admin` is the gate, not the sidebar.** `conf/role-pages.json`
+  decides what the UI offers; the route dependencies decide what the API
+  allows. Every restricted endpoint needs its own dependency, and
+  `tests/test_users_api.py` asserts the negative by calling as a ROLE_USER.
+- **`require_session` vs `require_session_allow_password_change`.** The strict
+  one 403s a user who still owes a password change. Only `/auth/me`,
+  `/auth/logout`, `GET /users/me` and the change-password call use the
+  permissive one -- a user must be able to reach the things needed to *stop*
+  owing a password change.
+- **Passwords are bcrypt-hashed, never encrypted.** `password_service` caps
+  them at 72 bytes because bcrypt silently ignores the rest, which would let
+  two different long passwords authenticate each other. Never add a code path
+  that recovers a password.
+- **No response schema has a password_hash field.** `to_response()` builds the
+  payload field by field rather than from the ORM object, so a new column
+  cannot leak by being added.
+- **The seeded admin is protected by the `is_seed_user` column**, not by
+  comparing the email, so the guard rails are enforced on data. It cannot be
+  deleted, demoted or deactivated -- all three, because any one of them alone
+  leaves a lockout hole.
+- **Email is never updatable.** An identical value is accepted (so a
+  whole-object PUT works); a different one is a 400.
+- The seed user is created both by the migration and by the app's lifespan,
+  because tests build the schema with `create_tables()` rather than by
+  migrating. `ensure_seed_user` is idempotent and never overwrites an existing
+  row -- resetting its password from the environment on every boot would undo
+  a change made in the UI.
+
+---
+
+## 11. Tests
 
 - `pytest.ini` sets `asyncio_mode = auto` — async tests need no decorator.
 - `tests/conftest.py` sets env vars **before** anything imports the app, and

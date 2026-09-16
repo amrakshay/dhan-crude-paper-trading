@@ -9,7 +9,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import require_session
+from src.auth.dependencies import SessionPrincipal, require_session
 from src.core.singleton_utils import SingletonDepends
 from src.database.session import get_async_session
 from src.orders.api_schemas.order_schemas import (
@@ -34,7 +34,7 @@ async def get_order_controller(
 async def preview_order(
     request: PreviewOrderRequest,
     controller: OrderController = Depends(get_order_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> PreviewOrderResponse:
     """Simulate an order WITHOUT placing it.
 
@@ -49,7 +49,7 @@ async def preview_order(
 async def submit_paper_order(
     request: PlaceOrderRequest,
     controller: OrderController = Depends(get_order_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> OrderResponse:
     """Place a paper order and match it against the live book."""
     return await controller.submit_paper_order(request)
@@ -66,7 +66,7 @@ async def list_orders(
     page: int = Query(0, ge=0),
     size: int = Query(50, gt=0, le=500),
     controller: OrderController = Depends(get_order_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> OrderListResponse:
     """Order history with full state transitions, fills and charges."""
     return await controller.list_orders(
@@ -85,7 +85,7 @@ async def list_orders(
 async def get_order(
     order_id: int,
     controller: OrderController = Depends(get_order_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> OrderResponse:
     """One order with every state transition, fill and charge line."""
     return await controller.get_order(order_id)
@@ -95,7 +95,7 @@ async def get_order(
 async def cancel_paper_order(
     order_id: int,
     controller: OrderController = Depends(get_order_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> OrderResponse:
     """Cancel a resting or partially filled order."""
     return await controller.cancel_paper_order(order_id)

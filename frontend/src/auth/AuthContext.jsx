@@ -3,6 +3,13 @@ import { ApiError, api } from '../api/client';
 
 const AuthContext = createContext(null);
 
+/**
+ * Session state for the whole app.
+ *
+ * `/auth/me` returns the role, the pages that role may see and whether a
+ * password change is still owed, so the first paint can route correctly
+ * without a second round trip.
+ */
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -24,8 +31,8 @@ export function AuthProvider({ children }) {
     refresh();
   }, [refresh]);
 
-  const login = useCallback(async (username, password) => {
-    const result = await api.post('/auth/login', { username, password });
+  const login = useCallback(async (email, password) => {
+    const result = await api.post('/auth/login', { email, password });
     setSession(result);
     return result;
   }, []);
@@ -38,10 +45,22 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const value = useMemo(
-    () => ({ session, loading, login, logout, refresh }),
-    [session, loading, login, logout, refresh],
-  );
+  const value = useMemo(() => {
+    const pages = session?.pages ?? [];
+    return {
+      session,
+      loading,
+      login,
+      logout,
+      refresh,
+      role: session?.role ?? null,
+      isAdmin: session?.role === 'ROLE_ACCOUNT_ADMIN',
+      mustChangePassword: Boolean(session?.mustChangePassword),
+      pages,
+      // Advisory: the server enforces the same rule on every endpoint.
+      canSee: (path) => pages.includes(path),
+    };
+  }, [session, loading, login, logout, refresh]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

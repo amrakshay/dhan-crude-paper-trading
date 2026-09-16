@@ -107,3 +107,31 @@ class ConnectionState(str, Enum):
     RECONNECTING = "RECONNECTING"
     SYNTHETIC = "SYNTHETIC"
     DISABLED = "DISABLED"
+
+
+# --- users -----------------------------------------------------------------
+class UserRole(str, Enum):
+    """The two roles this application knows about.
+
+    Named to match the Privacera SaaS portal's own role strings, so the
+    vocabulary is the same one Akshay already uses elsewhere.
+    """
+
+    ACCOUNT_ADMIN = "ROLE_ACCOUNT_ADMIN"
+    USER = "ROLE_USER"
+
+
+class UserStatus(str, Enum):
+    """An account can be deactivated instead of deleted.
+
+    INACTIVE is a hard block: such a user cannot log in, and an existing
+    session for one stops working on its next request rather than running to
+    token expiry.
+    """
+
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+
+
+USER_ROLES = tuple(role.value for role in UserRole)
+USER_STATUSES = tuple(status.value for status in UserStatus)

@@ -35,6 +35,33 @@ logger = get_logger("main")
 access_logger = get_access_logger()
 
 
+async def _seed_default_administrator() -> None:
+    """Make sure the default administrator exists before anyone tries to log in.
+
+    Idempotent, and run here as well as in the migration so a database built by
+    `create_tables()` (which the tests use) reaches the same state as one built
+    by `alembic upgrade head`. An existing seed user is never overwritten --
+    its password is not reset from the environment on every boot, or changing
+    it in the UI would be undone by the next restart.
+    """
+    from src.database.session import session_scope
+    from src.users.database.db_operations.user_repository import UserRepository
+    from src.users.services.user_service import UserService
+
+    try:
+        async with session_scope() as session:
+            service = UserService(UserRepository(session))
+            await service.ensure_seed_user(
+                config_utils.get_property_value("auth.admin_password", "")
+            )
+            await session.commit()
+    except Exception:
+        logger.exception(
+            "Could not seed the default administrator. If the users table is "
+            "empty, nobody will be able to log in."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(
@@ -45,13 +72,7 @@ async def lifespan(app: FastAPI):
         ),
     )
 
-    from src.auth.services.auth_service import AuthService
-
-    if not AuthService.is_configured():
-        logger.error(
-            "APP_PASSWORD is not set -- every login will be rejected. "
-            "Copy .env.example to .env and set APP_USERNAME / APP_PASSWORD."
-        )
+    await _seed_default_administrator()
 
     # One upstream Dhan connection per process, started here and fanned out to
     # every browser tab. See src/market/services/feed_manager.py.
@@ -207,6 +228,7 @@ from src.notes import notes_main_router  # noqa: E402
 from src.positions import positions_main_router  # noqa: E402
 from src.reports import reports_main_router  # noqa: E402
 from src.settings import settings_main_router  # noqa: E402
+from src.users import users_main_router  # noqa: E402
 from src.market import market_main_router, market_ws_router  # noqa: E402
 
 app.include_router(auth_main_router, prefix="/api")
@@ -218,6 +240,7 @@ app.include_router(positions_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")
+app.include_router(users_main_router, prefix="/api")
 app.include_router(market_ws_router)   # /ws/market -- not under /api
 
 

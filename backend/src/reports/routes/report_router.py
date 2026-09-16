@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import require_session
+from src.auth.dependencies import SessionPrincipal, require_session
 from src.core.singleton_utils import SingletonDepends
 from src.core.time_utils import ist_now
 from src.database.session import get_async_session
@@ -27,7 +27,7 @@ async def get_pnl_report(
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> PnlReportResponse:
     """Realised and unrealised P&L, by day / expiry / strike, gross vs net.
 
@@ -44,7 +44,7 @@ async def export_pnl_csv(
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> Response:
     """Every realisation event as CSV."""
     content = await controller.export_realisations_csv(security_id, placed_from, placed_to)
@@ -62,7 +62,7 @@ async def export_orders_csv(
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> Response:
     """Every order with its full charges breakdown as CSV."""
     content = await controller.export_orders_csv(security_id, placed_from, placed_to)

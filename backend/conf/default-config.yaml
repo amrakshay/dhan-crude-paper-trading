@@ -52,9 +52,17 @@ database:
   echo: false
 
 auth:
-  # Single hardcoded credential pair. No user table, no registration.
-  username: "${APP_USERNAME:trader}"
-  password: "${APP_PASSWORD:}"
+  # Authentication is against the `users` table -- see src/users/. There is no
+  # env-var credential pair any more: APP_USERNAME and APP_PASSWORD were
+  # removed rather than left as a fallback, because two authentication paths is
+  # exactly the kind of thing that rots, and an env-var backdoor outliving the
+  # table it was meant to replace is worse than no backdoor at all.
+  #
+  # Password for the seeded default administrator (trader@abc.com), used ONLY
+  # when that row does not yet exist. Changing it later has no effect -- change
+  # the password in the UI instead. If this is blank the administrator is not
+  # created and nobody can log in.
+  admin_password: "${APP_ADMIN_PASSWORD:}"
   jwt_secret: "${APP_JWT_SECRET:}"
   jwt_algorithm: "HS256"
   session_hours: 12

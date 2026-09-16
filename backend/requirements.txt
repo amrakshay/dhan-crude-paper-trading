@@ -26,6 +26,10 @@ websockets==14.1
 
 # --- auth ---
 PyJWT==2.10.1
+# Password hashing. Used directly rather than through passlib: passlib 1.7.4
+# reads bcrypt.__about__, which bcrypt >= 4.1 removed, so every import logs a
+# trapped AttributeError traceback. The API needed here is two functions.
+bcrypt==4.2.1
 
 # --- settings-at-rest encryption ---
 # The Dhan access token is stored encrypted in the database (Fernet:

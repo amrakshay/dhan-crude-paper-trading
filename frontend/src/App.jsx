@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AppShell from './layout/AppShell';
 import ProtectedRoute from './auth/ProtectedRoute';
+import RoleRoute from './auth/RoleRoute';
 import LoginPage from './auth/LoginPage';
 import LivePricePage from './pages/LivePricePage';
 import OptionChainPage from './pages/OptionChainPage';
@@ -8,8 +9,18 @@ import PositionsPage from './pages/PositionsPage';
 import OrderHistoryPage from './pages/OrderHistoryPage';
 import ReportsPage from './pages/ReportsPage';
 import NotesPage from './pages/NotesPage';
+import UsersPage from './pages/UsersPage';
+import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
 
+/**
+ * `RoleRoute` checks the page against the role -> pages mapping the server
+ * delivered with the session, so a ROLE_USER typing /settings lands somewhere
+ * sensible instead of on a page whose every request 403s.
+ *
+ * That is convenience, not security: the API refuses those calls regardless of
+ * what the router allows.
+ */
 export default function App() {
   return (
     <Routes>
@@ -21,13 +32,15 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/live" element={<LivePricePage />} />
-        <Route path="/chain" element={<OptionChainPage />} />
-        <Route path="/positions" element={<PositionsPage />} />
-        <Route path="/orders" element={<OrderHistoryPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/notes" element={<NotesPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/live" element={<RoleRoute path="/live"><LivePricePage /></RoleRoute>} />
+        <Route path="/chain" element={<RoleRoute path="/chain"><OptionChainPage /></RoleRoute>} />
+        <Route path="/positions" element={<RoleRoute path="/positions"><PositionsPage /></RoleRoute>} />
+        <Route path="/orders" element={<RoleRoute path="/orders"><OrderHistoryPage /></RoleRoute>} />
+        <Route path="/reports" element={<RoleRoute path="/reports"><ReportsPage /></RoleRoute>} />
+        <Route path="/notes" element={<RoleRoute path="/notes"><NotesPage /></RoleRoute>} />
+        <Route path="/users" element={<RoleRoute path="/users"><UsersPage /></RoleRoute>} />
+        <Route path="/profile" element={<RoleRoute path="/profile"><ProfilePage /></RoleRoute>} />
+        <Route path="/settings" element={<RoleRoute path="/settings"><SettingsPage /></RoleRoute>} />
         <Route path="/" element={<Navigate to="/live" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/live" replace />} />

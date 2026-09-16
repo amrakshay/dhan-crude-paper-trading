@@ -12,6 +12,10 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
 _TEST_DB_PATH = os.path.join(tempfile.gettempdir(), "dcpt_test.db")
+
+# The seeded administrator, as every test knows it.
+SEED_ADMIN_EMAIL = "trader@abc.com"
+SEED_ADMIN_PASSWORD = "seed-admin-password"
 # Log files go to a temp directory, not backend/logs, so a test run does not
 # leave artefacts in the working tree. tests/test_no_secrets_in_logs.py reads
 # app.log back out of here.
@@ -19,8 +23,9 @@ TEST_LOG_DIR = os.path.join(tempfile.gettempdir(), "dcpt_test_logs")
 
 os.environ.setdefault("CONFIG_PATH", str(BACKEND_ROOT / "conf"))
 os.environ.setdefault("LOG_DIR", TEST_LOG_DIR)
-os.environ.setdefault("APP_USERNAME", "trader")
-os.environ.setdefault("APP_PASSWORD", "test-password")
+# APP_USERNAME / APP_PASSWORD are gone: the users table is the only identity
+# source. The seeded administrator is created from APP_ADMIN_PASSWORD.
+os.environ.setdefault("APP_ADMIN_PASSWORD", SEED_ADMIN_PASSWORD)
 os.environ.setdefault("APP_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("DHAN_SYNTHETIC_FEED", "true")
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB_PATH}"
@@ -41,6 +46,7 @@ async def db_session():
 
     await DatabaseManager.drop_tables()
     await DatabaseManager.create_tables()
+    await seed_admin()
 
     session = get_session_factory()()
     try:
@@ -62,6 +68,7 @@ async def api_client():
 
     await DatabaseManager.drop_tables()
     await DatabaseManager.create_tables()
+    await seed_admin()
 
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -71,13 +78,38 @@ async def api_client():
     await close_database_connection()
 
 
-@pytest_asyncio.fixture
-async def auth_client(api_client):
-    """An api_client that has already logged in."""
-    response = await api_client.post(
-        "/api/auth/login", json={"username": "trader", "password": "test-password"}
+async def seed_admin():
+    """Create the default administrator.
+
+    The app does this in its lifespan, but these tests drive the ASGI app
+    through httpx without running it, and build the schema with
+    `create_tables()` rather than by migrating. Seeding explicitly keeps the
+    two paths equivalent.
+    """
+    from src.database.session import session_scope
+    from src.users.database.db_operations.user_repository import UserRepository
+    from src.users.services.user_service import UserService
+
+    async with session_scope() as session:
+        await UserService(UserRepository(session)).ensure_seed_user(
+            SEED_ADMIN_PASSWORD
+        )
+        await session.commit()
+
+
+async def login_as(client, email: str, password: str):
+    """Log `client` in, replacing whatever session it held."""
+    response = await client.post(
+        "/api/auth/login", json={"email": email, "password": password}
     )
     assert response.status_code == 200, response.text
+    return response.json()
+
+
+@pytest_asyncio.fixture
+async def auth_client(api_client):
+    """An api_client signed in as the seeded administrator."""
+    await login_as(api_client, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD)
     return api_client
 
 

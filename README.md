@@ -25,7 +25,9 @@ source.
 | **Order history** | Every state transition timestamped to the millisecond, with fills and a complete charges breakdown |
 | **P&L reports** | Realised and unrealised, by day / expiry / strike, gross vs net, charges by component, equity curve, CSV export |
 | **Trade notes** | Free-text notes on completed trades — searchable, editable, visible from history and reports |
-| **Settings** | Dhan credentials and feed mode editable in the UI, with a token validator and a live expiry countdown |
+| **Settings** | Dhan credentials and feed mode editable in the UI, with a token validator and a live expiry countdown — **account admins only** |
+| **Users** | Real user accounts with two roles, add/edit/delete, per-account status, and a forced password change on first login |
+| **Profile** | Your own details and password; email is read-only |
 
 ---
 
@@ -56,9 +58,15 @@ npm install
 npm run dev                                         # http://localhost:5173
 ```
 
-Open http://localhost:5173 and sign in with the `APP_USERNAME` / `APP_PASSWORD`
-you set in `.env`. Then click **Refresh instruments** on the Live Price page to
-pull the instrument master (~35 MB, cached for 12 hours).
+Open http://localhost:5173 and sign in as **`trader@abc.com`** with the
+`APP_ADMIN_PASSWORD` you set in `.env`. That account is seeded by the migration
+above. Then click **Refresh instruments** on the Live Price page to pull the
+instrument master (~35 MB, cached for 12 hours).
+
+> **Upgrading an existing checkout?** `APP_USERNAME` / `APP_PASSWORD` no longer
+> authenticate anyone. Add `APP_ADMIN_PASSWORD` to your `.env` and run
+> `alembic upgrade head`; if the variable is missing, the administrator is not
+> created and the log says so on every start.
 
 The Vite dev server proxies `/api` and `/ws` to the backend, so the browser sees
 one origin and the session cookie works on the WebSocket handshake.
@@ -75,8 +83,7 @@ Settings page is stored in the database and takes priority — see *Settings* be
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `APP_USERNAME` | `trader` | The single login username. There is no user table. |
-| `APP_PASSWORD` | *(none)* | The single login password. **Login is rejected until this is set.** |
+| `APP_ADMIN_PASSWORD` | *(none)* | Password for the seeded administrator `trader@abc.com`. Used **only** when that account does not yet exist; changing it later has no effect (change the password in the UI). **If blank, the account is not created and nobody can log in.** |
 | `APP_JWT_SECRET` | *(none)* | Signs the session cookie. If blank, a random key is generated per process and **every restart logs you out**. Generate one with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. |
 | `APP_ENCRYPTION_KEY` | *(none)* | Encrypts the Dhan access token at rest. Falls back to `APP_JWT_SECRET`; if both are blank the app refuses to store a token. Prefer setting it, so rotating the session secret does not destroy the stored token. |
 | `DHAN_CLIENT_ID` | *(none)* | Dhan client id — market data only. |
@@ -86,6 +93,61 @@ Settings page is stored in the database and takes priority — see *Settings* be
 | `LOG_LEVEL` | `INFO` | Logging level for both the app and access loggers. Overrides `conf/logging-config.ini`. |
 | `LOG_DIR` | `./logs` | Where `app.log` and `access.log` are written (relative to `backend/`). |
 | `STATIC_DIR` | `../frontend/dist` | Built frontend to serve in single-port mode. Set to `""` to disable. |
+
+## Users and roles
+
+Authentication is against a real `users` table. `APP_USERNAME` / `APP_PASSWORD`
+were **removed**, not left as a fallback — two authentication paths is exactly
+the kind of thing that rots, and an env-var backdoor outliving the table it was
+meant to replace is worse than no backdoor at all.
+
+**Login is by email.** Users have a first name, last name, email, password,
+role and status.
+
+| Role | Can |
+|---|---|
+| `ROLE_ACCOUNT_ADMIN` | Everything, including Settings and adding/editing/deleting users |
+| `ROLE_USER` | Everything except Settings. Sees the user list but cannot change it; can edit their own profile and password |
+
+**Passwords are hashed, not encrypted.** bcrypt with a per-user salt. The
+requirement as first written said "stored encrypted", but encryption is
+reversible: anyone holding the key recovers every password, and people reuse
+passwords across systems. A password only ever needs comparing, never
+recovering. (Contrast the Dhan access token, which *is* Fernet-encrypted —
+correctly, because it has to be replayed to Dhan verbatim.) Passwords are
+capped at 72 bytes because bcrypt silently ignores anything beyond that, which
+would let two different long passwords authenticate each other.
+
+**Which pages a role sees is a JSON file**, `backend/conf/role-pages.json`,
+served at `GET /api/users/role-pages` and used for both the sidebar and the
+client-side routes. **Hiding a nav item is not access control** — the API
+enforces the same rules independently, and
+`backend/tests/test_users_api.py` asserts a `ROLE_USER` calling the settings
+endpoints directly gets a 403.
+
+### Guard rails
+
+All enforced server-side, not by disabling a button:
+
+* **The seeded administrator (`trader@abc.com`) cannot be deleted, demoted or
+  deactivated.** Blocking only the delete would still allow demoting an
+  undeletable row to `ROLE_USER`, leaving the application with no administrator
+  and no way back.
+* **Nobody can delete their own account**, whatever their role.
+* **The last active administrator** cannot be deleted, demoted or deactivated.
+* **Email can never be changed.** It is the login identifier and the thing
+  every audit line refers to; changing it would silently reassign that history.
+  Resending an unchanged email is fine, so a whole-object PUT still works.
+* **An inactive user cannot log in**, and an existing session for a user who
+  becomes inactive **stops working on their next request**, not at token
+  expiry. The same applies to a deleted user and to a demoted one: the session
+  dependency re-reads the user from the database on every request rather than
+  trusting the role baked into the token.
+* **"Must change password on first login"** is a hard gate: such a user gets a
+  403 from every endpoint except the ones needed to change it, and the UI shows
+  the change-password screen instead of the app.
+
+---
 
 ## Settings page
 
@@ -340,7 +402,7 @@ since every order carries its own auditable charges row.
 cd backend && .venv/bin/python -m pytest tests/ -q
 ```
 
-368 tests. Two files are safety suites rather than feature tests:
+412 tests. Two files are safety suites rather than feature tests:
 
 `tests/test_no_real_orders.py` parses every Python file's AST (comments and
 docstrings exempt, everything else in scope) and fails if any Dhan URL outside
@@ -416,14 +478,15 @@ run-single-port.sh  build the frontend, then serve UI + API from one port
 backend/
   CLAUDE.md     backend conventions: layering, async SQLAlchemy traps, charges
   conf/         default-config.yaml (app), charges.yaml (rate card),
-                logging-config.ini (handlers, rotation, format)
+                logging-config.ini (handlers, rotation, format),
+                role-pages.json (which pages each role sees)
   logs/         app.log + access.log, rotating, gitignored
   alembic/      migrations
   src/
     core/       base repository, pagination, time helpers
     database/   engine, session, Money/PreciseDateTime column types
-    auth/ instruments/ market/ charges/ orders/ positions/ reports/ notes/
-                each: routes/ controllers/ services/ api_schemas/ database/
+    auth/ users/ instruments/ market/ charges/ orders/ positions/ reports/
+    notes/      each: routes/ controllers/ services/ api_schemas/ database/
   tests/
 frontend/
   CLAUDE.md     frontend conventions: theme port, feed context, UI honesty rules
@@ -448,7 +511,24 @@ not carried over.
 
 ## Known gaps
 
-* **MySQL is not execution-verified** (see above).
+* **The default administrator's password is never forced to rotate.** The
+  seeded `trader@abc.com` account is created with `must_change_password = false`,
+  so whatever `APP_ADMIN_PASSWORD` was set to stands until someone changes it in
+  the UI. That is a deliberate decision for a local single-user tool, recorded
+  here rather than left implicit — a default credential that is never forced to
+  rotate is a known risk. Change it on the Profile page.
+* **MySQL is not execution-verified** (see above). The `users` table is
+  DDL-compile-verified on MySQL like the rest of the schema — every VARCHAR has
+  a length, `role` is quoted as a reserved word, timestamps are `DATETIME(6)` —
+  but no migration has been run against a live MySQL server.
+* **There is no password reset flow.** An administrator can set someone's
+  password for them (which forces a change at their next sign-in), but there is
+  no self-service "forgot password" — it would need email delivery, which this
+  tool has no business having.
+* **Orders, positions and notes are not owned by a user.** They pre-date the
+  users table and remain global: every user sees the same book. Deleting a user
+  therefore leaves their trades in place. Making the book per-user would be a
+  schema change across four tables and was not in scope.
 * **The Quote/Full packet OHLC field order is unverified.** The layouts come from
   the official `dhanhq` SDK v2.2.0, which maps those four fields as open, close,
   high, low. That is reproduced faithfully, but has not been checked against a

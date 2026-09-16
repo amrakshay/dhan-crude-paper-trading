@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Which pages each role may see. Read by src/users/services/role_service.py",
+    "and served to the browser at GET /api/users/role-pages, so the sidebar and",
+    "the client-side routes are driven by this one file.",
+    "",
+    "HIDING A NAV ITEM IS NOT ACCESS CONTROL. This file decides what the UI",
+    "offers; the API enforces the same rules independently with require_admin,",
+    "and tests/test_users_api.py asserts a ROLE_USER is refused by the settings",
+    "endpoints even when it calls them directly.",
+    "",
+    "Paths must match frontend/src/layout/navigation.js."
+  ],
+  "pages": [
+    "/live",
+    "/chain",
+    "/positions",
+    "/orders",
+    "/reports",
+    "/notes",
+    "/users",
+    "/profile",
+    "/settings"
+  ],
+  "roles": {
+    "ROLE_ACCOUNT_ADMIN": {
+      "label": "Account admin",
+      "description": "Full access, including Settings and user management.",
+      "pages": [
+        "/live",
+        "/chain",
+        "/positions",
+        "/orders",
+        "/reports",
+        "/notes",
+        "/users",
+        "/profile",
+        "/settings"
+      ]
+    },
+    "ROLE_USER": {
+      "label": "User",
+      "description": "Everything except Settings. Sees the user list but cannot change it.",
+      "pages": [
+        "/live",
+        "/chain",
+        "/positions",
+        "/orders",
+        "/reports",
+        "/notes",
+        "/users",
+        "/profile"
+      ]
+    }
+  }
+}

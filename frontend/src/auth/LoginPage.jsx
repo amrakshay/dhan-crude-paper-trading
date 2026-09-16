@@ -18,7 +18,7 @@ export default function LoginPage() {
   const { session, loading, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +39,7 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(username, password);
+      await login(email, password);
       navigate(location.state?.from ?? '/live', { replace: true });
     } catch (submitError) {
       setError(submitError.message);
@@ -84,10 +84,11 @@ export default function LoginPage() {
             {error ? <Alert severity="error">{error}</Alert> : null}
 
             <TextField
-              label="Username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              autoComplete="username"
+              label="Email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
               autoFocus
               fullWidth
               required
@@ -105,7 +106,7 @@ export default function LoginPage() {
               type="submit"
               variant="contained"
               size="large"
-              disabled={submitting || !username || !password}
+              disabled={submitting || !email || !password}
             >
               {submitting ? 'Signing in…' : 'Sign in'}
             </Button>

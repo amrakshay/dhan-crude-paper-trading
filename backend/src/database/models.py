@@ -12,6 +12,7 @@ from src.orders.database.db_models.order_model import (  # noqa: F401
 )
 from src.positions.database.db_models.position_model import Position  # noqa: F401
 from src.settings.database.db_models.app_setting_model import AppSetting  # noqa: F401
+from src.users.database.db_models.user_model import User  # noqa: F401
 
 __all__ = [
     "Instrument",
@@ -22,4 +23,5 @@ __all__ = [
     "Position",
     "TradeNote",
     "AppSetting",
+    "User",
 ]

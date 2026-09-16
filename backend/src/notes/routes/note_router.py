@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import require_session
+from src.auth.dependencies import SessionPrincipal, require_session
 from src.core.singleton_utils import SingletonDepends
 from src.database.session import get_async_session
 from src.notes.api_schemas.note_schemas import (
@@ -28,7 +28,7 @@ async def get_note_controller(
 async def create_note(
     request: CreateNoteRequest,
     controller: NoteController = Depends(get_note_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> NoteResponse:
     """Attach a note to a completed trade."""
     return await controller.create(request)
@@ -43,7 +43,7 @@ async def search_notes(
     page: int = Query(0, ge=0),
     size: int = Query(50, gt=0, le=500),
     controller: NoteController = Depends(get_note_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> NoteListResponse:
     """Search notes. Used by both the notes page and order history."""
     return await controller.search(
@@ -61,7 +61,7 @@ async def update_note(
     note_id: int,
     request: UpdateNoteRequest,
     controller: NoteController = Depends(get_note_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> NoteResponse:
     """Edit a note. The original timestamp is kept; an edit stamp is added."""
     return await controller.update(note_id, request)
@@ -71,7 +71,7 @@ async def update_note(
 async def delete_note(
     note_id: int,
     controller: NoteController = Depends(get_note_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> dict:
     """Delete a note."""
     return await controller.delete(note_id)

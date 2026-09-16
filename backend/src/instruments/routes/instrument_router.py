@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import require_session
+from src.auth.dependencies import SessionPrincipal, require_session
 from src.core.singleton_utils import SingletonDepends
 from src.database.session import get_async_session
 from src.instruments.api_schemas.instrument_schemas import (
@@ -30,7 +30,7 @@ async def get_instrument_controller(
 async def refresh_instrument_master(
     force: bool = Query(False, description="Re-download even if the cache is fresh"),
     controller: InstrumentController = Depends(get_instrument_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> RefreshResponse:
     """Re-fetch Dhan's instrument master and upsert the CRUDEOIL universe.
 
@@ -43,7 +43,7 @@ async def refresh_instrument_master(
 @instrument_router.get("/status", response_model=InstrumentStatusResponse)
 async def get_instrument_status(
     controller: InstrumentController = Depends(get_instrument_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> InstrumentStatusResponse:
     """How many contracts are loaded, when, and what the front month is."""
     return await controller.get_status()
@@ -52,7 +52,7 @@ async def get_instrument_status(
 @instrument_router.get("/expiries", response_model=ExpiryListResponse)
 async def list_expiries(
     controller: InstrumentController = Depends(get_instrument_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> ExpiryListResponse:
     """Option and futures expiries, plus the mapping between them."""
     return await controller.list_expiries()
@@ -61,7 +61,7 @@ async def list_expiries(
 @instrument_router.get("/futures/near", response_model=InstrumentResponse)
 async def get_near_future(
     controller: InstrumentController = Depends(get_instrument_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> InstrumentResponse:
     """The front-month CRUDEOIL future."""
     return await controller.get_near_future()
@@ -71,7 +71,7 @@ async def get_near_future(
 async def get_chain(
     expiry: Optional[date] = Query(None, description="Defaults to the nearest expiry"),
     controller: InstrumentController = Depends(get_instrument_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> ChainResponse:
     """Full strike ladder for one expiry, with its underlying future."""
     return await controller.get_chain(expiry)

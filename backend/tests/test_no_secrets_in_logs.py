@@ -27,6 +27,7 @@ import pytest
 
 from src import log_redaction
 from src.logging_config import get_access_logger, get_logger
+from tests.conftest import SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = BACKEND_ROOT / "src"
@@ -103,7 +104,7 @@ def _assert_clean(captured: LogCapture, *secrets: str) -> None:
 async def test_a_failed_login_does_not_log_the_password(api_client, captured_logs):
     response = await api_client.post(
         "/api/auth/login",
-        json={"username": "trader", "password": SENTINEL_PASSWORD},
+        json={"email": SEED_ADMIN_EMAIL, "password": SENTINEL_PASSWORD},
     )
 
     assert response.status_code == 401
@@ -117,13 +118,14 @@ async def test_a_successful_login_does_not_log_the_password_or_session_token(
     api_client, captured_logs
 ):
     response = await api_client.post(
-        "/api/auth/login", json={"username": "trader", "password": "test-password"}
+        "/api/auth/login",
+        json={"email": SEED_ADMIN_EMAIL, "password": SEED_ADMIN_PASSWORD},
     )
 
     assert response.status_code == 200
     session_token = response.cookies.get("dcpt_session")
     assert session_token
-    _assert_clean(captured_logs, session_token, "test-password")
+    _assert_clean(captured_logs, session_token, SEED_ADMIN_PASSWORD)
 
 
 async def test_saving_a_dhan_access_token_never_logs_it(auth_client, captured_logs):
@@ -167,15 +169,78 @@ async def test_reading_settings_back_never_logs_the_stored_token(
 
 async def test_the_access_log_never_carries_a_session_token(api_client, captured_logs):
     login = await api_client.post(
-        "/api/auth/login", json={"username": "trader", "password": "test-password"}
+        "/api/auth/login",
+        json={"email": SEED_ADMIN_EMAIL, "password": SEED_ADMIN_PASSWORD},
     )
+    assert login.status_code == 200, login.text
     session_token = login.cookies.get("dcpt_session")
+    assert session_token
 
     # ?token= is the documented dev fallback for the WebSocket handshake; it is
     # the one place a session token travels in a URL.
     await api_client.get(f"/api/market/status?token={session_token}")
 
     _assert_clean(captured_logs, session_token)
+
+
+async def test_creating_a_user_never_logs_their_password(auth_client, captured_logs):
+    response = await auth_client.post(
+        "/api/users",
+        json={
+            "email": "sentinel.user@abc.com",
+            "firstName": "Sentinel",
+            "lastName": "User",
+            "password": SENTINEL_PASSWORD,
+            "role": "ROLE_USER",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert "created" in captured_logs.text.lower()
+    _assert_clean(captured_logs, SENTINEL_PASSWORD)
+
+
+async def test_changing_a_password_never_logs_either_password(
+    auth_client, captured_logs
+):
+    replacement = "replacement-password-DO-NOT-LOG-77de10"
+
+    response = await auth_client.post(
+        "/api/users/me/password",
+        json={"currentPassword": SEED_ADMIN_PASSWORD, "newPassword": replacement},
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_clean(captured_logs, SEED_ADMIN_PASSWORD, replacement)
+
+
+async def test_no_response_body_ever_carries_a_password_hash(auth_client):
+    """The hash is not a secret in the usual sense, but it is offline-crackable
+    and has no business leaving the server."""
+    created = await auth_client.post(
+        "/api/users",
+        json={
+            "email": "hash.check@abc.com",
+            "firstName": "Hash",
+            "lastName": "Check",
+            "password": "hash-check-password",
+            "role": "ROLE_USER",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    bodies = [
+        created.text,
+        (await auth_client.get("/api/users")).text,
+        (await auth_client.get(f"/api/users/{created.json()['id']}")).text,
+        (await auth_client.get("/api/users/me")).text,
+        (await auth_client.get("/api/auth/me")).text,
+    ]
+
+    for body in bodies:
+        assert "password_hash" not in body
+        assert "passwordHash" not in body
+        assert "$2b$" not in body
 
 
 def test_a_registered_secret_is_scrubbed_from_a_traceback(captured_logs):

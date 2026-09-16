@@ -4,16 +4,28 @@ import json
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
-from src.auth.dependencies import require_session
-from src.auth.services.auth_service import AuthError, AuthService
+from src.auth.dependencies import (
+    SessionPrincipal,
+    require_session,
+    resolve_principal,
+)
+from src.auth.services.auth_service import AuthService
 from src.logging_config import get_logger
 from src.market.api_schemas.market_schemas import (
     FeedStatusResponse,
     ResyncResponse,
     SnapshotResponse,
 )
+from src.database.session import session_scope
 from src.market.services.feed_manager import get_feed_manager
 from src.market.services.market_book import now_ms
 
@@ -24,7 +36,7 @@ market_ws_router = APIRouter()
 
 
 @market_router.get("/status", response_model=FeedStatusResponse)
-async def get_feed_status(_: str = Depends(require_session)) -> FeedStatusResponse:
+async def get_feed_status(_: SessionPrincipal = Depends(require_session)) -> FeedStatusResponse:
     """Connection health, book size, last tick age and market hours."""
     return FeedStatusResponse(**get_feed_manager().status())
 
@@ -34,7 +46,7 @@ async def get_snapshot(
     security_ids: Optional[str] = Query(
         None, alias="securityIds", description="Comma-separated; omit for everything"
     ),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> SnapshotResponse:
     """Current book. The WebSocket is the live path; this is for first paint
     and for debugging without opening a socket."""
@@ -48,7 +60,7 @@ async def get_snapshot(
 
 
 @market_router.post("/resync", response_model=ResyncResponse)
-async def resync_subscriptions(user: str = Depends(require_session)) -> ResyncResponse:
+async def resync_subscriptions(user: SessionPrincipal = Depends(require_session)) -> ResyncResponse:
     """Recompute the ATM window and reconcile upstream subscriptions.
 
     Called automatically after an instrument-master refresh and whenever the
@@ -71,22 +83,32 @@ async def market_websocket(websocket: WebSocket, token: Optional[str] = Query(No
     which matters for the live-price page: it needs one instrument, not the
     whole chain.
     """
+    # Same resolver as every HTTP route, so the two auth paths cannot drift:
+    # a deactivated or deleted user is refused a socket exactly as they are
+    # refused a request, rather than only when their token eventually expires.
     candidate = websocket.cookies.get(AuthService.cookie_name()) or token
-    if not candidate:
-        logger.warning(
-            "Rejected an unauthenticated WebSocket handshake from %s",
-            websocket.client.host if websocket.client else "unknown",
-        )
-        await websocket.close(code=4401, reason="Not authenticated")
-        return
     try:
-        AuthService.decode_token(candidate)
-    except AuthError as exc:
-        logger.warning("Rejected a WebSocket handshake: %s", exc)
-        await websocket.close(code=4401, reason=str(exc))
+        async with session_scope() as session:
+            principal = await resolve_principal(candidate, session)
+    except HTTPException as exc:
+        logger.warning(
+            "Rejected a WebSocket handshake from %s: %s",
+            websocket.client.host if websocket.client else "unknown",
+            exc.detail,
+        )
+        await websocket.close(code=4401, reason=str(exc.detail))
+        return
+
+    if principal.must_change_password:
+        logger.warning(
+            "Rejected a WebSocket handshake for %s: password change required",
+            principal.email,
+        )
+        await websocket.close(code=4403, reason="Password change required")
         return
 
     await websocket.accept()
+    logger.debug("WebSocket accepted for %s", principal)
 
     manager = get_feed_manager()
     broadcaster = manager.broadcaster

@@ -92,7 +92,26 @@ These are product requirements, not styling choices:
 - Show where each value came from (`saved here` / `from .env`). Silently
   preferring one source over the other is how configuration becomes a mystery.
 
-## 5. Conventions
+## 5. Roles in the UI
+
+- **The sidebar and the routes are driven by the server.** `/auth/me` returns
+  the pages the role may see (from `backend/conf/role-pages.json`);
+  `visibleNavigationItems(pages)` filters `navigation.js` and `RoleRoute` gates
+  each route. Do not hardcode a role check in a component.
+- **This is presentation, not access control.** The API refuses what the role
+  may not do regardless of what the UI shows. Never treat a hidden nav item as
+  a security boundary, and never skip the server-side check because the button
+  is hidden.
+- `ChangePasswordGate` renders **instead of** the shell when the session says a
+  password change is owed, so there is nowhere to navigate around it. The
+  backend enforces the same rule with a 403 on every other endpoint.
+- The email field is disabled everywhere it appears, and the Users and Profile
+  pages never send `email` on an update — the server rejects a changed one, and
+  a form that offers an edit it will refuse is worse than one that does not.
+
+---
+
+## 6. Conventions
 
 - API access goes through `src/api/` (`client.js` wraps fetch and raises
   `ApiError` with a status; a 401 drops the user to login). No bare `fetch` in a

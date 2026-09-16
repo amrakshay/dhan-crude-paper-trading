@@ -65,7 +65,7 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (368 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (412 tests)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
@@ -77,6 +77,10 @@ cd frontend
 npm run dev                                                # Vite on :5173
 npm run build
 ```
+
+Login is `trader@abc.com` / `APP_ADMIN_PASSWORD`. `APP_USERNAME` /
+`APP_PASSWORD` were removed and authenticate nobody — see `backend/CLAUDE.md`
+§10 for the users module, its role gates and the seeded-admin guard rails.
 
 Two-port dev (Vite :5173 + backend :8000) is the default. `./run-single-port.sh`
 from the project root builds the frontend and serves UI + API from :8000 alone;

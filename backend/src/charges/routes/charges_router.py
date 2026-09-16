@@ -5,7 +5,7 @@ is confirmed, which is what these serve.
 """
 from fastapi import APIRouter, Depends
 
-from src.auth.dependencies import require_session
+from src.auth.dependencies import SessionPrincipal, require_session
 from src.charges.api_schemas.charges_schemas import (
     ChargeBreakdownResponse,
     ChargeEstimateRequest,
@@ -26,7 +26,7 @@ def get_charges_controller() -> ChargesController:
 async def estimate_charges(
     request: ChargeEstimateRequest,
     controller: ChargesController = Depends(get_charges_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> ChargeBreakdownResponse:
     """Full charges breakdown for one prospective order."""
     return controller.estimate(request)
@@ -36,7 +36,7 @@ async def estimate_charges(
 async def estimate_round_trip(
     request: RoundTripEstimateRequest,
     controller: ChargesController = Depends(get_charges_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> ChargeBreakdownResponse:
     """Charges for a complete round trip, as the sum of both legs."""
     return controller.estimate_round_trip(request)
@@ -45,7 +45,7 @@ async def estimate_round_trip(
 @charges_router.get("/rates", response_model=RateCardResponse)
 async def get_rate_card(
     controller: ChargesController = Depends(get_charges_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> RateCardResponse:
     """The active rate card, including each rate's source and as-of date."""
     return controller.rate_card()
@@ -54,7 +54,7 @@ async def get_rate_card(
 @charges_router.post("/rates/reload", response_model=RateCardResponse)
 async def reload_rate_card(
     controller: ChargesController = Depends(get_charges_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> RateCardResponse:
     """Re-read conf/charges.yaml without restarting, after editing rates."""
     return controller.reload_rates()

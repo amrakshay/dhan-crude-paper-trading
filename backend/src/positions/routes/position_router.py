@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import require_session
+from src.auth.dependencies import SessionPrincipal, require_session
 from src.core.singleton_utils import SingletonDepends
 from src.database.session import get_async_session
 from src.orders.api_schemas.order_schemas import OrderResponse
@@ -25,7 +25,7 @@ async def get_position_controller(
 async def list_positions(
     include_closed: bool = Query(False, alias="includeClosed"),
     controller: PositionController = Depends(get_position_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> PositionListResponse:
     """Open positions with live MTM, plus aggregate realised/unrealised P&L."""
     return await controller.list_positions(include_closed=include_closed)
@@ -36,7 +36,7 @@ async def close_position(
     position_id: int,
     request: ClosePositionRequest,
     controller: PositionController = Depends(get_position_controller),
-    _: str = Depends(require_session),
+    _: SessionPrincipal = Depends(require_session),
 ) -> OrderResponse:
     """Close or partially close a position by placing an offsetting order."""
     return await controller.close_position(position_id, request)
