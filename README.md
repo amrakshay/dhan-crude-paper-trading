@@ -18,6 +18,7 @@ source.
 | | |
 |---|---|
 | **Live price** | CRUDEOIL near-month future — LTP, OHLC, volume, OI, 5-level depth, with connection health and last-tick age always on screen |
+| **Price chart** | Candlestick chart of the near-month future at ten timeframes (1m to 1M), history from Dhan's read-only chart endpoints, newest bar updating live from the existing feed |
 | **Option chain** | Full CE/PE ladder in the conventional Indian broker layout, with IV and greeks, OI change, ATM highlighting and click-to-trade |
 | **Order entry** | Market and limit, from the chain or a standalone ticket, with estimated charges and net debit/credit shown **before** confirmation |
 | **Fill simulation** | Orders cross the spread, walk the book level by level, and partially fill when depth runs out |
@@ -193,6 +194,66 @@ reports an error rather than inventing prices.
 
 To go live: set `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN`, set
 `DHAN_SYNTHETIC_FEED=false`, and restart.
+
+---
+
+## Price chart
+
+The Live Price page carries a candlestick chart of the near-month CRUDEOIL
+future, below the stat tiles. Timeframes: `1m 3m 5m 15m 30m 1h 4h 1D 1W 1M`.
+
+**Where the bars come from.** This application persists no price history at all
+— `MarketBook` holds one current row per instrument in memory and nothing writes
+ticks to the database — so history is fetched from Dhan's two read-only chart
+endpoints and only the newest bar is updated from the live WebSocket. The chart
+opens no second socket and polls nothing.
+
+**Native versus derived timeframes.** Dhan's intraday endpoint serves 1, 5, 15,
+25 and 60 minute candles, and daily candles come from a separate endpoint.
+Everything else is aggregated by the backend from the nearest finer native
+interval, and the chart says so underneath itself rather than presenting every
+series as equally direct:
+
+| Timeframe | Source |
+|---|---|
+| `1m` `5m` `15m` `1h` | Dhan intraday, passed through |
+| `1D` | Dhan daily, passed through |
+| `3m` | aggregated from 1m |
+| `30m` | aggregated from 15m |
+| `4h` | aggregated from 1h |
+| `1W` `1M` | aggregated from daily |
+
+Dhan's 25-minute interval is deliberately not offered. Intraday buckets are
+anchored to each IST trading day's first bar, not to midnight — anchoring to
+midnight would put a 4h boundary at 08:00, an hour before MCX opens, and leave
+the session's first bucket one hour long. Weekly bars are anchored to Monday and
+monthly bars to the 1st, in IST.
+
+**Two entries were added to the safety suite's URL allowlist.**
+`backend/tests/test_no_real_orders.py` fails the build on any Dhan URL it does
+not recognise, so charting required adding exactly these two:
+
+```
+https://api.dhan.co/v2/charts/historical
+https://api.dhan.co/v2/charts/intraday
+```
+
+Both are read-only market data, the same category as `/optionchain`. The
+matching logic, the forbidden-endpoint list and the `dhanhq` ban were **not**
+touched — only the explicit allowlist grew. The endpoint constants live in
+`backend/src/market/services/dhan_charts_client.py` and nowhere else, and that
+module carries the same "MARKET DATA ONLY" docstring as the option chain client.
+
+**Without credentials** the chart follows the same rule as the rest of the app:
+it never silently invents prices. With `DHAN_SYNTHETIC_FEED=true` it draws
+locally generated bars, labelled `SYNTHETIC — generated locally` on the chart
+itself as well as by the page banner; with the synthetic feed off and no
+credentials it reports the error instead of drawing anything.
+
+The chart is [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)
+(Apache-2.0, pinned to 5.2.1). Its licence requires attribution and a link to
+tradingview.com: the built-in `attributionLogo` is left enabled and the notice
+is repeated under the chart. See `frontend/NOTICE` — do not remove either.
 
 ---
 
@@ -402,7 +463,7 @@ since every order carries its own auditable charges row.
 cd backend && .venv/bin/python -m pytest tests/ -q
 ```
 
-412 tests. Two files are safety suites rather than feature tests:
+448 tests. Two files are safety suites rather than feature tests:
 
 `tests/test_no_real_orders.py` parses every Python file's AST (comments and
 docstrings exempt, everything else in scope) and fails if any Dhan URL outside
@@ -490,6 +551,7 @@ backend/
   tests/
 frontend/
   CLAUDE.md     frontend conventions: theme port, feed context, UI honesty rules
+  NOTICE        TradingView attribution required by the chart library's licence
   src/
     theme/      Privacera palette ported to MUI v6 (light + dark)
     market/     one shared WebSocket context
@@ -531,6 +593,28 @@ not carried over.
   oversight — the tool models one trading account that several people may look
   at, rather than one account each. Per-user books would be a schema change
   across four tables and a different product.
+* **Nothing about Dhan's chart endpoints has been verified against the live
+  API.** No Dhan token existed when the price chart was built, so the request
+  fields, the `YYYY-MM-DD` / `YYYY-MM-DD HH:MM:SS` date formats, the parallel-array
+  response shape, the non-inclusive `toDate`, the 90-day intraday cap and the
+  native interval set (`1, 5, 15, 25, 60` — note 25, not 30) all come from
+  <https://dhanhq.co/docs/v2/historical-data/> read on 2026-09-16 and from
+  nothing else. The first run against a real token is the first real test of
+  `backend/src/market/services/dhan_charts_client.py`. Dhan publishes no rate
+  limit for these endpoints either; the client self-throttles to one request per
+  second per series and caches responses, both of which are guesses.
+* **Synthetic candles are per-timeframe, not mutually consistent.** In synthetic
+  mode each timeframe's bars are generated independently, so the synthetic 1h
+  series is not exactly the aggregate of the synthetic 5m series. Bars are
+  deterministic per instrument and anchored so the newest close equals the live
+  price, but they are fake and labelled as such. Real Dhan data has no such
+  problem.
+* **The chart's live bar reflects the last traded price only.** The forming
+  candle is updated from the feed's LTP, so its high and low are the extremes
+  this browser has *seen* since the bar opened, not the true extremes of every
+  trade in that bucket. Reloading replaces it with the server's own bar. The bar
+  stops updating entirely when the feed is stale, rather than painting a flat
+  price into new buckets.
 * **The Quote/Full packet OHLC field order is unverified.** The layouts come from
   the official `dhanhq` SDK v2.2.0, which maps those four fields as open, close,
   high, low. That is reproduced faithfully, but has not been checked against a

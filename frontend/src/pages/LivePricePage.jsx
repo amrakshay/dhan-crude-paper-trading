@@ -20,6 +20,7 @@ import { instrumentsApi } from '../api/instruments';
 import { useFeedHealth, useMarketRow } from '../market/MarketFeedContext';
 import SyntheticBanner from '../components/SyntheticBanner';
 import DepthLadder from '../components/DepthLadder';
+import PriceChart from '../components/PriceChart';
 import {
   computeChange,
   formatAge,
@@ -254,6 +255,12 @@ export default function LivePricePage() {
           </Grid>
         </Grid>
       )}
+
+      <PriceChart
+        securityId={future?.securityId}
+        title="Price chart"
+        subtitle={future?.displayName ?? future?.tradingSymbol ?? undefined}
+      />
     </Stack>
   );
 }

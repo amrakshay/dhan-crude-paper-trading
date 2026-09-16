@@ -21,10 +21,17 @@ from src.auth.dependencies import (
 from src.auth.services.auth_service import AuthService
 from src.logging_config import get_logger
 from src.market.api_schemas.market_schemas import (
+    CandleResponse,
     FeedStatusResponse,
     ResyncResponse,
     SnapshotResponse,
+    TimeframesResponse,
 )
+from src.market.controllers.market_controller import (
+    MarketController,
+    get_market_controller,
+)
+from src.market.services.candle_service import DEFAULT_TIMEFRAME
 from src.database.session import session_scope
 from src.market.services.feed_manager import get_feed_manager
 from src.market.services.market_book import now_ms
@@ -68,6 +75,37 @@ async def resync_subscriptions(user: SessionPrincipal = Depends(require_session)
     """
     logger.info("Manual feed resync requested by %s", user)
     return ResyncResponse(**await get_feed_manager().resync())
+
+
+@market_router.get("/timeframes", response_model=TimeframesResponse)
+async def get_timeframes(
+    controller: MarketController = Depends(get_market_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> TimeframesResponse:
+    """The chart timeframes this build serves, and which are aggregated.
+
+    Dhan's intraday endpoint offers 1/5/15/25/60 minutes; the rest are derived
+    here. The UI reads this rather than hardcoding a list, so a timeframe can
+    never appear as a button that the backend would reject.
+    """
+    return controller.get_timeframes()
+
+
+@market_router.get("/candles", response_model=CandleResponse)
+async def get_candles(
+    security_id: str = Query(..., alias="securityId", description="Instrument to chart"),
+    timeframe: str = Query(DEFAULT_TIMEFRAME, description="One of /market/timeframes"),
+    controller: MarketController = Depends(get_market_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> CandleResponse:
+    """Candle history, oldest bar first.
+
+    MARKET DATA ONLY: this reads Dhan's chart endpoints, or -- when the
+    synthetic feed is on -- returns locally generated bars flagged
+    `synthetic: true`. The newest bar is updated in the browser from the
+    existing WebSocket rather than by polling this.
+    """
+    return await controller.get_candles(security_id, timeframe)
 
 
 @market_ws_router.websocket("/ws/market")

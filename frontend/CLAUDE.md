@@ -111,6 +111,38 @@ These are product requirements, not styling choices:
 
 ---
 
+## 5a. The price chart
+
+`src/components/PriceChart.jsx` uses TradingView Lightweight Charts, pinned to
+**5.2.1** in `package.json`. Pin it, and write against the version installed:
+v5 replaced `chart.addCandlestickSeries(...)` with
+`chart.addSeries(CandlestickSeries)`, and almost every example online is still
+v4.
+
+- **Candles never enter React state.** History goes into the series once with
+  `setData`; after that only `series.update()` is called, which is an imperative
+  call rather than a render. Putting candle arrays in state would re-render the
+  page on every tick and break section 2's contract.
+- **`<LiveCandle>` renders `null`.** It is the only part of the chart that
+  subscribes to the feed, so the chart chrome does not re-render at ~10/sec.
+  Keep the subscription there.
+- **No second WebSocket, no polling.** History is one request per (instrument,
+  timeframe); the forming bar comes from the shared feed context.
+- **Timestamps go through `src/utils/chartTime.js`.** The library renders every
+  time in UTC and has no timezone option, so IST bars are shifted by a fixed
+  +05:30 on the way in. IST has no daylight saving, which is what makes the
+  shift exact. Do the arithmetic nowhere else.
+- **Attribution is mandatory.** The library is Apache-2.0 with an attribution
+  clause: `attributionLogo` stays enabled and the "Charts by TradingView" link
+  stays under the chart. See `frontend/NOTICE`.
+- **Honesty applies to the chart too** (section 3). Synthetic bars are labelled
+  on the chart itself, not only by the page banner — a chart is exactly the
+  thing that gets screenshotted away from its banner. An aggregated timeframe
+  says it was aggregated. A stale feed stops the forming bar rather than
+  painting the last price into new buckets.
+
+---
+
 ## 6. Conventions
 
 - API access goes through `src/api/` (`client.js` wraps fetch and raises

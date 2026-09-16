@@ -1,0 +1,12 @@
+This product includes software developed by TradingView, Inc.
+
+TradingView Lightweight Charts™
+Copyright (c) 2025 TradingView, Inc.
+https://www.tradingview.com/
+
+Licensed under the Apache License, Version 2.0. The licence requires that the
+attribution notice above and a link to https://www.tradingview.com/ appear on
+the pages that show the chart. Both are satisfied by the chart's built-in
+`attributionLogo` option (left enabled in src/components/PriceChart.jsx) and by
+the "Charts by TradingView" link rendered beneath the chart. Do not remove
+either.

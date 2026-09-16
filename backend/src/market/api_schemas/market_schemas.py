@@ -31,3 +31,39 @@ class ResyncResponse(BaseModel):
     subscribed: int
     unsubscribed: int
     reason: Optional[str] = None
+
+
+class CandleResponse(BaseModel):
+    """Candle history for one instrument at one timeframe, oldest bar first.
+
+    `native` is False when the timeframe was aggregated here from a finer Dhan
+    interval, and `synthetic` is True when the bars were generated locally. The
+    chart surfaces both rather than presenting every series as equally real.
+    """
+
+    security_id: str = Field(alias="securityId")
+    timeframe: str
+    step_seconds: int = Field(alias="stepSeconds")
+    native: bool
+    source: str
+    synthetic: bool
+    candles: List[Dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TimeframeOption(BaseModel):
+    key: str
+    label: str
+    step_seconds: int = Field(alias="stepSeconds")
+    source: str
+    native: bool
+    derived_from: Optional[str] = Field(None, alias="derivedFrom")
+    lookback_days: int = Field(alias="lookbackDays")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TimeframesResponse(BaseModel):
+    default: str
+    timeframes: List[TimeframeOption] = Field(default_factory=list)

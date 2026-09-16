@@ -29,6 +29,14 @@ Python file's AST and fails the build on:
 Comments and docstrings are exempt — documentation may name the endpoints it is
 refusing to call. Everything else is in scope.
 
+The URL allowlist has grown exactly once, on 2026-09-16, when the price chart
+added `https://api.dhan.co/v2/charts/historical` and
+`https://api.dhan.co/v2/charts/intraday`. That is the sanctioned way to extend
+it: add the exact read-only market-data URL, keep the constants in a single
+client module, and leave the matching logic alone. **Never loosen the pattern,
+the endpoint list or the scanner** — a regex that accepts a family of URLs is
+not the same guarantee as a set of five you can read in one glance.
+
 **Consequences for naming.** Local order operations are deliberately called
 `submit_paper_order` and `cancel_paper_order`, never `place_order` /
 `cancel_order`. Those names are banned outright so a genuine broker call can
@@ -65,7 +73,7 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (412 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (448 tests)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
@@ -111,6 +119,13 @@ Current cost: ~2 µs/packet, ~1.1 ms to build a full 165-instrument broadcast.
 from the option chain REST endpoint (`greeks_poller`, 3 s per expiry, expiries
 polled concurrently) and merge via `MarketBook.merge_greeks` — a separate entry
 point from `apply_packet` precisely so the two can never be confused.
+
+**Price history is fetched, never accumulated.** Nothing writes ticks to the
+database and nothing should start: candle history comes from Dhan's chart
+endpoints (`dhan_charts_client` → `candle_service`), and the browser updates only
+the newest bar from the WebSocket it already has. If you are tempted to persist
+ticks to back a chart, read the "Price chart" section of `README.md` first — that
+option was considered and rejected.
 
 **Never invent prices.** If credentials are missing and
 `DHAN_SYNTHETIC_FEED` is false, the feed reports an error. It must never
@@ -162,6 +177,9 @@ backend/conf/default-config.yaml   app config; ${ENV_VAR} substitution
 backend/conf/charges.yaml          every charge rate, with source URL + as-of date
 backend/src/<feature>/             routes/ controllers/ services/ api_schemas/ database/
 backend/src/market/services/       feed protocol, book, feed client, broadcaster, greeks
+backend/src/market/services/dhan_charts_client.py   candle history (market data only)
+backend/src/market/services/candle_service.py       timeframes, aggregation, cache
+frontend/src/components/PriceChart.jsx              the chart; see frontend/NOTICE
 backend/tests/test_no_real_orders.py   the safety suite
 frontend/src/theme/tokens.js       palette ported from the Privacera portal
 frontend/src/market/               the single shared WebSocket context

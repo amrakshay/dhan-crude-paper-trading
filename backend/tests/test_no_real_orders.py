@@ -41,6 +41,12 @@ ALLOWED_DHAN_URLS = {
     "https://api.dhan.co/v2",                                    # REST base
     "https://api.dhan.co/v2/optionchain",                        # greeks / IV
     "https://api.dhan.co/v2/optionchain/expirylist",             # expiry list
+    # Candle history for the price chart. Read-only market data, the same
+    # category as the option chain: no order, funds or holdings surface is
+    # reachable through either. Added 2026-09-16 with src/market/services/
+    # dhan_charts_client.py, which is the only module allowed to name them.
+    "https://api.dhan.co/v2/charts/historical",                  # daily candles
+    "https://api.dhan.co/v2/charts/intraday",                    # intraday candles
     "wss://api-feed.dhan.co",                                    # live feed
     "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",  # master
 }

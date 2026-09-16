@@ -286,6 +286,44 @@ the loop and the app will not start.
 
 ---
 
+## 10a. Candle history (the price chart)
+
+`src/market/services/dhan_charts_client.py` is a second Dhan client, and the
+same rules apply to it as to `dhan_option_chain_client.py`: MARKET DATA ONLY, a
+closed set of endpoints checked in `_post`, and no relative path that could
+resolve against Dhan's base URL onto a trading surface. It may reach exactly
+`/charts/historical` and `/charts/intraday`, whose full URLs are the two entries
+added to `ALLOWED_DHAN_URLS`.
+
+`src/market/services/candle_service.py` owns everything above the wire:
+
+- **`TIMEFRAMES` is the single source of truth**, and the UI reads it from
+  `GET /market/timeframes` rather than hardcoding buttons. A timeframe the
+  backend would reject can therefore never appear as a button. Dhan serves
+  1/5/15/25/60-minute and daily bars; `3m`, `30m`, `4h`, `1W` and `1M` are
+  aggregated here, and `native` on each entry says which is which.
+- **Intraday buckets are anchored to each IST day's first bar**, not to midnight
+  and not to a bar count. Midnight anchoring puts a 4h boundary at 08:00, an
+  hour before MCX opens; count anchoring silently mis-groups everything after a
+  gap in the data. Both mistakes produce a chart that is wrong and plausible,
+  which is why `tests/test_candles.py` asserts each one directly.
+- **Responses are cached per (security id, timeframe, mode)** for 15 s intraday
+  and 5 min daily, and `FeedManager.reconfigure()` invalidates the cache for the
+  same reason it clears the book: a synthetic bar must not survive into live
+  mode.
+- **`synthetic_candles.py` is gated by the same flag as `synthetic_feed.py`.**
+  Bars are deterministic (seeded from the security id and the bar's own epoch,
+  so a refresh does not reshuffle history), anchored so the newest close equals
+  the live price, and generated only on the configured session grid. The
+  response carries `synthetic: true` and the chart labels itself. Nothing falls
+  back to it: no credentials and no synthetic flag raises `CandlesUnavailable`,
+  which the controller turns into a 503.
+- The instrument's Dhan `instrument` enum (`FUTCOM` / `OPTFUT`) is read from the
+  book's registered contract metadata, never guessed — sending the wrong one is
+  a silently empty chart.
+
+---
+
 ## 11. Tests
 
 - `pytest.ini` sets `asyncio_mode = auto` — async tests need no decorator.

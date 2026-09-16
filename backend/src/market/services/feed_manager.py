@@ -203,6 +203,12 @@ class FeedManager:
         # in the book after switching to live data would be indistinguishable
         # from a real one.
         self.book.clear()
+        # Cached candle history was fetched under the previous credentials and
+        # the previous synthetic setting, so it is discarded for the same
+        # reason the book is: a synthetic bar must not survive into live mode.
+        from src.market.services.candle_service import get_candle_service
+
+        get_candle_service().invalidate()
         self._window_centre = None
         self._strike_step = None
         self.last_error = None
