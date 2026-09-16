@@ -1,0 +1,149 @@
+# ===========================================================================
+# MCX COMMODITY OPTIONS CHARGE RATES
+#
+# Every rate carries a PRIMARY source URL and an as-of date. Update rates here
+# and nowhere else -- no rate is hardcoded in Python.
+#
+# Scope: options on MCX commodity futures (INSTRUMENT = OPTFUT), non-agri
+# commodity (crude oil). Researched and cross-checked 2026-09-16.
+#
+# Confidence markers used below:
+#   CONFIRMED   - read verbatim from a primary source (MCX / MCXCCL / SEBI /
+#                 incometaxindia.gov.in)
+#   UNCONFIRMED - no primary source obtained; value corroborated by brokers only
+# ===========================================================================
+
+version: "2026-09-16"
+currency: "INR"
+
+brokerage:
+  # Discount-broker flat rate. Not a statutory charge -- set it to whatever
+  # your broker actually charges.
+  mode: "flat"                     # flat | percentage
+  flat_per_order: 20.00
+  # Used only when mode = percentage. Zerodha's published commodity-options
+  # formula is min(20, 0.0003 * (premium + strike) * lot * qty), i.e. a 0.03%
+  # rate that is capped at Rs 20 and, unusually, includes the strike in its
+  # base. At CRUDEOIL premiums the cap always binds, so flat 20 is equivalent.
+  percentage_of_turnover: 0.0003
+  max_per_order: 20.00
+  include_strike_in_base: false
+  # source: https://zerodha.com/charges/  (as-of 2026-09-16)
+  # confidence: CONFIRMED (broker's own published rate; commercial, not statutory)
+
+ctt:
+  # Commodities Transaction Tax -- NOT STT. Commodity options use CTT.
+  #
+  # Legal basis: Chapter VII of the Finance Act 2013, section 117, as
+  # substituted w.e.f. 1 April 2018.
+  #
+  # TRAP: the 0.125% entry in the same table is "sale of option IN GOODS,
+  # exercised, settled otherwise than by delivery" (Sl. 7) -- a different
+  # taxable transaction. It must NOT be applied to CRUDEOIL OPTFUT.
+
+  # Sl. 3: "Sale of option on commodity derivative", 0.05% of the option
+  # premium, payable by the SELLER.
+  sell_option_premium_rate: 0.0005
+  # source (primary): https://www.incometaxindia.gov.in/w/section-117-71
+  # source (primary): https://www.mcxccl.com/clearing-settlement/commodities-transaction-tax
+  # source (secondary): https://zerodha.com/charges/
+  # as-of: 2026-09-16   confidence: CONFIRMED
+
+  # Sl. 5: "Sale of option on commodity derivative, where option is
+  # exercised", 0.0001% of the SETTLEMENT PRICE, payable by the PURCHASER.
+  # MCX crude oil options are European and devolve into futures at expiry.
+  # NOTE: no broker calculator publishes this leg. It is modelled here because
+  # it is real, and is applied only on exercise -- never on an ordinary trade.
+  exercise_settlement_rate: 0.000001
+  # source (primary): https://www.incometaxindia.gov.in/w/section-117-71
+  # as-of: 2026-09-16   confidence: CONFIRMED
+
+exchange_transaction_charge:
+  # MCX transaction fee, charged per side on premium turnover.
+  #
+  # CONFLICT RESOLVED: prior research suggested 0.0418% vs 0.053%. The MCX
+  # circular gives Rs 41.80 per lakh of premium turnover = 0.0418%. The figure
+  # 0.053% appears in NO MCX circular between 2018 and Sep 2026 and is not an
+  # MCX commodity-options rate.
+  #
+  # NOT slabbed. The previous slabbed structure (Rs 50 / Rs 40 per lakh,
+  # circular MCX/TRD/456/2021) was replaced under SEBI's uniform-fee regime,
+  # and is the likely origin of legacy "0.05%" figures.
+  option_premium_rate: 0.000418        # Rs 41.80 per lakh of premium turnover
+  # source (primary): MCX circular MCX/F&A/631/2024, dated 24 Sep 2024,
+  #   effective 01 Oct 2024 --
+  #   https://www.mcxindia.com/docs/default-source/circulars/english/2024/september/circular-631-2024gu8ea6e81e-2c77-4374-9eec-eacd3aed7ee8.pdf
+  # source (secondary): https://www.angelone.in/exchange-transaction-charges
+  # as-of: 2026-09-16   confidence: CONFIRMED
+
+  # Futures rate, kept only so the two are never confused. Options are ~20x it.
+  futures_turnover_rate: 0.000021      # Rs 2.10 per lakh of contract turnover
+  # source (primary): same circular MCX/F&A/631/2024
+  # as-of: 2026-09-16   confidence: CONFIRMED
+
+sebi_turnover_fee:
+  # Rs 10 per crore for non-agri commodity derivatives. Crude oil is non-agri.
+  # (Agri commodity derivatives are Rs 1 per crore -- not applicable here.)
+  # Measured on PREMIUM for options.
+  rate: 0.000001                       # Rs 10 per crore
+  # source (primary, rate cut to Rs 10/cr): SEBI board memorandum Mar 2019 --
+  #   https://www.sebi.gov.in/sebi_data/meetingfiles/mar-2019/1553244864312_1.pdf
+  # source (primary, options measured on premium + notional on exercise):
+  #   SEBI board memorandum Jan 2018 --
+  #   https://www.sebi.gov.in/sebi_data/meetingfiles/jan-2018/1515489132972_1.pdf
+  # source (secondary): https://zerodha.com/charges/
+  # as-of: 2026-09-16
+  # confidence: CONFIRMED for the rate. The operative schedule wording in the
+  #   SEBI (Payment of Fees) (Amendment) Regulations 2019 did not render when
+  #   fetched, so the REGULATION TEXT ITSELF IS UNVERIFIED -- the value is
+  #   corroborated by two brokers and a live broker calculator.
+
+  # SEBI's explanation also charges the fee on the notional value of options
+  # exercised or assigned. Brokers omit this. Disabled by default to stay
+  # consistent with broker contract notes; enable for strict compliance.
+  charge_on_exercise_notional: false
+
+stamp_duty:
+  # Uniform nationwide rate under the Indian Stamp (Collection of Stamp Duty
+  # through Stock Exchanges...) Rules 2019, implemented 1 July 2020.
+  # BUY SIDE ONLY, on premium turnover.
+  option_premium_rate: 0.00003         # 0.003% = Rs 300 per crore
+  # source (primary): https://www.mcxccl.com/clearing-settlement/stamp-duty
+  # source (secondary): https://zerodha.com/charges/
+  # as-of: 2026-09-16   confidence: CONFIRMED
+
+gst:
+  # 18% on (brokerage + exchange transaction charge + SEBI turnover fee).
+  # NOT on the trade value, NOT on CTT, NOT on stamp duty.
+  rate: 0.18
+  applies_to:
+    - "brokerage"
+    - "exchange_transaction_charge"
+    - "sebi_turnover_fee"
+  # source (secondary): https://zerodha.com/charges/ and the live Zerodha
+  #   brokerage calculator, whose source computes
+  #   stax = 0.18 * (brokerage + etc + sebi_charges)
+  # source (secondary): https://www.angelone.in/exchange-transaction-charges
+  # as-of: 2026-09-16
+  # confidence: UNCONFIRMED against a primary CBIC/GST notification. The rate
+  #   and its base are consistent across every broker checked, but no statutory
+  #   citation was obtained. TODO if a formal audit needs one.
+
+rounding:
+  # How intermediate components are rounded before the total is taken.
+  #
+  #   exact             - no intermediate rounding; only the final total is
+  #                       quantised to 2dp. Most defensible, and the default.
+  #   broker_compatible - reproduces a discount broker's displayed contract
+  #                       note: stamp duty rounded to the nearest rupee and the
+  #                       SEBI fee to 2dp before GST is computed.
+  #
+  # These differ by small amounts on small premiums -- Rs 0.30 on a Rs 10,000
+  # premium turnover, almost entirely stamp duty. The difference is real and is
+  # surfaced, not hidden: see tests/test_charges_worked_examples.py.
+  #
+  # Caveat: MCXCCL aggregates a client's buy trades per contract per day before
+  # applying stamp duty, so NEITHER mode reproduces a real contract note
+  # exactly for multi-trade days. Per-order attribution is what this tool needs.
+  mode: "exact"
+  final_total_decimal_places: 2

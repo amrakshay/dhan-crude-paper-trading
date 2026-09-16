@@ -1,0 +1,12 @@
+Alembic migrations for the crude-oil paper-trading backend.
+
+The database URL is read from conf/*.yaml (database.url, which honours the
+DATABASE_URL env var), not from alembic.ini, so these migrations always target
+the same database the application uses.
+
+Every migration must run clean on both SQLite and MySQL. env.py enables
+render_as_batch on SQLite so ALTERs are emitted as table rebuilds.
+
+  alembic upgrade head        # apply
+  alembic downgrade -1        # roll back one
+  alembic revision --autogenerate -m "..."

@@ -1,0 +1,166 @@
+# ---------------------------------------------------------------------------
+# Default application configuration.
+#
+# Loaded from the path in the CONFIG_PATH env var (defaults to ./conf).
+# `default-config.yaml` is always read first; if a `local-config.yaml` sits
+# beside it, it is deep-merged on top so local overrides never touch this file.
+#
+# Secrets do NOT live here. They come from the environment (.env) and are
+# referenced below as ${VAR_NAME} or ${VAR_NAME:default}.
+# ---------------------------------------------------------------------------
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  uvicorn_workers: 1          # MUST stay 1: the upstream feed is a single
+                              # process-wide connection (see market_feed below).
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
+
+logging:
+  level: "INFO"
+  access_log_level: "INFO"
+
+database:
+  # SQLite by default. To use MySQL, replace this one line, e.g.
+  #   url: "mysql+aiomysql://user:pass@127.0.0.1:3306/crude_paper?charset=utf8mb4"
+  # Every query goes through SQLAlchemy, and the Alembic migrations are written
+  # to run clean on both backends.
+  url: "${DATABASE_URL:sqlite+aiosqlite:///./data/paper_trading.db}"
+  echo: false
+
+auth:
+  # Single hardcoded credential pair. No user table, no registration.
+  username: "${APP_USERNAME:trader}"
+  password: "${APP_PASSWORD:}"
+  jwt_secret: "${APP_JWT_SECRET:}"
+  jwt_algorithm: "HS256"
+  session_hours: 12
+  cookie_name: "dcpt_session"
+  cookie_secure: false        # true only when served over HTTPS
+  cookie_samesite: "lax"
+
+dhan:
+  client_id: "${DHAN_CLIENT_ID:}"
+  access_token: "${DHAN_ACCESS_TOKEN:}"
+  api_base_url: "https://api.dhan.co/v2"
+  feed_ws_url: "wss://api-feed.dhan.co"
+  # 35 MB CSV, refreshed daily by Dhan. Re-fetched at runtime because security
+  # IDs change every expiry.
+  instrument_master_url: "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
+  instrument_master_cache_dir: "./data/instrument_master"
+  instrument_master_max_age_hours: 12
+  http_timeout_seconds: 30
+
+underlying:
+  # MCX CRUDEOIL. UnderlyingScrip 294 = CRUDEOIL, 556 = CRUDEOILM (mini).
+  symbol: "CRUDEOIL"
+  underlying_scrip: 294
+  exchange_segment: "MCX_COMM"
+  exchange_segment_code: 5          # numeric code used by the binary feed
+  exchange_id: "MCX"
+  option_instrument_type: "OPTFUT"  # options ON the futures contract
+  futures_instrument_type: "FUTCOM"
+
+contract_specs:
+  # -------------------------------------------------------------------------
+  # Contract size does NOT come from Dhan's instrument master.
+  #
+  # Verified against the live master on 2026-09-16: every MCX row reports
+  # LOT_SIZE=1.0 (all 158 FUTCOM and all 15,844 OPTFUT rows), while NSE rows in
+  # the same file carry real values (NIFTY OPTIDX = 65). Dhan's master simply
+  # does not publish MCX contract size, so it is configured here from MCX's own
+  # contract specification instead. If this number is wrong, every turnover,
+  # charge and P&L figure in the application is wrong with it.
+  #
+  # Source: MCX CRUDEOIL contract specification
+  #   https://www.mcxindia.com/products/energy/crude-oil
+  # as-of: 2026-09-16
+  # -------------------------------------------------------------------------
+  CRUDEOIL:
+    lot_size: 100         # barrels per lot
+    quotation_unit: "barrel"
+  CRUDEOILM:
+    lot_size: 10          # mini contract, barrels per lot
+    quotation_unit: "barrel"
+
+  # Dhan publishes TICK_SIZE in paise, not rupees. Verified 2026-09-16 across
+  # several commodities: ALUMINIUM 5.0 -> Rs 0.05, COPPER 5.0 -> Rs 0.05,
+  # CARDAMOM 100.0 -> Rs 1.00, COTTON 1000.0 -> Rs 10.00, CRUDEOIL futures
+  # 100.0 -> Rs 1.00, CRUDEOIL options 10.0 -> Rs 0.10. Divide by this to get
+  # rupees.
+  tick_size_divisor: 100
+
+market_feed:
+  enabled: true
+
+  # ---------------------------------------------------------------------
+  # SYNTHETIC FEED — THIS IS FAKE DATA. It exists so the whole stack can be
+  # exercised without Dhan credentials or outside market hours. When true, no
+  # upstream connection is opened and prices are generated locally. The UI
+  # shows a loud "SYNTHETIC" banner whenever this is on.
+  # Set to false (and supply DHAN_* credentials) for real market data.
+  # ---------------------------------------------------------------------
+  synthetic_feed: "${DHAN_SYNTHETIC_FEED:true}"
+  synthetic_base_price: 6800.0       # starting CRUDEOIL future price (Rs/barrel)
+  synthetic_volatility: 0.35         # annualised, drives both the walk and the smile
+  synthetic_tick_interval_ms: 250
+
+  mode: "FULL"                      # TICKER | QUOTE | FULL. Options need FULL
+                                    # (5-level depth + OI).
+  strike_window: 20                 # subscribe ATM +/- N strikes ...
+  expiries_to_subscribe: 2          # ... across the nearest N option expiries
+  resubscribe_move_strikes: 3       # re-centre the window after the underlying
+                                    # moves this many strikes
+  max_instruments_per_subscribe: 100
+  max_instruments_per_connection: 5000
+  reconnect_backoff_initial_seconds: 1.0
+  reconnect_backoff_max_seconds: 30.0
+  server_inactivity_timeout_seconds: 40   # Dhan drops us after 40s of silence
+  stale_tick_warn_seconds: 10
+
+fanout:
+  # Coalescing interval for pushing to browsers. Ticks land in the in-memory
+  # book immediately; only changed rows are flushed to clients on this tick.
+  broadcast_interval_ms: 100
+  max_client_queue: 64
+
+greeks_poller:
+  enabled: true
+  # Dhan rate limit: ONE request per 3 seconds per unique underlying+expiry.
+  # Different expiries may be polled concurrently.
+  interval_seconds: 3.0
+  expiries_to_poll: 2
+
+market_hours:
+  timezone: "Asia/Kolkata"
+  open: "09:00"
+  close: "23:30"
+  close_us_dst: "23:55"
+  trading_days: [0, 1, 2, 3, 4]     # Mon-Fri (Python weekday numbering)
+
+trading:
+  # Fill simulation. See src/orders/services/fill_simulator.py.
+  default_lots: 1
+  max_lots_per_order: 100
+  # Market orders cross the spread and pay the opposite side of the touch.
+  # Depth beyond level 1 is consumed in order, so a large order walks the book.
+  allow_partial_fills: true
+  # If the resting depth cannot fill the whole order, the remainder stays open
+  # (limit) or is rejected (market) depending on this flag.
+  reject_market_order_on_insufficient_depth: false
+  # Extra adverse slippage applied to marketable fills, in ticks. This is on
+  # top of walking the book, and models queue/latency effects.
+  slippage_ticks: 1
+  # A limit order only fills once the opposite side of the book actually
+  # crosses it, and then only for the quantity displayed at that level.
+  # Setting this false makes a resting order fill when the market merely
+  # TOUCHES its price, which ignores queue position and flatters every limit
+  # strategy. Leave it true unless you know why you want otherwise.
+  limit_fill_requires_cross: true
+
+  # Background matcher for resting limit orders. Runs off the tick path with
+  # its own database session.
+  matcher_enabled: true
+  matcher_interval_ms: 250

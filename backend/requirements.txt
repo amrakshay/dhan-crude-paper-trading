@@ -1,0 +1,32 @@
+# --- web / api ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- data / validation ---
+pydantic==2.10.4
+PyYAML==6.0.2
+python-dotenv==1.0.1
+
+# --- persistence ---
+SQLAlchemy==2.0.36
+alembic==1.14.0
+aiosqlite==0.20.0
+aiomysql==0.2.0          # MySQL async driver (pure python; no build step)
+greenlet==3.1.1
+
+# --- upstream Dhan market data (market data ONLY) ---
+# NOTE: the official `dhanhq` SDK is deliberately NOT a dependency. It bundles
+# order placement / funds / holdings clients, and keeping it out of the tree
+# makes the "no real order can ever be sent" guarantee structural rather than
+# merely tested. The market-data client here is hand written from the wire
+# protocol.
+httpx==0.28.1
+websockets==14.1
+
+# --- auth ---
+PyJWT==2.10.1
+
+# --- tests ---
+pytest==8.3.4
+pytest-asyncio==0.25.0

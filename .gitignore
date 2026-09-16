@@ -216,3 +216,29 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# dhan-crude-paper-trading specifics
+# ---------------------------------------------------------------------------
+
+# Secrets. .env holds APP_PASSWORD, APP_JWT_SECRET and the Dhan market-data
+# credentials. .env.example is committed; .env never is.
+.env
+backend/conf/local-config.yaml
+
+# Local state: SQLite database and the cached 35 MB instrument master CSV.
+backend/data/
+*.db
+*.sqlite3
+
+# Node / frontend build output
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
