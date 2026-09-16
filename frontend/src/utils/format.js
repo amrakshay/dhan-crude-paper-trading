@@ -66,3 +66,21 @@ export function computeChange(row) {
   const absolute = row.ltp - reference;
   return { absolute, percent: (absolute / reference) * 100 };
 }
+
+/**
+ * Countdown to a token expiry, e.g. "18h 42m 09s".
+ *
+ * Dhan access tokens last about 24 hours, so the difference between "expires
+ * today" and "expires in 40 minutes" is the whole point — seconds are shown
+ * once under an hour so a nearly-dead token is unmistakable.
+ */
+export function formatCountdown(seconds) {
+  if (seconds === null || seconds === undefined) return null;
+  if (seconds <= 0) return 'expired';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+  if (minutes > 0) return `${minutes}m ${String(secs).padStart(2, '0')}s`;
+  return `${secs}s`;
+}

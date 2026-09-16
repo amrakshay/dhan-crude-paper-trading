@@ -27,6 +27,12 @@ websockets==14.1
 # --- auth ---
 PyJWT==2.10.1
 
+# --- settings-at-rest encryption ---
+# The Dhan access token is stored encrypted in the database (Fernet:
+# AES-128-CBC + HMAC-SHA256, random IV per message). See
+# src/settings/services/crypto_service.py.
+cryptography==44.0.0
+
 # --- tests ---
 pytest==8.3.4
 pytest-asyncio==0.25.0

@@ -41,7 +41,21 @@ auth:
   cookie_secure: false        # true only when served over HTTPS
   cookie_samesite: "lax"
 
+security:
+  # Key used to encrypt secret settings at rest (currently the Dhan access
+  # token, stored in the app_settings table). Derived via HKDF-SHA256.
+  #
+  # Prefer a dedicated key: rotating APP_JWT_SECRET then does not destroy the
+  # stored token. If this is blank, APP_JWT_SECRET is used instead. If BOTH are
+  # blank, the application refuses to store a token rather than encrypt it
+  # under a per-process random key it could never read back.
+  #   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+  encryption_key: "${APP_ENCRYPTION_KEY:}"
+
 dhan:
+  # NOTE: these are the .env FALLBACK values. Anything saved on the Settings
+  # page is stored in the database and overlaid on top of these at startup and
+  # on save -- the UI wins. See src/settings/services/settings_service.py.
   client_id: "${DHAN_CLIENT_ID:}"
   access_token: "${DHAN_ACCESS_TOKEN:}"
   api_base_url: "https://api.dhan.co/v2"

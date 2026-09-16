@@ -8,6 +8,7 @@ import PositionsPage from './pages/PositionsPage';
 import OrderHistoryPage from './pages/OrderHistoryPage';
 import ReportsPage from './pages/ReportsPage';
 import NotesPage from './pages/NotesPage';
+import SettingsPage from './pages/SettingsPage';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/orders" element={<OrderHistoryPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/notes" element={<NotesPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/" element={<Navigate to="/live" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/live" replace />} />

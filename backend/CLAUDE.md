@@ -154,7 +154,35 @@ by-expiry / by-strike slices and the equity curve possible at all.
 
 ---
 
-## 7. Tests
+## 7. Settings and secrets
+
+`src/settings/` stores runtime configuration in the `app_settings` table, and it
+**takes priority over `.env`**.
+
+- `SettingsService.apply_to_config()` mutates the in-memory config dict from
+  `config_utils`. That is deliberate: it means every existing caller picks up the
+  UI value without touching a single call site. It runs in the lifespan **before
+  the feed starts**, and again after each save.
+- Only keys in `MANAGED_KEYS` are ever read back out, so a stray row cannot start
+  influencing configuration.
+- **Secrets go in `encrypted_value`, never `value`** — the repository enforces
+  that a value lives in exactly one column.
+- `crypto_service` refuses to encrypt when no stable secret is configured, rather
+  than using a per-process random key that could never be read back. Decryption
+  failures return `None` (log and ask the operator to re-enter) instead of
+  raising, so a rotated secret cannot block startup.
+- **Never return a token to the browser.** Return `crypto_service.mask()` plus
+  the metadata from `inspect_token()`.
+- `inspect_token()` decodes the JWT **without verifying the signature** — Dhan
+  signed it with a key we do not hold, and we are reading metadata, not trusting
+  it. Do not "fix" this by verifying.
+- Changing credentials or the synthetic toggle requires
+  `FeedManager.reconfigure()`. It rebuilds the feed client, book and greeks
+  poller but deliberately **keeps the broadcaster**, so connected browser tabs
+  are not stranded on a dead one. Do not replace the FeedManager singleton to
+  apply settings.
+
+## 8. Tests
 
 - `pytest.ini` sets `asyncio_mode = auto` — async tests need no decorator.
 - `tests/conftest.py` sets env vars **before** anything imports the app, and

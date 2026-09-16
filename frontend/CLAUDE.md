@@ -80,7 +80,19 @@ These are product requirements, not styling choices:
 
 ---
 
-## 4. Conventions
+## 4. Settings page
+
+- The access token field is **write-only**. The API returns a mask, never the
+  token, so an empty field means "keep what is stored" — not "clear it".
+  Clearing is an explicit `clearAccessToken` flag.
+- The expiry countdown ticks locally off the absolute `expiresAt` the API
+  returns, rather than re-fetching every second.
+- Credentials are only required when the synthetic toggle is off; the Save
+  button's enabled state encodes that rule, and the server enforces it again.
+- Show where each value came from (`saved here` / `from .env`). Silently
+  preferring one source over the other is how configuration becomes a mystery.
+
+## 5. Conventions
 
 - API access goes through `src/api/` (`client.js` wraps fetch and raises
   `ApiError` with a status; a 401 drops the user to login). No bare `fetch` in a

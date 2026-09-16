@@ -25,6 +25,7 @@ source.
 | **Order history** | Every state transition timestamped to the millisecond, with fills and a complete charges breakdown |
 | **P&L reports** | Realised and unrealised, by day / expiry / strike, gross vs net, charges by component, equity curve, CSV export |
 | **Trade notes** | Free-text notes on completed trades — searchable, editable, visible from history and reports |
+| **Settings** | Dhan credentials and feed mode editable in the UI, with a token validator and a live expiry countdown |
 
 ---
 
@@ -69,16 +70,50 @@ one origin and the session cookie works on the WebSocket handshake.
 All live in `.env` at the project root. `conf/default-config.yaml` reads them via
 `${VAR}` substitution — put secrets here, not in the YAML.
 
+**The three `DHAN_*` variables are only a fallback.** Anything saved on the
+Settings page is stored in the database and takes priority — see *Settings* below.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `APP_USERNAME` | `trader` | The single login username. There is no user table. |
 | `APP_PASSWORD` | *(none)* | The single login password. **Login is rejected until this is set.** |
 | `APP_JWT_SECRET` | *(none)* | Signs the session cookie. If blank, a random key is generated per process and **every restart logs you out**. Generate one with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. |
+| `APP_ENCRYPTION_KEY` | *(none)* | Encrypts the Dhan access token at rest. Falls back to `APP_JWT_SECRET`; if both are blank the app refuses to store a token. Prefer setting it, so rotating the session secret does not destroy the stored token. |
 | `DHAN_CLIENT_ID` | *(none)* | Dhan client id — market data only. |
 | `DHAN_ACCESS_TOKEN` | *(none)* | Dhan access token (JWT) — market data only. |
 | `DHAN_SYNTHETIC_FEED` | `true` | **`true` generates fake prices locally.** Set to `false` for real MCX data. See below. |
 | `DATABASE_URL` | SQLite file | Connection URL. See *Switching to MySQL*. |
 | `LOG_LEVEL` | `INFO` | Logging level. |
+
+## Settings page
+
+Dhan credentials and the feed mode can be set in the UI at **Settings**, which
+avoids editing `.env` and restarting for a token that expires daily.
+
+**Precedence: database (UI) over `.env`.** Stored settings are overlaid onto the
+in-memory config at startup and after each save, so every existing config reader
+picks them up. The page shows where each value came from (`saved here` /
+`from .env` / `not set`).
+
+- **Client ID** — stored as plain text.
+- **Access token** — encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256,
+  random IV), the key derived by HKDF-SHA256 from `APP_ENCRYPTION_KEY` (or
+  `APP_JWT_SECRET`). It is **never returned to the browser** — responses carry
+  only a mask and decoded metadata. Leave the field blank to keep the stored
+  token when changing something else.
+- **Synthetic feed** — the toggle. While it is on, both credentials are
+  optional; turning it off requires them.
+- **Validate token** — issues one real market-data request (the option chain
+  expiry list, already on the market-data allowlist) to confirm the credentials
+  work, without saving them. Expired tokens and a client ID that disagrees with
+  the token's own `dhanClientId` claim are caught locally first, with no network
+  call.
+- **Expiry countdown** — Dhan access tokens are JWTs, so the real `exp` claim is
+  decoded and counted down live, with warnings under two hours and on expiry.
+  No guessing "24 hours from whenever it was pasted".
+
+Saving restarts the market feed in place so changes take effect immediately;
+connected browser tabs keep their WebSocket.
 
 ### The synthetic feed
 

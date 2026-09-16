@@ -142,6 +142,7 @@ from src.orders import orders_main_router  # noqa: E402
 from src.notes import notes_main_router  # noqa: E402
 from src.positions import positions_main_router  # noqa: E402
 from src.reports import reports_main_router  # noqa: E402
+from src.settings import settings_main_router  # noqa: E402
 from src.market import market_main_router, market_ws_router  # noqa: E402
 
 app.include_router(auth_main_router, prefix="/api")
@@ -152,4 +153,5 @@ app.include_router(orders_main_router, prefix="/api")
 app.include_router(positions_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
+app.include_router(settings_main_router, prefix="/api")
 app.include_router(market_ws_router)   # /ws/market -- not under /api

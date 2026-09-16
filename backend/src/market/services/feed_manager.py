@@ -134,7 +134,7 @@ class FeedManager:
             return
 
         self.broadcaster.set_status_provider(self.status)
-        await self.broadcaster.start()
+        await self.broadcaster.start()   # no-op if already running
         await self.feed.start()
         await self.resync()
         # Separate task on its own cadence; it must never sit on the tick path.
@@ -157,6 +157,42 @@ class FeedManager:
             await self.feed.stop()
         await self.broadcaster.stop()
         self._started = False
+
+    async def reconfigure(self) -> Dict[str, Any]:
+        """Rebuild the feed after a settings change, keeping browser clients.
+
+        The broadcaster and its registered WebSocket clients are deliberately
+        NOT recreated -- replacing the FeedManager wholesale would silently
+        strand every open browser tab on a dead broadcaster. Only the upstream
+        client, the book and the greeks poller are torn down and rebuilt.
+        """
+        logger.info("Reconfiguring the market feed after a settings change")
+
+        if self._resync_task is not None and not self._resync_task.done():
+            self._resync_task.cancel()
+            try:
+                await self._resync_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._resync_task = None
+
+        await self.greeks_poller.stop()
+        if self.feed is not None:
+            await self.feed.stop()
+            self.feed = None
+
+        # Prices from the previous mode must not linger: a synthetic price left
+        # in the book after switching to live data would be indistinguishable
+        # from a real one.
+        self.book.clear()
+        self._window_centre = None
+        self._strike_step = None
+        self.last_error = None
+        self._started = False
+        self._stopping = False
+
+        await self.start()
+        return self.status()
 
     def _on_state_change(self, state: ConnectionState, detail: Optional[str]) -> None:
         # Fire and forget: the feed's state callback must never await.

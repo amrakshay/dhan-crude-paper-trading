@@ -53,6 +53,14 @@ class OptionChainRateLimited(OptionChainError):
     pass
 
 
+def configured_credentials_present() -> bool:
+    """Whether the live config carries a usable Dhan credential pair."""
+    return bool(
+        config_utils.get_property_value("dhan.client_id", "")
+        and config_utils.get_property_value("dhan.access_token", "")
+    )
+
+
 @dataclass
 class OptionLeg:
     """One side (CE or PE) of one strike, as returned by the chain endpoint."""
@@ -169,7 +177,19 @@ def parse_option_chain(payload: Dict[str, Any], expiry: Optional[str] = None) ->
 class DhanOptionChainClient:
     """Read-only client for the two option chain endpoints."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        client_id: Optional[str] = None,
+        access_token: Optional[str] = None,
+    ) -> None:
+        """Optionally pin explicit credentials.
+
+        Used by the Settings page to validate a token the operator has typed
+        but not yet saved. When omitted, the configured credentials are read
+        from the live config as usual.
+        """
+        self._client_id_override = client_id
+        self._access_token_override = access_token
         self._last_request_at: Dict[Tuple[int, str], float] = {}
         self._locks: Dict[Tuple[int, str], asyncio.Lock] = {}
         self.request_count = 0
@@ -185,21 +205,27 @@ class DhanOptionChainClient:
     def _timeout() -> int:
         return config_utils.get_property_value_int("dhan.http_timeout_seconds", 30)
 
-    @staticmethod
-    def _headers() -> Dict[str, str]:
+    def _credentials(self) -> Tuple[str, str]:
+        client_id = self._client_id_override or (
+            config_utils.get_property_value("dhan.client_id", "") or ""
+        )
+        access_token = self._access_token_override or (
+            config_utils.get_property_value("dhan.access_token", "") or ""
+        )
+        return client_id, access_token
+
+    def _headers(self) -> Dict[str, str]:
+        client_id, access_token = self._credentials()
         return {
-            "access-token": config_utils.get_property_value("dhan.access_token", "") or "",
-            "client-id": config_utils.get_property_value("dhan.client_id", "") or "",
+            "access-token": access_token,
+            "client-id": client_id,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
 
-    @staticmethod
-    def has_credentials() -> bool:
-        return bool(
-            config_utils.get_property_value("dhan.client_id", "")
-            and config_utils.get_property_value("dhan.access_token", "")
-        )
+    def has_credentials(self) -> bool:
+        client_id, access_token = self._credentials()
+        return bool(client_id and access_token)
 
     # --- rate limiting -----------------------------------------------------
     def _lock_for(self, key: Tuple[int, str]) -> asyncio.Lock:

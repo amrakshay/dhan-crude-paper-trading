@@ -11,6 +11,7 @@ from src.orders.database.db_models.order_model import (  # noqa: F401
     OrderFill,
 )
 from src.positions.database.db_models.position_model import Position  # noqa: F401
+from src.settings.database.db_models.app_setting_model import AppSetting  # noqa: F401
 
 __all__ = [
     "Instrument",
@@ -20,4 +21,5 @@ __all__ = [
     "OrderCharge",
     "Position",
     "TradeNote",
+    "AppSetting",
 ]

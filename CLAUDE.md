@@ -112,6 +112,17 @@ fills more generous without being asked.
 
 **Money is `Decimal`, never `float`.** Timestamps are stored naive-UTC.
 
+**Settings from the UI beat `.env`.** `SettingsService.apply_to_config()` overlays
+stored settings onto the in-memory config at startup (before the feed starts)
+and after every save. Do not read `DHAN_*` from `os.environ` directly — go
+through `config_utils`, or you will see the `.env` fallback instead of what the
+operator actually configured.
+
+**The Dhan access token is encrypted at rest and never leaves the server.**
+Responses carry a mask and decoded JWT metadata only. If you add a settings
+field, decide explicitly whether it is a secret; secrets go in
+`encrypted_value`, never `value`.
+
 ---
 
 ## 5. Data quirks that will bite you
