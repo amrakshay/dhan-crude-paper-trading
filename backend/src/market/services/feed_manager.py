@@ -118,9 +118,19 @@ class FeedManager:
         if self._synthetic_enabled():
             self.is_synthetic = True
             self.feed = SyntheticFeed(self.book, on_state_change=self._on_state_change)
+            logger.info(
+                "Starting the SYNTHETIC feed -- prices are generated locally and "
+                "are not market data (market_feed.synthetic_feed=true)"
+            )
         elif DhanFeedClient.has_credentials():
             self.is_synthetic = False
             self.feed = DhanFeedClient(self.book, on_state_change=self._on_state_change)
+            logger.info(
+                "Starting the live Dhan feed: mode=%s strike_window=%s expiries=%s",
+                config_utils.get_property_value("market_feed.mode", "FULL"),
+                self._strike_window(),
+                self._expiry_count(),
+            )
         else:
             # Never silently invent prices. If the operator wanted fake data
             # they would have set the flag.
@@ -141,8 +151,15 @@ class FeedManager:
         await self.greeks_poller.start(is_synthetic=self.is_synthetic)
 
         self._resync_task = asyncio.create_task(self._resync_loop(), name="feed-resync")
+        logger.info(
+            "Market feed started: synthetic=%s instruments=%s near_future=%s",
+            self.is_synthetic,
+            self.feed.subscribed_count,
+            self.near_future_security_id,
+        )
 
     async def stop(self) -> None:
+        logger.info("Stopping the market feed")
         self._stopping = True
         if self._resync_task is not None and not self._resync_task.done():
             self._resync_task.cancel()
@@ -157,6 +174,7 @@ class FeedManager:
             await self.feed.stop()
         await self.broadcaster.stop()
         self._started = False
+        logger.info("Market feed stopped")
 
     async def reconfigure(self) -> Dict[str, Any]:
         """Rebuild the feed after a settings change, keeping browser clients.
@@ -195,6 +213,8 @@ class FeedManager:
         return self.status()
 
     def _on_state_change(self, state: ConnectionState, detail: Optional[str]) -> None:
+        # The feed client logs the transition itself in _set_state; this only
+        # has to push it out to the browsers.
         # Fire and forget: the feed's state callback must never await.
         try:
             asyncio.get_running_loop().create_task(
@@ -256,7 +276,16 @@ class FeedManager:
 
                 if spot is not None:
                     self._window_centre = chain_service.resolve_atm_strike(strikes, spot)
+                logger.debug(
+                    "Resolved %s contracts for expiry %s (strikes=%s step=%s spot=%s)",
+                    len(contracts), expiry, len(strikes), self._strike_step, spot,
+                )
 
+        logger.debug(
+            "Subscription target set: %s contracts across %s expiries "
+            "(future=%s spot=%s window=+/-%s)",
+            len(targets), len(expiries), self.near_future_security_id, spot, window,
+        )
         return targets, meta
 
     @staticmethod
@@ -280,6 +309,10 @@ class FeedManager:
 
         targets, meta = await self._resolve_targets()
         if not targets:
+            logger.warning(
+                "Feed resync found no instruments to subscribe to; the book will "
+                "stay empty until the instrument master is refreshed"
+            )
             return {"subscribed": 0, "unsubscribed": 0, "reason": "no instruments available"}
 
         self._contract_meta = meta
@@ -297,6 +330,13 @@ class FeedManager:
             for security_id in current
             if security_id not in wanted
         ]
+
+        logger.debug(
+            "Subscription diff: current=%s wanted=%s add=%s remove=%s",
+            len(current), len(wanted),
+            [security_id for _segment, security_id in to_add],
+            [security_id for _segment, security_id in to_remove],
+        )
 
         removed = await self.feed.unsubscribe(to_remove) if to_remove else 0
         added = await self.feed.subscribe(to_add) if to_add else 0

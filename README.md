@@ -83,7 +83,8 @@ Settings page is stored in the database and takes priority — see *Settings* be
 | `DHAN_ACCESS_TOKEN` | *(none)* | Dhan access token (JWT) — market data only. |
 | `DHAN_SYNTHETIC_FEED` | `true` | **`true` generates fake prices locally.** Set to `false` for real MCX data. See below. |
 | `DATABASE_URL` | SQLite file | Connection URL. See *Switching to MySQL*. |
-| `LOG_LEVEL` | `INFO` | Logging level. |
+| `LOG_LEVEL` | `INFO` | Logging level for both the app and access loggers. Overrides `conf/logging-config.ini`. |
+| `LOG_DIR` | `./logs` | Where `app.log` and `access.log` are written (relative to `backend/`). |
 
 ## Settings page
 
@@ -129,6 +130,56 @@ reports an error rather than inventing prices.
 
 To go live: set `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN`, set
 `DHAN_SYNTHETIC_FEED=false`, and restart.
+
+---
+
+## Logging
+
+Two loggers, three handlers: `app.log` and `access.log` under `LOG_DIR`
+(default `backend/logs/`, gitignored), plus stdout. Both files rotate at 10 MB
+with 3 backups.
+
+```
+2026-09-16 19:00:36 [INFO] order_service.py:_apply_fills:353 [dcpt.orders.service] : Order a45372… filled 100 at average 999.4580 across 2 level(s): 42@999.4000(L1), 58@999.5000(L2)
+```
+
+The `filename:funcName:lineno` field is the point of the format — a log line is
+a jump target. Access lines go to `access.log` only:
+
+```
+2026-09-16 19:00:36 - [2f6d4bdc8744] "POST /api/orders" 201 40.695 ms
+```
+
+**Configuration.** `backend/conf/logging-config.ini`, loaded with
+`logging.config.fileConfig` and found via `CONFIG_PATH` like the YAML. Drop a
+`local-logging-config.ini` beside it to replace it wholesale (ini files are not
+deep-mergeable the way the YAML is). Levels from `logging.level` /
+`logging.access_log_level` in `default-config.yaml`, or `LOG_LEVEL`, are
+applied on top of whatever the ini sets.
+
+**Correlation.** Every request gets an id, returned as `X-Request-Id` and
+stamped on its access line; an inbound `X-Request-Id` is honoured. Every
+order-related line carries the `client_order_id`, so `grep <id> app.log`
+reconstructs a fill end to end — the levels walked, the quantity taken at each,
+the slippage, the charges and every status transition.
+
+**`LOG_LEVEL=DEBUG` is meant to be left on.** Measured at **0.27 MB/hour** with
+the synthetic feed, broadcaster, greeks poller and order matcher all running —
+about 37 hours per 10 MB file, 150 hours across the rotation. Nothing logs on
+the tick path (`feed_protocol` → `MarketBook.apply_packet`); tick volume is
+reported instead as aggregate counters on the broadcaster's own 10-second
+interval, alongside an edge-triggered warning when the book goes stale.
+
+**Secrets never reach the log.** Enforced three ways:
+`tests/test_no_secrets_in_logs.py` runs the real login, settings and order
+flows with sentinel credentials and greps the captured output; the same file
+AST-scans every `logger.*()` call in `src/` for secret-named arguments (with
+known-bad and known-good controls, so it cannot pass vacuously); and
+`src/log_redaction.py` scrubs registered secrets out of the formatted line —
+including out of formatted tracebacks — as a last resort.
+
+Migrations log through the same configuration, so `alembic upgrade head` and
+Alembic's own `Running upgrade …` lines land in `app.log`.
 
 ---
 
@@ -240,12 +291,19 @@ since every order carries its own auditable charges row.
 cd backend && .venv/bin/python -m pytest tests/ -q
 ```
 
-279 tests. The most important file is `tests/test_no_real_orders.py` — it parses
-every Python file's AST (comments and docstrings exempt, everything else in
-scope) and fails if any Dhan URL outside the market-data allowlist, any broker
-trading endpoint inside a Dhan client module, any broker order operation, or any
-`dhanhq` import appears. It includes a self-test that feeds the scanner known-bad
-code, so it cannot pass vacuously.
+339 tests. Two of them are safety suites rather than feature tests:
+
+`tests/test_no_real_orders.py` parses every Python file's AST (comments and
+docstrings exempt, everything else in scope) and fails if any Dhan URL outside
+the market-data allowlist, any broker trading endpoint inside a Dhan client
+module, any broker order operation, or any `dhanhq` import appears. It includes
+a self-test that feeds the scanner known-bad code, so it cannot pass vacuously.
+
+`tests/test_no_secrets_in_logs.py` exercises the real login, settings and
+order flows with sentinel credentials and fails if one reaches the log, and
+AST-scans every `logger.*()` call for secret-named arguments. It carries the
+same style of self-test — seven known-bad snippets it must catch and seven
+known-good ones it must not flag.
 
 ---
 
@@ -307,7 +365,9 @@ equity curve possible.
 CLAUDE.md       working notes for Claude Code (safety rules, invariants, gotchas)
 backend/
   CLAUDE.md     backend conventions: layering, async SQLAlchemy traps, charges
-  conf/         default-config.yaml (app) + charges.yaml (rate card)
+  conf/         default-config.yaml (app), charges.yaml (rate card),
+                logging-config.ini (handlers, rotation, format)
+  logs/         app.log + access.log, rotating, gitignored
   alembic/      migrations
   src/
     core/       base repository, pagination, time helpers

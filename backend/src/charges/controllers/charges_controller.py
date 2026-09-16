@@ -31,8 +31,12 @@ class ChargesController:
                 strike_price=request.strike_price,
             )
         except ValueError as exc:
+            logger.warning("Rejected a charges estimate request: %s", exc)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ChargesConfigError as exc:
+            logger.exception(
+                "The charge rate card is unusable -- check conf/charges.yaml"
+            )
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return self._to_response(breakdown)
 
@@ -47,6 +51,7 @@ class ChargesController:
                 lots=request.lots,
             )
         except ValueError as exc:
+            logger.warning("Rejected a charges request: %s", exc)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return self._to_response(breakdown)
 

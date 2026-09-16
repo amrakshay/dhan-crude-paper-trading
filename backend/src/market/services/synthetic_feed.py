@@ -125,7 +125,10 @@ class SyntheticFeed:
             try:
                 self._generate_tick_batch()
             except Exception:
-                logger.exception("Synthetic tick generation failed")
+                logger.exception(
+                    "Synthetic tick generation failed; the synthetic book will "
+                    "stop advancing until this recovers"
+                )
             await asyncio.sleep(interval)
 
     # --- generation --------------------------------------------------------

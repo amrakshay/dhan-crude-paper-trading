@@ -1,7 +1,6 @@
 import asyncio
 import os
 import sys
-from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
@@ -10,14 +9,25 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Deliberately NOT logging.config.fileConfig(alembic.ini): the application's
+# own logging config (conf/logging-config.ini) is used instead, so migration
+# output is written to logs/app.log alongside everything else. Alembic's own
+# `alembic` logger propagates to root, which that ini configures.
+#
+# This must run before importing anything that builds a logger at module scope
+# (src.database.connection does), or `logging.log_dir` is ignored.
+from src.app_utils import load_config_properties  # noqa: E402
+
+load_config_properties()
+
 from src.database.base import Base  # noqa: E402
 from src.database.connection import get_database_url  # noqa: E402
+from src.logging_config import get_logger  # noqa: E402
 import src.database.models  # noqa: E402,F401  (registers every model)
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+logger = get_logger("database.migrations")
 
 target_metadata = Base.metadata
 
@@ -27,6 +37,7 @@ config.set_main_option("sqlalchemy.url", get_database_url().replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
+    logger.info("Generating migration SQL offline (no database connection)")
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
@@ -39,6 +50,11 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    logger.info(
+        "Running migrations against %s (batch mode=%s)",
+        connection.dialect.name,
+        connection.dialect.name == "sqlite",
+    )
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -49,6 +65,7 @@ def do_run_migrations(connection: Connection) -> None:
     )
     with context.begin_transaction():
         context.run_migrations()
+    logger.info("Migrations complete")
 
 
 async def run_async_migrations() -> None:

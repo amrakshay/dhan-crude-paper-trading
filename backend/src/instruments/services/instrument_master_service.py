@@ -207,6 +207,10 @@ class InstrumentMasterService:
 
             os.replace(temp_path, self._cache_path())
         except Exception:
+            logger.exception(
+                "Instrument master download failed after %s bytes from %s",
+                total_bytes, url,
+            )
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
             raise
@@ -343,6 +347,15 @@ class InstrumentMasterService:
                 f"for MCX); used contract_specs.{underlying_symbol}.lot_size="
                 f"{configured_lot_size}"
             )
+            # Expected for MCX today, but load-bearing: if this substitution is
+            # ever wrong, every turnover, charge and P&L figure is wrong with it.
+            logger.warning(
+                "%s of %s %s rows published LOT_SIZE<=1; substituted the "
+                "configured contract_specs.%s.lot_size=%s. Expected for MCX -- "
+                "see CLAUDE.md section 5.",
+                suspicious_lot_sizes, len(rows), underlying_symbol,
+                underlying_symbol, configured_lot_size,
+            )
         if not rows:
             raise InstrumentMasterError(
                 f"No {underlying_symbol} contracts found in the instrument master. "
@@ -388,4 +401,11 @@ class InstrumentMasterService:
             result.rows_matched, result.inserted, result.updated,
             result.unchanged, result.deactivated, result.duration_seconds,
         )
+        logger.debug(
+            "Refresh detail: scanned=%s rows downloaded=%s source=%s expiries=%s",
+            result.rows_scanned, result.downloaded, result.source_path,
+            [expiry.isoformat() for expiry in expiries],
+        )
+        for warning in warnings:
+            logger.warning("Instrument master: %s", warning)
         return result

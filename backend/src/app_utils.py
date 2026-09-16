@@ -31,6 +31,7 @@ def load_config_properties(config_path: Optional[str] = None) -> dict:
     configure_logging(
         level=config_utils.get_property_value("logging.level", "INFO"),
         access_level=config_utils.get_property_value("logging.access_log_level", "INFO"),
+        log_dir=config_utils.get_property_value("logging.log_dir", "./logs"),
     )
     return config
 
@@ -50,4 +51,8 @@ def ensure_data_directories() -> None:
         "dhan.instrument_master_cache_dir", "./data/instrument_master"
     )
     os.makedirs(cache_dir, exist_ok=True)
-    logger.debug("Data directories ready")
+    logger.debug(
+        "Data directories ready: database=%s instrument_master_cache=%s",
+        database_url.split("://", 1)[0] if database_url else "(unset)",
+        os.path.abspath(cache_dir),
+    )

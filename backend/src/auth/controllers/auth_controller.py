@@ -25,14 +25,20 @@ class AuthController:
         try:
             token = AuthService.authenticate(login_data.username, login_data.password)
         except AuthError as exc:
-            logger.warning("Failed login attempt for username=%r", login_data.username)
+            # The attempted username is logged; the password never is.
+            logger.warning(
+                "Failed login attempt for username=%r: %s", login_data.username, exc
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
             ) from exc
 
         self._set_cookie(response, token)
         expiry = AuthService.token_expiry(token)
-        logger.info("Login succeeded for %s", login_data.username)
+        logger.info(
+            "Login succeeded for %s; session valid for %sh",
+            login_data.username, AuthService.session_hours(),
+        )
         return SessionResponse(
             username=login_data.username,
             expires_at=expiry.isoformat() if expiry else None,
@@ -40,6 +46,7 @@ class AuthController:
 
     def logout(self, response: Response) -> LogoutResponse:
         response.delete_cookie(key=AuthService.cookie_name(), path="/")
+        logger.info("Session cookie cleared on logout")
         return LogoutResponse()
 
     def current_session(self, username: str, token: str) -> SessionResponse:

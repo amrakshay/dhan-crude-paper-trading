@@ -48,12 +48,13 @@ async def get_snapshot(
 
 
 @market_router.post("/resync", response_model=ResyncResponse)
-async def resync_subscriptions(_: str = Depends(require_session)) -> ResyncResponse:
+async def resync_subscriptions(user: str = Depends(require_session)) -> ResyncResponse:
     """Recompute the ATM window and reconcile upstream subscriptions.
 
     Called automatically after an instrument-master refresh and whenever the
     underlying drifts; exposed so it can be forced by hand.
     """
+    logger.info("Manual feed resync requested by %s", user)
     return ResyncResponse(**await get_feed_manager().resync())
 
 
@@ -72,11 +73,16 @@ async def market_websocket(websocket: WebSocket, token: Optional[str] = Query(No
     """
     candidate = websocket.cookies.get(AuthService.cookie_name()) or token
     if not candidate:
+        logger.warning(
+            "Rejected an unauthenticated WebSocket handshake from %s",
+            websocket.client.host if websocket.client else "unknown",
+        )
         await websocket.close(code=4401, reason="Not authenticated")
         return
     try:
         AuthService.decode_token(candidate)
     except AuthError as exc:
+        logger.warning("Rejected a WebSocket handshake: %s", exc)
         await websocket.close(code=4401, reason=str(exc))
         return
 
@@ -97,9 +103,16 @@ async def market_websocket(websocket: WebSocket, token: Optional[str] = Query(No
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:
+                logger.debug(
+                    "Client %s sent a non-JSON frame (%s bytes); ignored",
+                    client.client_id, len(raw),
+                )
                 continue
 
             action = message.get("action")
+            logger.debug(
+                "Client %s sent action=%s", client.client_id, action or "(none)"
+            )
             if action == "configure":
                 client.configure(
                     message.get("securityIds"),

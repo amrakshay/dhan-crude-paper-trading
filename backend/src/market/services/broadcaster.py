@@ -12,6 +12,7 @@ once, at its latest state.
 """
 import asyncio
 import json
+import logging
 from typing import Any, Dict, List, Optional, Set
 
 from src import config_utils
@@ -19,6 +20,11 @@ from src.logging_config import get_logger
 from src.market.services.market_book import MarketBook, now_ms
 
 logger = get_logger("market.broadcaster")
+
+# Tick visibility without logging on the tick path: the broadcaster already
+# wakes on a fixed interval, so aggregate counters are emitted from there
+# every SUMMARY_INTERVAL_SECONDS instead of one line per packet.
+SUMMARY_INTERVAL_SECONDS = 10.0
 
 
 class ClientConnection:
@@ -47,6 +53,12 @@ class ClientConnection:
         self.security_ids = {str(value) for value in security_ids} if security_ids else None
         self.include_depth = include_depth
         self.needs_snapshot = True
+        logger.debug(
+            "Client %s configured: securityIds=%s includeDepth=%s (snapshot queued)",
+            self.client_id,
+            "all" if self.security_ids is None else sorted(self.security_ids),
+            include_depth,
+        )
 
 
 class Broadcaster:
@@ -58,6 +70,9 @@ class Broadcaster:
         self._status_provider = None
         self.broadcasts = 0
         self.rows_sent = 0
+        self._last_summary_ms = 0
+        self._summary_baseline = (0, 0)
+        self._stale_warned = False
 
     def set_status_provider(self, provider) -> None:
         """Callable returning the feed status dict pushed alongside updates."""
@@ -90,24 +105,97 @@ class Broadcaster:
 
     async def _run(self) -> None:
         interval = self._interval_seconds()
+        logger.info(
+            "Broadcaster started (flushing every %.0f ms, max client queue %s)",
+            interval * 1000, self._max_queue(),
+        )
         while not self._stopping:
             await asyncio.sleep(interval)
             try:
                 self._flush()
+                self._check_staleness()
+                self._log_summary()
             except Exception:
                 logger.exception("Broadcast flush failed")
+
+    def _check_staleness(self) -> None:
+        """Warn once when the book stops ticking, and once when it recovers.
+
+        A stale book that still looks live is the worst failure this tool can
+        have, so it is stated in the log as well as in the UI. Edge-triggered:
+        a quiet market must not produce a line every 100 ms.
+        """
+        threshold_ms = config_utils.get_property_value_float(
+            "market_feed.stale_tick_warn_seconds", 10.0
+        ) * 1000
+        age_ms = self.book.last_tick_age_ms()
+
+        if age_ms is None or age_ms <= threshold_ms:
+            if self._stale_warned:
+                logger.info(
+                    "Market book is ticking again after %s ms of silence",
+                    age_ms if age_ms is not None else "?",
+                )
+                self._stale_warned = False
+            return
+
+        if not self._stale_warned:
+            self._stale_warned = True
+            status = self._status_provider() if self._status_provider else {}
+            market = (status or {}).get("market") or {}
+            logger.warning(
+                "Market book is stale: no tick for %.1fs (threshold %.1fs). "
+                "MCX open=%s, feed state=%s. Prices on screen are not current.",
+                age_ms / 1000, threshold_ms / 1000,
+                market.get("isOpen"),
+                ((status or {}).get("feed") or {}).get("state"),
+            )
+
+    def _log_summary(self) -> None:
+        """Aggregate throughput counters, at most one line per interval.
+
+        This is the only place tick volume is logged. The tick path itself
+        (feed_protocol -> MarketBook.apply_packet) must stay free of logging --
+        see CLAUDE.md section 4.
+        """
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+        now = now_ms()
+        if now - self._last_summary_ms < SUMMARY_INTERVAL_SECONDS * 1000:
+            return
+        elapsed = (now - self._last_summary_ms) / 1000 if self._last_summary_ms else 0
+        previous_broadcasts, previous_rows = self._summary_baseline
+        self._last_summary_ms = now
+        self._summary_baseline = (self.broadcasts, self.rows_sent)
+        if elapsed <= 0:
+            return
+        logger.debug(
+            "Fanout in the last %.0fs: %s flushes, %s rows to %s client(s) "
+            "(%.1f rows/s); book holds %s instruments",
+            elapsed,
+            self.broadcasts - previous_broadcasts,
+            self.rows_sent - previous_rows,
+            len(self._clients),
+            (self.rows_sent - previous_rows) / elapsed,
+            self.book.stats().get("instruments", "?"),
+        )
 
     # --- clients -----------------------------------------------------------
     def register(self, websocket, client_id: str) -> ClientConnection:
         client = ClientConnection(websocket, client_id, self._max_queue())
         self._clients.add(client)
+        logger.debug(
+            "Registered client %s with a %s-message queue", client_id, self._max_queue()
+        )
         logger.info("Browser client %s connected (%s total)", client_id, len(self._clients))
         return client
 
     def unregister(self, client: ClientConnection) -> None:
         self._clients.discard(client)
         logger.info(
-            "Browser client %s disconnected (%s remaining)", client.client_id, len(self._clients)
+            "Browser client %s disconnected (%s remaining, %s resync(s) during "
+            "its session)",
+            client.client_id, len(self._clients), client.dropped,
         )
 
     @property
@@ -194,6 +282,10 @@ class Broadcaster:
                 client.queue.put_nowait(payload)
             except asyncio.QueueFull:
                 client.needs_snapshot = True
+                logger.debug(
+                    "Client %s queue full while pushing status; snapshot queued",
+                    client.client_id,
+                )
 
     def stats(self) -> Dict[str, Any]:
         return {

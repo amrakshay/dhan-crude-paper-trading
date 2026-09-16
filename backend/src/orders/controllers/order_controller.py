@@ -46,6 +46,11 @@ class OrderController:
                 is_close_order=request.is_close_order,
             )
         except OrderValidationError as exc:
+            logger.warning(
+                "Rejected an order request for security_id=%s (%s %s %s lot(s)): %s",
+                request.security_id, request.side, request.order_type,
+                request.lots, exc,
+            )
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # The session is configured with expire_on_commit=False, so a re-fetch
@@ -72,6 +77,10 @@ class OrderController:
                 limit_price=request.limit_price,
             )
         except OrderValidationError as exc:
+            logger.debug(
+                "Order preview rejected for security_id=%s: %s",
+                request.security_id, exc,
+            )
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         instrument = preview["instrument"]
@@ -106,6 +115,7 @@ class OrderController:
         try:
             order = await self.service.cancel_paper_order(order_id)
         except OrderValidationError as exc:
+            logger.warning("Cannot cancel order %s: %s", order_id, exc)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         order_id = order.id
         await self.session.commit()

@@ -7,7 +7,9 @@ tests/test_no_real_orders.py, which fails the build if an order-placement path
 ever appears in this codebase.
 """
 import json
+import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -15,14 +17,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src import config_utils
-from src.app_utils import ensure_data_directories, load_config_properties
-from src.core.singleton_utils import clear_singletons
-from src.database.connection import close_database_connection
-from src.logging_config import get_access_logger, get_logger
+# Bootstrap FIRST, before importing anything that builds a logger at module
+# scope (src.database.connection does). configure_logging() is one-shot: if a
+# logger is created before the config is loaded, logging is set up with its
+# defaults and `logging.log_dir` is silently ignored.
+from src.app_utils import ensure_data_directories, load_config_properties  # noqa: E402
 
 load_config_properties()
 ensure_data_directories()
+
+from src import config_utils  # noqa: E402
+from src.core.singleton_utils import clear_singletons  # noqa: E402
+from src.database.connection import close_database_connection  # noqa: E402
+from src.logging_config import get_access_logger, get_logger  # noqa: E402
 
 logger = get_logger("main")
 access_logger = get_access_logger()
@@ -30,7 +37,13 @@ access_logger = get_access_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Crude paper-trading backend starting up")
+    logger.info(
+        "Crude paper-trading backend starting up (config=%s, logs=%s)",
+        config_utils.get_config_path(),
+        os.path.abspath(
+            config_utils.get_property_value("logging.log_dir", "./logs")
+        ),
+    )
 
     from src.auth.services.auth_service import AuthService
 
@@ -58,6 +71,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Order matcher failed to start; resting limits will not fill")
 
+    logger.info("Startup complete; the API is accepting requests")
+
     yield
 
     logger.info("Crude paper-trading backend shutting down")
@@ -66,8 +81,9 @@ async def lifespan(app: FastAPI):
         await shutdown_feed_manager()
         clear_singletons()
         await close_database_connection()
-    except Exception as exc:  # pragma: no cover - shutdown best effort
-        logger.error("Error during shutdown: %s", exc)
+        logger.info("Shutdown complete")
+    except Exception:  # pragma: no cover - shutdown best effort
+        logger.exception("Error during shutdown")
 
 
 app = FastAPI(
@@ -94,22 +110,51 @@ app.add_middleware(
 
 
 class LogRequestsMiddleware(BaseHTTPMiddleware):
-    """Access log, skipping health probes and the docs."""
+    """Access log, skipping health probes and the docs.
+
+    Every request gets a short id, echoed back as `X-Request-Id` and stamped on
+    the access line, so a browser complaint can be tied to a specific server
+    line. An inbound `X-Request-Id` is honoured if the caller supplies one.
+    """
 
     IGNORED_PATHS = {"/", "/api/healthcheck/status", "/api/docs", "/api/openapi.json"}
 
+    # A request slower than this is worth knowing about: nothing here should
+    # take seconds.
+    SLOW_REQUEST_MS = 1000.0
+
     async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
+        request.state.request_id = request_id
+
         started = time.perf_counter()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            logger.exception(
+                "[%s] Unhandled error serving %s %s after %.1f ms",
+                request_id, request.method, request.url.path, elapsed_ms,
+            )
+            raise
+        response.headers["X-Request-Id"] = request_id
+
         if request.url.path not in self.IGNORED_PATHS:
             elapsed_ms = (time.perf_counter() - started) * 1000
             access_logger.info(
-                '"%s %s" %s %.3f ms',
+                '[%s] "%s %s" %s %.3f ms',
+                request_id,
                 request.method,
                 request.url.path,
                 response.status_code,
                 elapsed_ms,
             )
+            if elapsed_ms > self.SLOW_REQUEST_MS:
+                logger.warning(
+                    "[%s] Slow request: %s %s took %.0f ms (status %s)",
+                    request_id, request.method, request.url.path,
+                    elapsed_ms, response.status_code,
+                )
         return response
 
 
@@ -118,6 +163,7 @@ app.add_middleware(LogRequestsMiddleware)
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc) -> JSONResponse:
+    logger.debug("404 for %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=404,
         content={"success": False, "message": "Path not found", "path": request.url.path},

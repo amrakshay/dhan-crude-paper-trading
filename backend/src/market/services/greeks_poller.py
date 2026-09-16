@@ -138,16 +138,28 @@ class GreeksPoller:
             merged = 0
             for expiry, result in zip(expiries, results):
                 if isinstance(result, OptionChainRateLimited):
-                    logger.warning("Rate limited polling %s; will retry", expiry)
+                    logger.warning(
+                        "Rate limited polling greeks for expiry %s (Dhan allows "
+                        "one request per %.1fs per underlying+expiry); will retry",
+                        expiry, self._interval(),
+                    )
                 elif isinstance(result, Exception):
                     self.last_error = str(result)
-                    logger.error("Greeks poll for %s failed: %s", expiry, result)
+                    logger.error(
+                        "Greeks poll for expiry %s failed: %s: %s",
+                        expiry, type(result).__name__, result,
+                    )
                 else:
                     merged += result
 
         self.poll_count += 1
         self.last_poll_ms = now_ms()
         self.legs_merged += merged
+        logger.debug(
+            "Greeks poll #%s merged %s leg(s) across expiries %s (synthetic=%s)",
+            self.poll_count, merged,
+            [expiry.isoformat() for expiry in expiries], self.is_synthetic,
+        )
         return merged
 
     async def _poll_expiry(self, expiry: date) -> int:
@@ -185,6 +197,10 @@ class GreeksPoller:
             merged += 1
 
         self.last_error = None
+        logger.debug(
+            "Greeks for expiry %s: merged %s leg(s), underlying last price %s",
+            expiry, merged, snapshot.underlying_last_price,
+        )
         return merged
 
     # --- synthetic ---------------------------------------------------------

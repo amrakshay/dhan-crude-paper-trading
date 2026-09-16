@@ -32,6 +32,12 @@ class ReportController:
         placed_to: Optional[datetime] = None,
     ) -> PnlReportResponse:
         report = await self.service.build_report(security_id, placed_from, placed_to)
+        logger.debug(
+            "Built P&L report (security=%s, from=%s, to=%s): realised gross %s, "
+            "charges %s, net %s",
+            security_id or "all", placed_from, placed_to,
+            report.realised_gross, report.total_charges, report.realised_net,
+        )
 
         return PnlReportResponse(
             realisedGross=report.realised_gross,
@@ -73,6 +79,10 @@ class ReportController:
         placed_to: Optional[datetime] = None,
     ) -> str:
         report = await self.service.build_report(security_id, placed_from, placed_to)
+        logger.info(
+            "Exporting realisations CSV (security=%s, from=%s, to=%s)",
+            security_id or "all", placed_from, placed_to,
+        )
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -108,6 +118,10 @@ class ReportController:
         placed_to: Optional[datetime] = None,
     ) -> str:
         """Every order with its full charges breakdown, one row each."""
+        logger.info(
+            "Exporting orders CSV (security=%s, from=%s, to=%s)",
+            security_id or "all", placed_from, placed_to,
+        )
         repository = OrderRepository(self.session)
         orders, _total = await repository.list_orders(
             security_id=security_id,

@@ -182,7 +182,39 @@ by-expiry / by-strike slices and the equity curve possible at all.
   are not stranded on a dead one. Do not replace the FeedManager singleton to
   apply settings.
 
-## 8. Tests
+## 8. Logging
+
+`src/logging_config.py` is the only public API: `get_logger("<feature>.<area>")`
+and `get_access_logger()`. Never call `logging.getLogger` directly and never add
+a handler at a call site.
+
+- Config is `conf/logging-config.ini` (or `local-logging-config.ini` beside it),
+  loaded with `fileConfig` and found via `CONFIG_PATH`. Levels from
+  `logging.level` / `logging.access_log_level` / `LOG_LEVEL` are applied on top.
+- **Bootstrap order matters.** `configure_logging()` is one-shot. Anything that
+  builds a logger at module scope before `load_config_properties()` runs pins
+  logging to its defaults and silently ignores `logging.log_dir`. `main.py` and
+  `alembic/env.py` therefore call `load_config_properties()` *above* their other
+  `src.*` imports. Keep it that way.
+- **Never log on the tick path** (`feed_protocol`, `MarketBook.apply_packet`).
+  Tick volume is reported as aggregate counters from `Broadcaster._log_summary`
+  on the broadcaster's own interval. `market_book.py` deliberately has no log
+  calls at all.
+- **Never log a secret.** `tests/test_no_secrets_in_logs.py` fails the build on
+  one, both at runtime and by AST-scanning every `logger.*()` call for
+  secret-named arguments. Wrap a secret in `crypto_service.mask()`, `bool()` or
+  `len()` if it must appear at all. `src/log_redaction.register_secret()` adds a
+  value to the scrubber for anything discovered at runtime (the Dhan token from
+  the Settings page is registered this way).
+- **Correlate.** Order lines carry the `client_order_id`; the fill simulator
+  takes a `context=` tag for the same purpose. Request lines carry the request
+  id from `LogRequestsMiddleware`.
+- DEBUG must stay cheap enough to leave on: measured at 0.27 MB/hour with the
+  whole stack running. Log decisions and inputs, not loops.
+
+---
+
+## 9. Tests
 
 - `pytest.ini` sets `asyncio_mode = auto` — async tests need no decorator.
 - `tests/conftest.py` sets env vars **before** anything imports the app, and

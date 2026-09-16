@@ -65,8 +65,10 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (282 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (339 tests)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
+.venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
+LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
 CONFIG_PATH=conf .venv/bin/alembic upgrade head            # migrate
 CONFIG_PATH=conf .venv/bin/python server.py                # serve on :8000
 

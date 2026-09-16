@@ -19,8 +19,14 @@ server:
     - "http://127.0.0.1:5173"
 
 logging:
-  level: "INFO"
-  access_log_level: "INFO"
+  # Levels here (and LOG_LEVEL in the environment) override whatever
+  # conf/logging-config.ini sets. LOG_LEVEL wins only when these are blank.
+  level: "${LOG_LEVEL:INFO}"
+  access_log_level: "${LOG_LEVEL:INFO}"
+  # Where app.log and access.log are written. Handler class, rotation size and
+  # backup count live in conf/logging-config.ini; drop a
+  # local-logging-config.ini beside it to replace that wholesale.
+  log_dir: "${LOG_DIR:./logs}"
 
 database:
   # SQLite by default. To use MySQL, replace this one line, e.g.

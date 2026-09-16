@@ -80,6 +80,8 @@ class AuthService:
         username_ok = hmac.compare_digest(username, cls._configured_username())
         password_ok = hmac.compare_digest(password, expected_password)
         if not (username_ok and password_ok):
+            # Logged once, by the controller -- it has the request context and
+            # is the layer that turns this into a 401.
             raise AuthError("Invalid username or password")
 
         return cls.issue_token(username)
@@ -100,8 +102,10 @@ class AuthService:
         try:
             return jwt.decode(token, cls.jwt_secret(), algorithms=[cls.algorithm()])
         except jwt.ExpiredSignatureError as exc:
+            logger.debug("Rejected an expired session token")
             raise AuthError("Session expired") from exc
         except jwt.InvalidTokenError as exc:
+            logger.debug("Rejected an invalid session token: %s", exc)
             raise AuthError("Invalid session") from exc
 
     @classmethod

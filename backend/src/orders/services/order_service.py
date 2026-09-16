@@ -118,6 +118,13 @@ class OrderService:
         side = str(side).upper()
         order_type = str(order_type).upper()
 
+        logger.debug(
+            "Paper order requested: security_id=%s side=%s type=%s lots=%s "
+            "limit=%s close=%s quantity_override=%s",
+            security_id, side, order_type, lots, limit_price, is_close_order,
+            quantity_override,
+        )
+
         instrument = await self.instruments.get_by_security_id(str(security_id))
         if instrument is None:
             raise OrderValidationError(
@@ -181,6 +188,12 @@ class OrderService:
             message=f"{side} {lots} lot(s) {order_type}",
         )
 
+        logger.info(
+            "Paper order %s placed: %s %s %s lot(s) of %s (qty %s, limit %s)",
+            order.client_order_id, side, order_type, lots,
+            instrument.trading_symbol, quantity, limit_price,
+        )
+
         await self._attempt_initial_fill(order, instrument)
         return order
 
@@ -202,6 +215,13 @@ class OrderService:
         depth = row.get("depth") if row else None
         tick = Decimal(str(instrument.tick_size or "0.1"))
 
+        if row is None:
+            logger.warning(
+                "Order %s: no book row for security_id %s (%s) -- the feed has "
+                "not delivered a tick for it, so there is nothing to fill against",
+                order.client_order_id, order.security_id, order.trading_symbol,
+            )
+
         if order.order_type == OrderType.MARKET.value:
             result = fill_simulator.simulate_marketable_fill(
                 side=order.side,
@@ -212,6 +232,7 @@ class OrderService:
                 allow_partial=(
                     self._allow_partial() and not self._reject_market_on_thin_book()
                 ),
+                context=order.client_order_id,
             )
             if not result.is_filled:
                 await self._reject(
@@ -242,6 +263,7 @@ class OrderService:
                 slippage_ticks=self._slippage_ticks(),
                 limit_price=order.limit_price,
                 allow_partial=self._allow_partial(),
+                context=order.client_order_id,
             )
             if result.is_filled:
                 await self._apply_fills(order, result)
@@ -255,6 +277,10 @@ class OrderService:
                 return
 
         # Rests in the book until the market trades through it.
+        logger.info(
+            "Order %s resting at %s (%s %s): not marketable against the current touch",
+            order.client_order_id, order.limit_price, order.side, order.trading_symbol,
+        )
         await self._transition(
             order, OrderStatus.OPEN.value, "RESTING",
             message="Resting until the market crosses the limit price",
@@ -288,6 +314,7 @@ class OrderService:
                 depth=row.get("depth"),
                 tick_size=tick,
                 requires_cross=self._limit_requires_cross(),
+                context=order.client_order_id,
             )
             if not result.is_filled:
                 continue
@@ -323,6 +350,16 @@ class OrderService:
                 message=f"Filled {fill.quantity} at {fill.price} (book level {fill.book_level})",
             )
 
+        logger.info(
+            "Order %s filled %s at average %s across %s level(s): %s",
+            order.client_order_id, result.filled_quantity, result.average_price,
+            len(result.fills),
+            ", ".join(
+                f"{fill.quantity}@{fill.price}(L{fill.book_level})"
+                for fill in result.fills
+            ),
+        )
+
         previous_quantity = int(order.filled_quantity or 0)
         previous_value = Decimal(str(order.average_fill_price or 0)) * previous_quantity
         new_quantity = previous_quantity + result.filled_quantity
@@ -346,6 +383,12 @@ class OrderService:
         )
         total_charges = await self._recompute_charges(order)
         incremental_charges = total_charges - previously_charged
+        logger.debug(
+            "Order %s charges: cumulative %s, previously charged %s, "
+            "this fill accrues %s to the position",
+            order.client_order_id, total_charges, previously_charged,
+            incremental_charges,
+        )
 
         await self.positions.apply_fill(
             security_id=order.security_id,
@@ -422,11 +465,20 @@ class OrderService:
         )
         if complete or terminal_when_incomplete:
             order.completed_at = utc_now()
+        logger.info(
+            "Order %s -> %s (%s of %s at average %s)",
+            order.client_order_id, status, order.filled_quantity, order.quantity,
+            order.average_fill_price,
+        )
 
     async def _transition(
         self, order: Order, status: str, event_type: str, message: Optional[str] = None
     ) -> None:
         now = utc_now()
+        logger.debug(
+            "Order %s transition: %s -> %s (%s) %s",
+            order.client_order_id, order.status, status, event_type, message or "",
+        )
         order.status = status
         order.last_event_at = now
         await self.orders.add_event(
@@ -440,7 +492,11 @@ class OrderService:
         order.rejection_reason = reason[:255]
         order.completed_at = utc_now()
         await self._transition(order, OrderStatus.REJECTED.value, "REJECTED", message=reason)
-        logger.info("Order %s rejected: %s", order.client_order_id, reason)
+        logger.warning(
+            "Order %s REJECTED: %s (%s %s %s lot(s) of %s, security_id=%s, limit=%s)",
+            order.client_order_id, reason, order.side, order.order_type, order.lots,
+            order.trading_symbol, order.security_id, order.limit_price,
+        )
 
     async def cancel_paper_order(self, order_id: int) -> Order:
         order = await self.orders.get_by_id(order_id)
@@ -452,10 +508,16 @@ class OrderService:
             raise OrderValidationError(
                 f"Order {order_id} is already {order.status} and cannot be cancelled"
             )
+        unfilled = int(order.quantity) - int(order.filled_quantity or 0)
         order.completed_at = utc_now()
         await self._transition(
             order, OrderStatus.CANCELLED.value, "CANCELLED",
-            message=f"Cancelled with {int(order.quantity) - int(order.filled_quantity or 0)} unfilled",
+            message=f"Cancelled with {unfilled} unfilled",
+        )
+        logger.info(
+            "Order %s cancelled with %s of %s unfilled (%s %s)",
+            order.client_order_id, unfilled, order.quantity, order.side,
+            order.trading_symbol,
         )
         return order
 

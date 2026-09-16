@@ -397,6 +397,19 @@ class ChargesEngine:
             + gst_amount
         )
 
+        # Unrounded component values, so a disputed total can be traced back to
+        # the exact arithmetic that produced it rather than to the 2dp figures
+        # the API returns.
+        logger.debug(
+            "Charges (%s, turnover=%s, rates=%s, rounding=%s) before rounding: "
+            "brokerage=%s ctt=%s exchange=%s sebi=%s (raw %s) stamp=%s (raw %s) "
+            "gst=%s total=%s",
+            side, turnover, self.version, self.rounding_mode,
+            brokerage.amount, ctt.amount, exchange_charge.amount,
+            sebi_amount, sebi_fee.amount, stamp_amount, stamp_duty.amount,
+            gst_amount, total,
+        )
+
         return ChargeBreakdown(
             turnover=self._round_money(turnover),
             brokerage=self._round_money(brokerage.amount),

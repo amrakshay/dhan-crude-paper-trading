@@ -145,12 +145,17 @@ def simulate_marketable_fill(
     slippage_ticks: int = 0,
     limit_price: Optional[Decimal] = None,
     allow_partial: bool = True,
+    context: str = "",
 ) -> FillResult:
     """Walk the book for an order that is crossing the spread now.
 
     Used for market orders, and for limit orders that are marketable the moment
     they are placed. When `limit_price` is given, levels worse than it are not
     consumed -- that is what makes it a limit rather than a market order.
+
+    `context` is a free-text correlation tag (the client_order_id, for a real
+    order) that is stamped on the DEBUG lines so a fill can be reconstructed
+    from the log alone.
     """
     result = FillResult()
 
@@ -168,6 +173,14 @@ def simulate_marketable_fill(
     is_buy = str(side).upper() == OrderSide.BUY.value
     remaining = quantity
 
+    logger.debug(
+        "[%s] Marketable %s %s: limit=%s tick=%s slippage=%s ticks "
+        "allow_partial=%s against %s level(s) %s",
+        context or "-", side, quantity, limit_price, tick_size, slippage_ticks,
+        allow_partial, len(levels),
+        [(str(price), qty) for price, qty in levels],
+    )
+
     for index, (level_price, level_quantity) in enumerate(levels, start=1):
         if remaining <= 0:
             break
@@ -178,11 +191,24 @@ def simulate_marketable_fill(
             # Slippage may push the effective price through the limit. A real
             # limit order would not fill there, so neither does this one.
             if is_buy and fill_price > limit_price:
+                logger.debug(
+                    "[%s] Stopping at level %s: %s is through the limit %s "
+                    "after slippage", context or "-", index, fill_price, limit_price,
+                )
                 break
             if not is_buy and fill_price < limit_price:
+                logger.debug(
+                    "[%s] Stopping at level %s: %s is through the limit %s "
+                    "after slippage", context or "-", index, fill_price, limit_price,
+                )
                 break
 
         take = min(remaining, level_quantity)
+        logger.debug(
+            "[%s] Level %s: taking %s of %s displayed at %s (book %s, +%s ticks)",
+            context or "-", index, take, level_quantity, fill_price,
+            level_price, slippage_ticks,
+        )
         result.fills.append(
             SimulatedFill(
                 price=fill_price,
@@ -213,7 +239,17 @@ def simulate_marketable_fill(
                 f"Partially filled {quantity - remaining} of {quantity}: the "
                 f"visible book ran out of quantity"
             )
+            logger.warning(
+                "[%s] Thin book: %s %s filled only %s of %s across %s level(s); "
+                "the remaining %s has no displayed liquidity to fill against",
+                context or "-", side, quantity, quantity - remaining, quantity,
+                len(result.fills), remaining,
+            )
 
+    if result.rejection_reason:
+        logger.debug(
+            "[%s] No fill: %s", context or "-", result.rejection_reason
+        )
     return result
 
 
@@ -224,6 +260,7 @@ def try_fill_resting_limit(
     depth: Optional[Sequence[DepthLevel]],
     tick_size: Decimal,
     requires_cross: bool = True,
+    context: str = "",
 ) -> FillResult:
     """Attempt to fill a limit order already resting in the book.
 
@@ -254,6 +291,12 @@ def try_fill_resting_limit(
     is_buy = str(side).upper() == OrderSide.BUY.value
     remaining = remaining_quantity
 
+    logger.debug(
+        "[%s] Resting %s %s at %s: requires_cross=%s against touch %s",
+        context or "-", side, remaining_quantity, limit_price, requires_cross,
+        str(levels[0][0]),
+    )
+
     for index, (level_price, level_quantity) in enumerate(levels, start=1):
         if remaining <= 0:
             break
@@ -263,9 +306,19 @@ def try_fill_resting_limit(
         else:
             crossed = level_price <= limit_price if is_buy else level_price >= limit_price
         if not crossed:
+            logger.debug(
+                "[%s] Level %s at %s does not %s the limit %s -- no fill",
+                context or "-", index, level_price,
+                "cross" if requires_cross else "reach", limit_price,
+            )
             break
 
         take = min(remaining, level_quantity)
+        logger.debug(
+            "[%s] Level %s crossed at %s: taking %s of %s displayed, filling at "
+            "the limit %s", context or "-", index, level_price, take,
+            level_quantity, limit_price,
+        )
         # A resting order fills at its own limit, not at the better price the
         # market traded through: price improvement would need queue priority we
         # cannot observe.
@@ -284,6 +337,11 @@ def try_fill_resting_limit(
         result.note = (
             f"Partially filled {remaining_quantity - remaining} of "
             f"{remaining_quantity} against the quantity displayed through the limit"
+        )
+        logger.warning(
+            "[%s] Thin book: resting %s at %s filled only %s of %s; %s stays open",
+            context or "-", side, limit_price,
+            remaining_quantity - remaining, remaining_quantity, remaining,
         )
     return result
 

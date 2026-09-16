@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 
 import jwt
 
-from src import config_utils
+from src import config_utils, log_redaction
 from src.core.time_utils import UTC
 from src.logging_config import get_logger
 from src.settings.database.db_operations.app_setting_repository import (
@@ -37,6 +37,11 @@ KEY_SYNTHETIC_FEED = "market_feed.synthetic_feed"
 
 MANAGED_KEYS = (KEY_CLIENT_ID, KEY_ACCESS_TOKEN, KEY_SYNTHETIC_FEED)
 SECRET_KEYS = (KEY_ACCESS_TOKEN,)
+
+# Warn when the stored Dhan token has less than this left. Dhan tokens are
+# day-scoped, and a feed that dies mid-session because nobody noticed the
+# expiry is exactly the failure the logs should have predicted.
+TOKEN_EXPIRY_WARN_SECONDS = 2 * 60 * 60
 
 
 class SettingsValidationError(Exception):
@@ -129,8 +134,18 @@ class SettingsService:
                 if plaintext is None:
                     # Unreadable (key rotated). Fall through to .env rather
                     # than pretending the setting is absent AND unusable.
+                    logger.warning(
+                        "Stored setting %s could not be decrypted -- most likely "
+                        "APP_ENCRYPTION_KEY (or APP_JWT_SECRET) changed since it "
+                        "was saved. Falling back to .env; re-enter it on the "
+                        "Settings page to fix this.",
+                        key,
+                    )
                     continue
                 resolved[key] = plaintext
+                # Never let this value reach a log line, whatever a future call
+                # site does with it.
+                log_redaction.register_secret(plaintext)
             else:
                 resolved[key] = setting.value
 
@@ -173,13 +188,42 @@ class SettingsService:
                 continue
             node[leaf] = value
             applied[key] = "set" if key in SECRET_KEYS else str(value)
+            logger.debug(
+                "Applied setting %s = %s (database overrides .env)",
+                key,
+                crypto_service.mask(value) if key in SECRET_KEYS else value,
+            )
 
         if applied:
             logger.info(
                 "Applied %s setting(s) from the database over .env: %s",
                 len(applied), ", ".join(sorted(applied)),
             )
+        self._warn_if_token_expiring(stored.get(KEY_ACCESS_TOKEN))
         return applied
+
+    @staticmethod
+    def _warn_if_token_expiring(token: Optional[str]) -> None:
+        """Say so while there is still time to replace the token."""
+        if not token:
+            return
+        info = inspect_token(token)
+        if info.seconds_remaining is None:
+            return
+        if info.expired:
+            logger.warning(
+                "The stored Dhan access token expired at %s. The live feed will "
+                "be rejected until a new token is saved on the Settings page.",
+                info.expires_at.isoformat() if info.expires_at else "an unknown time",
+            )
+        elif info.seconds_remaining < TOKEN_EXPIRY_WARN_SECONDS:
+            hours, minutes = divmod(info.seconds_remaining // 60, 60)
+            logger.warning(
+                "The stored Dhan access token expires in %sh %sm (at %s). "
+                "Generate a new one in the Dhan console before it lapses.",
+                hours, minutes,
+                info.expires_at.isoformat() if info.expires_at else "?",
+            )
 
     # --- writing -----------------------------------------------------------
     async def save(
@@ -198,6 +242,11 @@ class SettingsService:
         synthetic_feed = bool(synthetic_feed)
         client_id = (client_id or "").strip()
         access_token = (access_token or "").strip()
+        logger.debug(
+            "Settings save requested: syntheticFeed=%s clientIdProvided=%s "
+            "accessTokenProvided=%s clearAccessToken=%s",
+            synthetic_feed, bool(client_id), bool(access_token), clear_access_token,
+        )
 
         # Live credentials are only required when NOT running synthetically.
         if not synthetic_feed:
@@ -218,6 +267,7 @@ class SettingsService:
         await self.repository.upsert(KEY_CLIENT_ID, value=client_id or None)
 
         if clear_access_token:
+            logger.info("Clearing the stored Dhan access token at the operator's request")
             await self.repository.delete_by_key(KEY_ACCESS_TOKEN)
         elif access_token:
             if not crypto_service.is_available():
@@ -226,6 +276,10 @@ class SettingsService:
                 KEY_ACCESS_TOKEN,
                 encrypted_value=crypto_service.encrypt(access_token),
                 is_encrypted=True,
+            )
+            log_redaction.register_secret(access_token)
+            logger.info(
+                "Stored a new Dhan access token (%s)", crypto_service.mask(access_token)
             )
 
         await self.repository.session.commit()
@@ -356,6 +410,10 @@ class SettingsService:
         except OptionChainError as exc:
             detail = str(exc)
             result["detail"] = detail
+            logger.warning(
+                "Dhan credential validation failed for client id %s: %s",
+                client_id, detail[:300],
+            )
             if "401" in detail or "invalid" in detail.lower() or "unauthor" in detail.lower():
                 result["message"] = (
                     "Dhan rejected these credentials. Check the client ID and "
@@ -370,12 +428,20 @@ class SettingsService:
                 result["message"] = f"Could not validate against Dhan: {detail[:200]}"
             return result
         except Exception as exc:  # network failures, DNS, timeouts
+            logger.exception(
+                "Could not reach Dhan while validating credentials for client id %s",
+                client_id,
+            )
             result["detail"] = str(exc)
             result["message"] = f"Could not reach Dhan: {exc}"
             return result
 
         result["valid"] = True
         result["expiries"] = expiries[:5]
+        logger.info(
+            "Dhan credentials validated for client id %s: %s expiries returned",
+            client_id, len(expiries),
+        )
         remaining = token_info.seconds_remaining
         if remaining is not None:
             hours, minutes = divmod(max(0, remaining) // 60, 60)

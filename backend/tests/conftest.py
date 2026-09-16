@@ -12,8 +12,13 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
 _TEST_DB_PATH = os.path.join(tempfile.gettempdir(), "dcpt_test.db")
+# Log files go to a temp directory, not backend/logs, so a test run does not
+# leave artefacts in the working tree. tests/test_no_secrets_in_logs.py reads
+# app.log back out of here.
+TEST_LOG_DIR = os.path.join(tempfile.gettempdir(), "dcpt_test_logs")
 
 os.environ.setdefault("CONFIG_PATH", str(BACKEND_ROOT / "conf"))
+os.environ.setdefault("LOG_DIR", TEST_LOG_DIR)
 os.environ.setdefault("APP_USERNAME", "trader")
 os.environ.setdefault("APP_PASSWORD", "test-password")
 os.environ.setdefault("APP_JWT_SECRET", "test-secret-key-for-unit-tests-only")

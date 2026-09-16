@@ -240,7 +240,13 @@ class DhanOptionChainClient:
         if last is not None:
             elapsed = time.monotonic() - last
             if elapsed < MIN_REQUEST_INTERVAL_SECONDS:
-                await asyncio.sleep(MIN_REQUEST_INTERVAL_SECONDS - elapsed)
+                wait = MIN_REQUEST_INTERVAL_SECONDS - elapsed
+                logger.debug(
+                    "Self-throttling %s: waiting %.2fs to respect Dhan's "
+                    "one-request-per-%.0fs limit",
+                    key, wait, MIN_REQUEST_INTERVAL_SECONDS,
+                )
+                await asyncio.sleep(wait)
         self._last_request_at[key] = time.monotonic()
 
     # --- requests ----------------------------------------------------------
@@ -256,16 +262,34 @@ class DhanOptionChainClient:
 
         url = self._base_url() + endpoint
         self.request_count += 1
-        async with httpx.AsyncClient(timeout=self._timeout()) as client:
-            response = await client.post(url, json=body, headers=self._headers())
+        logger.debug("POST %s body=%s", url, body)
+        started = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout()) as client:
+                response = await client.post(url, json=body, headers=self._headers())
+        except Exception:
+            self.error_count += 1
+            logger.exception(
+                "Option chain request to %s failed to complete (body=%s)", url, body
+            )
+            raise
+        elapsed_ms = (time.monotonic() - started) * 1000
 
         if response.status_code == 429:
             self.rate_limited_count += 1
+            logger.warning(
+                "Dhan rate limited %s (body=%s); %s rate-limited response(s) so far",
+                endpoint, body, self.rate_limited_count,
+            )
             raise OptionChainRateLimited(
                 "Dhan rate limited the option chain request (one per 3s per expiry)"
             )
         if response.status_code >= 400:
             self.error_count += 1
+            logger.error(
+                "Option chain request failed: HTTP %s from %s (body=%s): %s",
+                response.status_code, url, body, response.text[:300],
+            )
             raise OptionChainError(
                 f"Option chain request failed: HTTP {response.status_code} {response.text[:300]}"
             )
@@ -273,7 +297,11 @@ class DhanOptionChainClient:
         payload = response.json()
         if isinstance(payload, dict) and payload.get("status") not in (None, "success"):
             self.error_count += 1
+            logger.error(
+                "Dhan rejected the option chain request for %s: %s", body, payload
+            )
             raise OptionChainError(f"Option chain request rejected: {payload}")
+        logger.debug("%s responded 200 in %.0f ms", endpoint, elapsed_ms)
         return payload
 
     async def fetch_expiry_list(self, underlying_scrip: int, underlying_segment: str) -> List[str]:

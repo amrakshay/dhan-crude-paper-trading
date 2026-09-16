@@ -59,6 +59,10 @@ class NoteService:
         )
         self.repository.session.add(note)
         await self.repository.session.flush()
+        logger.info(
+            "Note %s created against order=%s position=%s security=%s (%s chars)",
+            note.id, order_id, position_id, security_id, len(note.note_text),
+        )
         return note
 
     async def update(self, note_id: int, note_text: str) -> Optional[TradeNote]:
@@ -70,7 +74,13 @@ class NoteService:
         note.note_text = note_text.strip()
         note.edited_at = utc_now()
         await self.repository.session.flush()
+        logger.info("Note %s edited (%s chars)", note_id, len(note.note_text))
         return note
 
     async def delete(self, note_id: int) -> bool:
-        return await self.repository.delete(note_id)
+        deleted = await self.repository.delete(note_id)
+        if deleted:
+            logger.info("Note %s deleted", note_id)
+        else:
+            logger.debug("Delete requested for note %s, which does not exist", note_id)
+        return deleted

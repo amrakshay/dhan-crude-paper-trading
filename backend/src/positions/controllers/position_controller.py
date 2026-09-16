@@ -116,8 +116,13 @@ class PositionController:
         """Close (or partially close) by placing an offsetting paper order."""
         position = await self.repository.get_by_id(position_id)
         if position is None:
+            logger.warning("Close requested for position %s, which does not exist", position_id)
             raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
         if not position.is_open or int(position.net_quantity) == 0:
+            logger.warning(
+                "Close requested for position %s (%s), which is already flat",
+                position_id, position.trading_symbol,
+            )
             raise HTTPException(status_code=400, detail="Position is already closed")
 
         net_quantity = int(position.net_quantity)
@@ -147,6 +152,12 @@ class PositionController:
 
         # Closing a long means selling, and vice versa.
         side = OrderSide.SELL.value if net_quantity > 0 else OrderSide.BUY.value
+        logger.info(
+            "Closing position %s (%s): net %s, placing a %s %s for %s lot(s)%s",
+            position_id, position.trading_symbol, net_quantity, side,
+            request.order_type, lots,
+            f" (quantity override {quantity_override})" if quantity_override else "",
+        )
 
         # Imported here rather than at module scope: closing a position places
         # an order, and the orders package imports the position repository, so
@@ -170,6 +181,10 @@ class PositionController:
                 quantity_override=quantity_override,
             )
         except OrderValidationError as exc:
+            logger.warning(
+                "Could not place the closing order for position %s (%s): %s",
+                position_id, position.trading_symbol, exc,
+            )
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         order_id = order.id

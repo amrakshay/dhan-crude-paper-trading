@@ -99,10 +99,22 @@ class PositionService:
                 position.net_quantity = residual if side == OrderSide.BUY.value else -residual
                 position.average_price = _q(price)
                 self._record_leg(position, side, residual, price, Decimal("0"))
+                logger.info(
+                    "Position %s flipped: closed %s at %s (realised %s) and "
+                    "opened %s in the opposite direction",
+                    trading_symbol, closing_quantity, price, realized, residual,
+                )
                 await self.repository.session.flush()
                 return position, _q(realized, MONEY_QUANTUM)
 
         self._record_leg(position, side, quantity, price, charges)
+
+        logger.debug(
+            "Position %s after %s %s @ %s: net %s -> %s, average %s, "
+            "realised this fill %s, charges accrued %s",
+            trading_symbol, side, quantity, price, old_net,
+            position.net_quantity, position.average_price, realized, charges,
+        )
 
         if position.net_quantity == 0:
             await self._close_position(position)
@@ -160,6 +172,10 @@ class PositionService:
         )
         self.repository.session.add(position)
         await self.repository.session.flush()
+        logger.info(
+            "Position opened for %s (security_id=%s, lot size %s, expiry %s)",
+            trading_symbol, security_id, lot_size, expiry_date,
+        )
         return position
 
     async def _close_position(self, position: Position) -> None:
@@ -167,8 +183,10 @@ class PositionService:
         position.closed_at = utc_now()
         position.average_price = Decimal("0")
         logger.info(
-            "Position %s closed: realised %s",
+            "Position %s closed: realised %s gross, %s in charges, "
+            "%s bought / %s sold",
             position.trading_symbol, position.realized_pnl,
+            position.total_charges, position.buy_quantity, position.sell_quantity,
         )
 
     # --- marks -------------------------------------------------------------

@@ -14,6 +14,14 @@ Design constraints, in priority order:
 Concurrency: every writer runs on the same asyncio event loop, so mutations are
 already serialised and no lock is needed. This is only true while the app runs
 single-process -- see the workers guard in server.py.
+
+**This module deliberately emits no log lines.** It is the hot path: at a few
+hundred packets a second, one line per tick would fill a rotating 10 MB file in
+minutes and cost more than the parse it describes. Tick visibility comes from
+aggregate counters logged on the broadcaster's own interval
+(`Broadcaster._log_summary`) and from the staleness check beside it. The logger
+below stays for a genuine invariant violation, which has not needed one yet.
+See CLAUDE.md section 4.
 """
 import time
 from typing import Any, Dict, Iterable, List, Optional, Set

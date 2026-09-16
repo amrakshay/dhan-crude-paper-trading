@@ -242,3 +242,7 @@ yarn-error.log*
 .DS_Store
 .idea/
 .vscode/
+
+# Application logs (conf/logging-config.ini writes here; path is logging.log_dir)
+logs/
+backend/logs/

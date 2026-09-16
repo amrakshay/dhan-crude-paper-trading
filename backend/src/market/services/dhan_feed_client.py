@@ -180,7 +180,12 @@ class DhanFeedClient:
                 return
             except Exception as exc:
                 self._set_state(ConnectionState.RECONNECTING, str(exc))
-                logger.warning("Feed connection lost (%s); retrying in %.1fs", exc, backoff)
+                logger.warning(
+                    "Feed connection lost (%s: %s); reconnect #%s in %.1fs "
+                    "(backoff max %.1fs, %s instruments to resubscribe)",
+                    type(exc).__name__, exc, self.reconnect_count + 1,
+                    backoff, maximum, len(self._subscribed),
+                )
 
             if self._stopping:
                 break
@@ -217,6 +222,11 @@ class DhanFeedClient:
             self._set_state(ConnectionState.CONNECTED)
 
             # Resubscribe everything we had before the drop.
+            if self._subscribed:
+                logger.info(
+                    "Feed connected; resubscribing %s instruments carried over "
+                    "from the previous session", len(self._subscribed),
+                )
             await self._send_subscriptions(sorted(self._subscribed), subscribe=True)
             await self._flush_pending()
 
@@ -239,7 +249,10 @@ class DhanFeedClient:
             if packet_type == PACKET_SERVER_DISCONNECT:
                 code = fields.get("disconnect_code")
                 reason = fields.get("reason")
-                logger.error("Server disconnected the feed: %s", reason)
+                logger.error(
+                    "Server disconnected the feed: code=%s reason=%s (fatal=%s)",
+                    code, reason, code in FATAL_DISCONNECT_CODES,
+                )
                 if code in FATAL_DISCONNECT_CODES:
                     self._stopping = True
                     self._set_state(ConnectionState.DISCONNECTED, reason)
@@ -282,6 +295,11 @@ class DhanFeedClient:
         if not subscribe:
             request_code += FEED_UNSUBSCRIBE_OFFSET
 
+        logger.debug(
+            "%s security ids: %s",
+            "Subscribing" if subscribe else "Unsubscribing",
+            [security_id for _segment, security_id in instruments],
+        )
         async with self._send_lock:
             for batch in chunk_instruments(list(instruments), self._batch_size()):
                 message = build_subscribe_message(request_code, batch)
@@ -309,6 +327,7 @@ class DhanFeedClient:
             if (segment, str(security_id)) not in self._subscribed
         ]
         if not new:
+            logger.debug("Subscribe requested but every instrument is already subscribed")
             return 0
 
         limit = config_utils.get_property_value_int(
