@@ -525,10 +525,12 @@ not carried over.
   password for them (which forces a change at their next sign-in), but there is
   no self-service "forgot password" — it would need email delivery, which this
   tool has no business having.
-* **Orders, positions and notes are not owned by a user.** They pre-date the
-  users table and remain global: every user sees the same book. Deleting a user
-  therefore leaves their trades in place. Making the book per-user would be a
-  schema change across four tables and was not in scope.
+* **The book is shared, by design.** Orders, positions and notes are not owned
+  by a user: every account sees and trades the same book, and deleting a user
+  leaves their trades in place. This is a deliberate decision, not an
+  oversight — the tool models one trading account that several people may look
+  at, rather than one account each. Per-user books would be a schema change
+  across four tables and a different product.
 * **The Quote/Full packet OHLC field order is unverified.** The layouts come from
   the official `dhanhq` SDK v2.2.0, which maps those four fields as open, close,
   high, low. That is reproduced faithfully, but has not been checked against a
