@@ -1,7 +1,16 @@
-# MCX Crude Oil Options — Paper Trading
+# Paper Trading — a platform for testing strategies against real money limits
 
-A single-user paper-trading platform for MCX CRUDEOIL options, built on live
-DhanHQ v2 market data.
+A paper-trading platform built on live DhanHQ v2 market data. It ships with one
+**strategy module** — MCX CRUDEOIL options — and the framework a second one
+plugs into: a strategy is a bundle of an underlying, contract specs, market
+hours, a subscription policy, a charge rate card, a margin model and the
+capabilities it supports, declared in one YAML file.
+
+Paper money is **not unlimited**. A **portfolio** behaves like one demat
+account: it holds money, an admin deposits into it and withdraws from it, it is
+attached to one or many strategies, and every order, position and chart trade
+belongs to exactly one of them. The same strategy can run in several portfolios
+at once and their books stay separate.
 
 **This tool trades paper rupees only.** It contains no order-placement code path
 and never contacts a broker's trading, funds or holdings endpoints. The Dhan
@@ -17,15 +26,17 @@ source.
 
 | | |
 |---|---|
-| **Live price** | CRUDEOIL near-month future — LTP, OHLC, volume, OI, 5-level depth, with connection health and last-tick age always on screen |
+| **Strategies & Features** | Every strategy module with what it is currently costing — instruments on the shared feed connection, expiries polled, greeks interval, open positions, which portfolios run it — and a switch that frees all of it immediately. Generic capabilities toggle across every strategy. **Account admins only** |
+| **Portfolios** | One book of paper money each, with cash, blocked margin (an estimate), available and equity as four separate figures, an append-only cash ledger, and deposit/withdraw/archive. **Admins fund; anyone trades** |
+| **Live price** | The strategy's near-month future — LTP, OHLC, volume, OI, 5-level depth, with connection health and last-tick age always on screen |
 | **Price chart** | Candlestick chart of the near-month future with a volume pane, at ten timeframes (1m to 1M), history from Dhan's read-only chart endpoints, newest bar updating live from the existing feed |
 | **Chart trading** | One-click Buy/Sell on the futures chart, draggable stop-loss and take-profit lines, live P&L net of charges — trading futures levels while the book holds ATM options |
 | **Option chain** | Full CE/PE ladder in the conventional Indian broker layout, with IV and greeks, OI change, ATM highlighting and click-to-trade |
-| **Order entry** | Market and limit, from the chain or a standalone ticket, with estimated charges and net debit/credit shown **before** confirmation |
+| **Order entry** | Market and limit, from the chain or a standalone ticket, with estimated charges, the net debit/credit **and the active portfolio's available balance** shown before confirmation — Confirm is disabled when the order does not fit |
 | **Fill simulation** | Orders cross the spread, walk the book level by level, and partially fill when depth runs out |
 | **Positions** | Live MTM, per-position and aggregate P&L, full or partial close |
 | **Order history** | Every state transition timestamped to the millisecond, with fills and a complete charges breakdown |
-| **P&L reports** | Realised and unrealised, by day / expiry / strike, gross vs net, charges by component, equity curve, CSV export |
+| **P&L reports** | Realised and unrealised, by day / expiry / strike, gross vs net, charges by component, a real equity curve (opening balance + deposits/withdrawals + realised), CSV export. Scoped to the active portfolio, with an explicit all-portfolios view |
 | **Trade notes** | Free-text notes on completed trades — searchable, editable, visible from history and reports |
 | **Settings** | Dhan credentials and feed mode editable in the UI, with a token validator and a live expiry countdown — **account admins only** |
 | **System health** | One page answering "is this thing healthy and what is it doing right now?" — uptime, the eight named background tasks, the upstream feed against Dhan's 40 s drop cliff, every connected browser tab, Dhan API usage, token expiry and recent warnings — **account admins only** |
@@ -524,9 +535,22 @@ SQLite, and the full schema DDL compiles without error against the MySQL dialect
 
 ## Updating charge rates
 
-Every rate lives in **`backend/conf/charges.yaml`**. No rate is hardcoded in
-Python. Each one carries a primary source URL, an as-of date and a confidence
-marker in a comment beside it.
+Every rate lives in a **rate card** at
+**`backend/conf/charges/<card>.yaml`** — the MCX crude module is charged under
+`mcx-commodity-options.yaml`. No rate is hardcoded in Python. Each one carries a
+primary source URL, an as-of date and a confidence marker in a comment beside
+it.
+
+A strategy names the card it is charged under (`charges.rate_card` in its YAML).
+The engine that applies a card is generic; only the rates are not. An NSE equity
+strategy would get its own card paying STT — a different tax on a different
+transaction, not CTT at another rate.
+
+The persisted breakdown is a **list of line items**, not a column per tax:
+`order_charges` keeps `turnover`, `total_charges` and `rates_version` as real
+columns and the components in `breakdown_json`. A card that introduces a tax
+needs no migration, no schema change and no new label in the UI — it supplies
+the label itself.
 
 Edit the file, then either restart or reload at runtime:
 
@@ -636,6 +660,35 @@ book — it never blocks the tick path.
 the nearest two expiries (~165 instruments), re-centred automatically as the
 underlying moves.
 
+**Strategies contribute to that one connection; they never open their own.**
+Each enabled strategy module adds its `(segment, security_id)` targets to the
+single `DhanFeedClient`, and a disabled one adds none — switching a strategy off
+unsubscribes its instruments immediately, stops its greeks poll, stops its chart
+requests and hides its live pages. Per-strategy state (front future, subscribed
+expiries, window centre, strike step) is per strategy, because two strategies
+have two front futures and collapsing them would re-centre one strategy's window
+on another's price.
+
+**A portfolio's balance is derived, never stored.** Cash is the sum of an
+append-only `cash_ledger`, replayed the same way realised P&L is replayed from
+fills. Four figures are reported separately — cash, blocked margin, available,
+equity — because one "balance" hides what a short position ties up. Blocked
+margin is a configured **estimate** and every surface says so. Equity is
+withheld entirely when any open position has no live mark, rather than valuing
+it at zero.
+
+**Two portfolios holding the same contract are two books.** The lookups that
+find an open position and an open chart trade are keyed on `(portfolio_id,
+security_id)`. Without the portfolio in the key, a buy in one would average into
+the other's position and a chart click in one would close the other's trade —
+silently, with no error anywhere.
+
+**Funds are checked twice.** At placement, and again at the fill: a resting
+limit order can sit for hours while other trades spend the money it was
+affordable against. An order that can no longer be afforded is REJECTED with a
+timestamped event, not filled into a negative balance and not partially filled
+to fit.
+
 **Option and futures expiries differ.** CRUDEOIL September options expire
 2026-09-17 while the September future expires 2026-09-21 — the chain and the
 underlying roll on different dates. Each option expiry is mapped to the earliest
@@ -719,7 +772,28 @@ not carried over.
 * **The charge rate card's per-rate as-of dates are YAML comments.** The health
   page reports the rate-card `version` but cannot say "this rate is N days
   stale", because the dates are not structured fields. Promoting them to real
-  keys in `conf/charges.yaml` would fix it; parsing comments would not.
+  keys in `conf/charges/<card>.yaml` would fix it; parsing comments would not.
+* **The margin figure is an APPROXIMATION and is not a broker number.** Real
+  MCX margin on a short option is SPAN + exposure, computed by the exchange from
+  risk-array files this tool does not consume. What it uses instead is a flat
+  10% of notional, configured per strategy with a stated basis, an as-of date of
+  2026-09-18 and a confidence marker of `APPROXIMATION`. It is the right order
+  of magnitude for CRUDEOIL initial margin and nothing more: a real short
+  option's requirement varies with moneyness and volatility and can exceed it
+  substantially. Every surface that prints the number says "estimate", and a
+  withdrawal refused for reaching it says so too.
+* **Equity ignores unrealised P&L on the curve.** The Reports equity line is
+  opening balance + deposits/withdrawals + realised net of charges. Open
+  positions are NOT marked into it, because a historical curve would need a
+  historical mark for every point and this application stores no tick history.
+  The Portfolios page's equity figure *does* include the live mark-to-market,
+  and withholds itself when any position is unmarked.
+* **A second strategy module has never been run.** The framework is built
+  against the hard case — a different exchange segment, different market hours,
+  a weekly expiry cadence, STT instead of CTT, and eventually cash instruments
+  with no expiry and no strike — but only `mcx-crude-options` exists, so the
+  seams are exercised by one module and by tests, not by a second real
+  strategy.
 * **The health page has never been seen against a live Dhan token.** The
   inactivity headroom, the reconnect count, the real feed's `mode`/`requestCode`
   and the option chain client's request counters were all exercised with the

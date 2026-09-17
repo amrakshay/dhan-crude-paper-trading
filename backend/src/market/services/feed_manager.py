@@ -438,12 +438,44 @@ class FeedManager:
             return {"subscribed": 0, "unsubscribed": 0, "reason": "feed not running"}
 
         targets, meta = await self._resolve_targets()
-        if not targets:
+        if not targets and self._strategies():
+            # Strategies ARE running but resolved nothing, which means the
+            # instrument master has not been ingested. Unsubscribing everything
+            # here would empty a book that is only temporarily unresolvable, so
+            # the live subscription is left alone.
             logger.warning(
                 "Feed resync found no instruments to subscribe to; the book will "
                 "stay empty until the instrument master is refreshed"
             )
             return {"subscribed": 0, "unsubscribed": 0, "reason": "no instruments available"}
+
+        if not targets:
+            # NOTHING is running. This is the case where unsubscribing
+            # everything is exactly right: freeing the instruments on the shared
+            # connection is the whole point of switching a strategy off, and a
+            # subscription nobody is looking at still costs bandwidth and still
+            # counts against the connection.
+            current = self.feed.subscribed_security_ids()
+            removed = 0
+            if current:
+                to_remove = [
+                    (self._segment_for_subscribed(security_id), security_id)
+                    for security_id in current
+                ]
+                removed = await self.feed.unsubscribe(to_remove)
+                self.book.forget(security_id for _segment, security_id in to_remove)
+            self._contract_meta = {}
+            self.last_resync_ms = now_ms()
+            logger.info(
+                "No strategy is enabled; unsubscribed %s instrument(s). The feed "
+                "connection stays open and the browsers stay connected.",
+                removed,
+            )
+            return {
+                "subscribed": 0,
+                "unsubscribed": removed,
+                "reason": "no strategy is enabled",
+            }
 
         self._contract_meta = meta
         self.book.register_many(meta)

@@ -34,6 +34,7 @@ from src.logging_config import get_logger
 from src.strategies.services.strategy_definition import (
     CAPABILITY_CHART_TRADING,
     CAPABILITY_GREEKS,
+    CAPABILITY_LIVE_PAGES,
     CAPABILITY_PAGES,
     KNOWN_CAPABILITIES,
     STRATEGY_LIVE_PAGES,
@@ -300,10 +301,20 @@ class StrategyRegistry:
         running = self.enabled()
         capabilities = self.enabled_capabilities()
 
+        # Live pages need something live to show.
         if running:
             granted.update(STRATEGY_LIVE_PAGES)
         for definition in running:
             granted.update(definition.pages(capabilities))
+
+        # History pages follow their own capability and nothing else. Reports
+        # and Trade Notes stay reachable with every strategy switched off --
+        # that is exactly when someone wants to look at what one of them did.
+        for capability, page in CAPABILITY_PAGES.items():
+            if capability in CAPABILITY_LIVE_PAGES:
+                continue
+            if capability in capabilities:
+                granted.add(page)
 
         return frozenset(granted)
 

@@ -122,8 +122,24 @@ Several tests assert that a fill does *not* occur. They are load-bearing.
 
 ## 5. Charges
 
-- **Every rate lives in `conf/charges.yaml`** with a primary source URL, an
-  as-of date and a confidence marker. Nothing is hardcoded in Python.
+- **Every rate lives in a rate card**, `conf/charges/<card>.yaml`, with a
+  primary source URL, an as-of date and a confidence marker. Nothing is
+  hardcoded in Python. A strategy names the card it is charged under; the
+  engine is generic, the rates are not.
+- **The component list IS the breakdown.** `ChargeBreakdown.components` is the
+  source of truth and what gets persisted; `.ctt`, `.gst` and friends are
+  conveniences that read out of it. `order_charges` keeps `turnover`,
+  `total_charges` and `rates_version` as columns because they are queried and
+  aggregated -- the per-tax columns were dropped on 2026-09-18, because which
+  taxes exist is a property of the card and a column per tax makes adding one a
+  migration. Read a stored breakdown through
+  `src/charges/services/charge_persistence.py`, never by parsing the JSON again
+  somewhere else.
+- **A component carries both its rounded amount and the raw figure.** The total
+  is the rounded SUM OF THE RAW components, not the sum of the rounded ones, so
+  the two can differ by a paisa. That is a property of rounding and was true
+  before the refactor; the raw figure is kept so it can be traced rather than
+  argued about.
 - All arithmetic is `Decimal`. Rounding is a configured policy
   (`rounding.mode`), not an accident.
 - **Brokerage is per executed ORDER**, not per fill. When an order fills in
@@ -135,6 +151,39 @@ Several tests assert that a fill does *not* occur. They are load-bearing.
   of barrels, not a whole number of lots.
 - Orders persist the `rates_version` they were charged under so old orders stay
   explainable after rates change.
+
+---
+
+## 5a. Strategies and portfolios
+
+`src/strategies/` and `src/portfolios/` are the two packages the rest of this
+application now hangs off. The root `CLAUDE.md` section 3a has the rules; these
+are the ones that only matter once you are editing the code.
+
+- **`src.strategies` must stay import-light.** Every low-level module reads the
+  registry, so the strategies package cannot import orders, positions,
+  chart-trading or portfolios at module scope -- the app will not start. Those
+  imports go inside the functions that need them, the same way `auth` <->
+  `users` is handled (section 10).
+- **`get_strategy_registry()` is synchronous and cached.** It is read from code
+  that cannot await (the feed's target resolution, `expected_task_names`), which
+  is why enabled state is held in memory and refreshed by
+  `StrategyStateService`, not read from the database per call.
+- **A toggle applies through `resync()`, not `reconfigure()`.** Nothing about
+  the credentials changed, so tearing down the feed client would drop the
+  upstream connection and every browser's prices with it. `resync()` diffs the
+  target set. The one subtlety: an EMPTY target set means two different things
+  -- "the instrument master has not been ingested", where the live subscription
+  must be left alone, and "nothing is enabled", where everything must be
+  unsubscribed. Telling them apart is what makes "off" free anything.
+- **`BalanceService` owns cash, blocked margin, available and equity.** Four
+  numbers, one place. A second implementation anywhere is a bug waiting for a
+  disagreement.
+- **The cash ledger is append-only.** There is deliberately no update and no
+  delete on `CashLedgerRepository`. A correction is a new entry.
+- **Charges are posted to the ledger as a DELTA.** They are recomputed on
+  cumulative executed quantity (section 5), so posting the full figure on a
+  second fill would charge the portfolio twice.
 
 ---
 

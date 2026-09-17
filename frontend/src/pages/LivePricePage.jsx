@@ -107,7 +107,9 @@ export default function LivePricePage() {
         <Box>
           <Typography variant="h2">Live Price</Typography>
           <Typography variant="body2" color="text.secondary">
-            {future ? `${future.displayName ?? future.tradingSymbol} · expires ${future.expiryDate}` : 'CRUDEOIL near-month future'}
+            {future
+              ? `${future.displayName ?? future.tradingSymbol} · expires ${future.expiryDate}`
+              : 'The near-month future'}
           </Typography>
         </Box>
         <Button

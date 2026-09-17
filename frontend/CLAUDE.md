@@ -30,6 +30,11 @@ including their WCAG contrast ratios, come from that portal's documented
 Prices and quantities get `className="numeric"`, which applies tabular figures
 so digits do not jitter as they tick.
 
+**`MuiChip` sets a background on every chip in this theme.** That defeats
+`color="primary"`, whose text turns white and lands on the theme's grey -- once
+shipped as an unreadable capability chip. Set `bgcolor` and `color` explicitly
+with `sx` when a chip needs to stand out.
+
 ---
 
 ## 2. One WebSocket, and how re-rendering works
@@ -64,6 +69,28 @@ because they need server-computed P&L; prices come from the socket.
 
 ---
 
+## 2a. The active portfolio
+
+`src/portfolios/ActivePortfolioContext.jsx` holds which portfolio the portal is
+pointing at. It sits **beside** `MarketFeedContext`, never inside it: the feed
+context has the performance contract in section 2, and a portfolio change or a
+balance tick must not re-render every subscriber to it.
+
+- **The selection is sent EXPLICITLY** as `portfolioId` on the requests that
+  need it. The server never infers it from the session, because a trade landing
+  in the wrong book is exactly what the picker exists to prevent.
+- It is remembered in `localStorage` per browser, and every read and write is
+  wrapped in try/catch -- a private window throws. A remembered id that has been
+  archived falls back to the first active portfolio rather than naming a
+  portfolio that cannot trade.
+- **The header shows AVAILABLE, not cash.** The difference between them is money
+  blocked against open shorts, and showing cash would promise money that cannot
+  be spent.
+- Anything that moves money calls `refresh()` so the header figure does not lag
+  behind the trade.
+
+---
+
 ## 3. Honesty in the UI
 
 These are product requirements, not styling choices:
@@ -77,6 +104,19 @@ These are product requirements, not styling choices:
 - Order entry shows **estimated charges and the net debit/credit before** the
   confirm button is enabled, and warns when an order would only partially fill
   or would rest instead of filling.
+- **The same rule applies to money.** The ticket shows the debit beside the
+  active portfolio's available balance and disables Confirm when it does not
+  fit. The server refuses it anyway; finding that out after clicking is a worse
+  way to learn it.
+- **Four figures, never one.** Cash, blocked margin, available and equity are
+  shown separately wherever a portfolio's money appears. Collapsing them into a
+  single "balance" is what makes a short position's effect invisible.
+- **Blocked margin always says "estimate".** It is a configured approximation,
+  not what a broker would hold.
+- **An equity figure that cannot be computed says "no mark"** and names the
+  strategies responsible, rather than valuing an unmarked position at zero.
+- **A position whose strategy is switched off is labelled.** Its mark is blank
+  rather than stale, because nothing is updating it.
 
 ---
 
@@ -95,9 +135,14 @@ These are product requirements, not styling choices:
 ## 5. Roles in the UI
 
 - **The sidebar and the routes are driven by the server.** `/auth/me` returns
-  the pages the role may see (from `backend/conf/role-pages.json`);
+  the pages the role may see -- `backend/conf/role-pages.json` INTERSECTED with
+  the pages the enabled strategies and capabilities grant;
   `visibleNavigationItems(pages)` filters `navigation.js` and `RoleRoute` gates
-  each route. Do not hardcode a role check in a component.
+  each route. Do not hardcode a role check in a component, and do not add a
+  second check for a disabled strategy: `pages` already reflects it.
+- **After a toggle, re-read the session.** The page list has just changed, and
+  leaving a dead nav item behind is how a user finds a page whose every request
+  refuses.
 - **This is presentation, not access control.** The API refuses what the role
   may not do regardless of what the UI shows. Never treat a hidden nav item as
   a security boundary, and never skip the server-side check because the button

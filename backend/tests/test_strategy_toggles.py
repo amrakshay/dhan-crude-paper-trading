@@ -149,6 +149,70 @@ async def test_a_disabled_strategy_contributes_no_subscription_targets(db_sessio
         await manager.stop()
 
 
+async def test_disabling_every_strategy_unsubscribes_the_feed(db_session):
+    """Freeing the shared connection is the whole point of switching one off.
+
+    The empty target set used to mean only one thing -- the instrument master
+    has not been ingested -- and resync protected the live subscription by
+    doing nothing. It now means two things, and telling them apart is what
+    makes "off" actually free anything.
+    """
+    from src.instruments.database.db_operations.instrument_repository import (
+        InstrumentRepository as Repo,
+    )
+
+    rows = [
+        {
+            "security_id": "565899", "exchange_id": "MCX",
+            "exchange_segment": "MCX_COMM", "segment_code": 5,
+            "instrument_type": "FUTCOM", "underlying_symbol": "CRUDEOIL",
+            "underlying_scrip": 294, "trading_symbol": "CRUDEOIL FUT",
+            "display_name": "CRUDEOIL FUT", "expiry_date": NEAR_OPTION_EXPIRY,
+            "strike_price": None, "option_type": None, "lot_size": 100,
+            "tick_size": Decimal("1.0"), "is_active": True,
+            "refreshed_at": utc_now(),
+        },
+    ]
+    for index in range(4):
+        strike = Decimal(6700 + index * 50)
+        rows.append(
+            {
+                "security_id": f"C{index}", "exchange_id": "MCX",
+                "exchange_segment": "MCX_COMM", "segment_code": 5,
+                "instrument_type": "OPTFUT", "underlying_symbol": "CRUDEOIL",
+                "underlying_scrip": 294,
+                "trading_symbol": f"CRUDEOIL {strike} CE",
+                "display_name": f"CRUDEOIL {strike} CE",
+                "expiry_date": NEAR_OPTION_EXPIRY, "strike_price": strike,
+                "option_type": "CE", "lot_size": 100,
+                "tick_size": Decimal("0.1"), "is_active": True,
+                "refreshed_at": utc_now(),
+            }
+        )
+    await Repo(db_session).upsert_many(rows)
+    await db_session.commit()
+
+    manager = FeedManager()
+    manager.is_synthetic = True
+    manager.feed = SyntheticFeed(manager.book)
+    try:
+        first = await manager.resync()
+        assert first["subscribed"] > 0
+        assert manager.feed.subscribed_count > 0
+
+        get_strategy_registry().set_enabled(CRUDE, False)
+        after = await manager.resync()
+
+        assert after["unsubscribed"] > 0
+        assert after["reason"] == "no strategy is enabled"
+        assert manager.feed.subscribed_count == 0, (
+            "an instrument nobody is looking at still costs bandwidth and still "
+            "counts against the one connection"
+        )
+    finally:
+        await manager.stop()
+
+
 async def test_a_disabled_strategy_is_not_polled_for_greeks(ready):
     """No outbound Dhan REST call, which is the point -- it is token spend."""
     poller = get_feed_manager().greeks_poller
@@ -237,6 +301,26 @@ async def test_a_disabled_strategys_live_pages_disappear_from_the_session(ready)
     assert "/orders" in after
     assert "/positions" in after
     assert "/settings" in after
+
+
+async def test_history_pages_survive_every_strategy_being_switched_off(ready):
+    """Decision 3, on the sidebar.
+
+    Reports and Trade Notes show HISTORY. Switching the last strategy off is
+    exactly when someone wants to look at what it did, so those pages follow
+    their own capability and nothing else. Only the LIVE pages go.
+    """
+    client = ready
+    get_strategy_registry().set_enabled(CRUDE, False)
+
+    pages = (await client.get("/api/auth/me")).json()["pages"]
+
+    assert "/live" not in pages, "nothing live to show"
+    assert "/chain" not in pages, "a live quote screen with no quotes"
+    assert "/reports" in pages
+    assert "/notes" in pages
+    assert "/orders" in pages
+    assert "/positions" in pages
 
 
 async def test_turning_the_reports_capability_off_hides_only_that_page(ready):

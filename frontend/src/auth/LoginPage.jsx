@@ -75,9 +75,14 @@ export default function LoginPage() {
               >
                 <ShowChartIcon />
               </Box>
-              <Typography variant="h3">Crude Paper Trading</Typography>
+              {/*
+                Deliberately generic: this screen has no session, so it cannot
+                ask which strategies are configured, and naming one here would
+                be a guess that goes stale the moment a second is added.
+              */}
+              <Typography variant="h3">Paper Trading</Typography>
               <Typography variant="body2" color="text.secondary">
-                MCX CRUDEOIL options &middot; paper rupees only
+                Paper rupees only &middot; no order reaches a broker
               </Typography>
             </Stack>
 

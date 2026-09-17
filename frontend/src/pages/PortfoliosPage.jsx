@@ -410,7 +410,13 @@ export default function PortfoliosPage() {
                     <Chip size="small" label="Archived" variant="outlined" />
                   ) : null}
                   {portfolio.id === activeId ? (
-                    <Chip size="small" color="primary" label="Active" />
+                    <Chip
+                      size="small"
+                      label="Active"
+                      // See StrategiesPage: the theme forces a chip background,
+                      // so `color="primary"` alone gives white on grey.
+                      sx={{ bgcolor: 'primary.main', color: 'primary.contrastText' }}
+                    />
                   ) : null}
                 </Stack>
                 <Typography variant="body2" color="text.secondary">

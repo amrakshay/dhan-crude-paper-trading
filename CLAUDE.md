@@ -73,7 +73,7 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (475 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (591 tests)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
@@ -97,6 +97,56 @@ see `backend/CLAUDE.md` §9 for the route-ordering rules that make that safe.
 `server.py` forces `workers=1`. Do not "fix" that — see §4.
 
 Run the full suite before committing. The safety suite must pass.
+
+---
+
+## 3a. Strategies, capabilities and portfolios
+
+Three ideas, kept apart on purpose.
+
+**A strategy module** is everything specific to trading one thing: underlying,
+exchange segment, instrument types, contract specs, market hours, subscription
+policy, charge rate card, margin model, and which capabilities it supports. One
+YAML per strategy in `conf/strategies/`. `mcx-crude-options.yaml` is the only
+one that exists; the framework is designed against the harder case (NSE index
+options, then equity F&O) because that is what is expected next.
+
+**A capability** is a generic feature of THIS codebase -- the option chain, the
+price chart, chart trading, greeks, trade notes, P&L reports. A strategy
+declares which it supports; a capability can also be switched off globally. The
+effective state is the intersection, so a capability cannot be switched on for a
+strategy that cannot support it.
+
+**A portfolio** is one book of paper money. Every order, position and chart
+trade belongs to exactly one, the same strategy can run in several, and their
+books must not mix.
+
+Rules that are not negotiable:
+
+- **The YAML says what a strategy IS; the database says whether it is ON.**
+  Enabled state is a `feature_toggles` row, applied at startup and after every
+  toggle. Nothing about a strategy's rates, specs or margin model is editable
+  from the UI.
+- **Off means off.** No instruments on the feed, no greeks poll, no chart
+  fetches, no background work, no live pages. And **history never moves**: past
+  orders, positions and P&L totals are identical across a toggle, Reports and
+  Trade Notes stay reachable with every strategy off, and an open position can
+  still be closed.
+- **`strategy_key` and `portfolio_id` are STORED on trade rows**, resolved once
+  at placement. Deriving either at read time from the instrument would break the
+  moment a contract expired and was deactivated.
+- **The two open-row lookups are keyed per portfolio.**
+  `PositionRepository.get_open_for_security` and
+  `ChartTradeRepository.get_open_for_underlying` both take a `portfolio_id`.
+  Dropping it merges two books silently -- no error, just wrong numbers.
+- **A portfolio's balance is never stored.** Cash is the sum of the append-only
+  `cash_ledger`. `src/portfolios/services/balance_service.py` is the only place
+  that computes cash, blocked margin, available and equity; do not recompute
+  them anywhere else.
+- **Blocked margin is an estimate and must always be labelled one.** Equity is
+  withheld -- not zeroed -- when any open position has no mark.
+- **Funds are checked at placement AND at the fill.** A resting order that
+  became unaffordable is rejected, never partially filled to fit.
 
 ---
 
@@ -158,7 +208,14 @@ are in `LogRequestsMiddleware.IGNORED_PATHS` so the polling does not fill the
 access log the page reports on. Do not add timing or sampling inside
 `apply_packet` to feed it.
 
-**Money is `Decimal`, never `float`.** Timestamps are stored naive-UTC.
+**Money is `Decimal`, never `float`.** Timestamps are stored naive-UTC. That
+includes every ledger amount, margin estimate and equity figure.
+
+**Nothing strategy-aware goes on the tick path.** A packet is not looked up
+against a strategy or a portfolio. Membership is resolved when a subscription is
+built (the contract metadata carries `strategyKey`) or when a trade is written,
+never when a tick arrives. Portfolio equity is computed on request, at the
+Positions/Portfolios cadence.
 
 **Settings from the UI beat `.env`.** `SettingsService.apply_to_config()` overlays
 stored settings onto the in-memory config at startup (`main.py`'s
@@ -206,7 +263,9 @@ open, close, high, low per the SDK. Never checked against a live feed.
 
 ```
 backend/conf/default-config.yaml   app config; ${ENV_VAR} substitution
-backend/conf/charges.yaml          every charge rate, with source URL + as-of date
+backend/conf/strategies/*.yaml     one strategy module each: underlying, specs,
+                                   hours, subscription, rate card, margin
+backend/conf/charges/*.yaml        rate cards, with source URL + as-of date
 backend/src/<feature>/             routes/ controllers/ services/ api_schemas/ database/
 backend/src/market/services/       feed protocol, book, feed client, broadcaster, greeks
 backend/src/market/services/dhan_charts_client.py   candle history (market data only)
@@ -214,9 +273,14 @@ backend/src/market/services/candle_service.py       timeframes, aggregation, cac
 frontend/src/components/PriceChart.jsx              the chart; see frontend/NOTICE
 backend/src/chart_trading/                         one-click trading from the chart
 backend/src/chart_trading/services/bracket_monitor.py   server-side SL/TP watcher
+backend/src/strategies/            the registry, the toggles and their page
+backend/src/portfolios/            portfolios, the cash ledger, the balance maths
 backend/src/health/                the system health page's backend (no tables)
 backend/src/log_buffer.py          in-memory ring buffer of recent WARNING+ records
 frontend/src/pages/SystemHealthPage.jsx            the system health page
+frontend/src/pages/PortfoliosPage.jsx             money, per portfolio
+frontend/src/pages/StrategiesPage.jsx             what is on and what it costs
+frontend/src/portfolios/ActivePortfolioContext.jsx  the header picker's scope
 backend/tests/test_no_real_orders.py   the safety suite
 frontend/src/theme/tokens.js       palette ported from the Privacera portal
 frontend/src/market/               the single shared WebSocket context
@@ -228,9 +292,10 @@ See `backend/CLAUDE.md` and `frontend/CLAUDE.md` for per-side conventions.
 
 ## 7. Working style for this repo
 
-- **No rate is hardcoded in Python.** Every charge rate lives in
-  `conf/charges.yaml` with a primary source URL, an as-of date and a confidence
-  marker. If you change a rate, update its source and date too.
+- **No rate is hardcoded in Python.** Every charge rate lives in a rate card
+  under `conf/charges/` with a primary source URL, an as-of date and a
+  confidence marker. If you change a rate, update its source and date too. The
+  margin model gets the same treatment, marked `APPROXIMATION`.
 - **Do not tune constants to make tests agree.** The charges engine has a known,
   asserted ₹0.01 divergence from Zerodha on round trips, with the reason
   documented in the test. If a number does not match, report the gap.

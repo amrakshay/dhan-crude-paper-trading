@@ -277,7 +277,8 @@ export default function OptionChainPage() {
         <Box>
           <Typography variant="h2">Option Chain</Typography>
           <Typography variant="body2" color="text.secondary">
-            CRUDEOIL options on the {chain?.underlyingFuture?.displayName ?? 'near future'}
+            {chain?.underlyingSymbol ? `${chain.underlyingSymbol} options` : 'Options'} on
+            the {chain?.underlyingFuture?.displayName ?? 'near future'}
             {underlying !== null ? ` · underlying ${formatPrice(underlying)}` : ''}
           </Typography>
         </Box>

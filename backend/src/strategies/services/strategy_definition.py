@@ -75,6 +75,16 @@ CAPABILITY_PAGES: Dict[str, str] = {
     CAPABILITY_PNL_REPORTS: "/reports",
 }
 
+# Of those, the ones that need something LIVE to show. The chain is a live
+# quote screen and has nothing to display without a subscribed instrument.
+#
+# The others -- Reports and Trade Notes -- are history, and history does not go
+# away when a strategy is switched off (decision 3). They follow their own
+# capability toggle and nothing else: turning P&L reports off hides Reports for
+# everyone, but turning the last STRATEGY off must not, or a trader loses the
+# record of what that strategy did.
+CAPABILITY_LIVE_PAGES: FrozenSet[str] = frozenset({CAPABILITY_OPTION_CHAIN})
+
 # Pages that exist only while at least one strategy is live. Live Price has
 # nothing to show without a subscribed instrument.
 STRATEGY_LIVE_PAGES: Tuple[str, ...] = ("/live",)
@@ -160,9 +170,15 @@ class StrategyDefinition:
         )
 
     def pages(self, enabled_capabilities: FrozenSet[str]) -> List[str]:
-        """Live pages this strategy contributes, given the capabilities on."""
+        """LIVE pages this strategy contributes, given the capabilities on.
+
+        History pages are not here: they do not belong to a strategy and do not
+        disappear with one. See `StrategyRegistry.feature_pages`.
+        """
         granted = list(STRATEGY_LIVE_PAGES)
-        for capability in sorted(self.capabilities & enabled_capabilities):
+        for capability in sorted(
+            self.capabilities & enabled_capabilities & CAPABILITY_LIVE_PAGES
+        ):
             page = CAPABILITY_PAGES.get(capability)
             if page:
                 granted.append(page)

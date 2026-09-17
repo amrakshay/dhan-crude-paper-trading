@@ -61,7 +61,7 @@ function AppShellInner() {
             <ShowChartIcon sx={{ fontSize: 18 }} />
           </Box>
           <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            Crude Paper Trading
+            Paper Trading
           </Typography>
 
           <Box sx={{ flexGrow: 1 }} />

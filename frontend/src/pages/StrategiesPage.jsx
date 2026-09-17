@@ -292,7 +292,15 @@ export default function StrategiesPage() {
                         size="small"
                         label={capability}
                         variant={active ? 'filled' : 'outlined'}
-                        color={active ? 'primary' : 'default'}
+                        // Colours set explicitly rather than through `color`:
+                        // the theme's MuiChip override forces a background on
+                        // every chip, so a `color="primary"` chip ends up with
+                        // white text on the theme's grey and is unreadable.
+                        sx={{
+                          bgcolor: active ? 'primary.main' : 'transparent',
+                          color: active ? 'primary.contrastText' : 'text.secondary',
+                          borderColor: 'divider',
+                        }}
                       />
                     );
                   })}
