@@ -8,11 +8,15 @@ from src.core.time_utils import utc_now
 from src.database.session import get_session_factory
 from src.orders.database.db_models.order_model import Order
 
+# Every row in this suite belongs to the one configured strategy module.
+STRATEGY = "mcx-crude-options"
+
 
 async def _seed_order(symbol="CRUDEOIL 17 SEP 6800 CALL", security_id="576375") -> int:
     session = get_session_factory()()
     try:
         order = Order(
+            strategy_key=STRATEGY,
             client_order_id=f"note-test-{security_id}-{symbol}",
             security_id=security_id,
             trading_symbol=symbol,

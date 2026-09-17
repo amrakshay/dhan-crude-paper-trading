@@ -9,6 +9,9 @@ from src.orders.database.db_models.order_model import Order, OrderCharge, OrderF
 from src.orders.database.db_operations.order_repository import OrderRepository
 from src.reports.services.pnl_service import PnlService
 
+# Every row in this suite belongs to the one configured strategy module.
+STRATEGY = "mcx-crude-options"
+
 SECURITY = "576375"
 SYMBOL = "CRUDEOIL 17 SEP 6800 CALL"
 
@@ -26,6 +29,7 @@ async def _order(session, side, quantity, price, when=None, security_id=SECURITY
     """Create a filled order with its fill and charges rows."""
     when = when or utc_now()
     order = Order(
+        strategy_key=STRATEGY,
         client_order_id=f"{side}-{quantity}-{when.timestamp()}-{security_id}",
         security_id=security_id,
         trading_symbol=symbol,
@@ -313,6 +317,7 @@ async def test_report_agrees_with_the_position_book_on_realised_pnl(db_session):
     position_service = PositionService(PositionRepository(db_session))
     for price, quantity in zip(prices, quantities):
         await position_service.apply_fill(
+            strategy_key=STRATEGY,
             security_id=SECURITY, trading_symbol=SYMBOL, side="BUY",
             quantity=quantity, price=price, lot_size=100,
             expiry_date=date(2026, 9, 17), strike_price=Decimal("6800"),
@@ -322,6 +327,7 @@ async def test_report_agrees_with_the_position_book_on_realised_pnl(db_session):
 
     exit_price = Decimal("46.5840")
     position, position_realised = await position_service.apply_fill(
+        strategy_key=STRATEGY,
         security_id=SECURITY, trading_symbol=SYMBOL, side="SELL",
         quantity=100, price=exit_price, lot_size=100,
         expiry_date=date(2026, 9, 17), strike_price=Decimal("6800"),

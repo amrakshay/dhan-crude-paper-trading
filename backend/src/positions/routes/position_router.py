@@ -1,4 +1,6 @@
 """Position endpoints."""
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,11 +26,22 @@ async def get_position_controller(
 @position_router.get("", response_model=PositionListResponse)
 async def list_positions(
     include_closed: bool = Query(False, alias="includeClosed"),
+    strategy_key: Optional[str] = Query(
+        None,
+        alias="strategyKey",
+        description=(
+            "Filter by strategy module. Omit for every strategy -- a position "
+            "held under a DISABLED strategy still exists and still counts, it "
+            "simply stops being marked."
+        ),
+    ),
     controller: PositionController = Depends(get_position_controller),
     _: SessionPrincipal = Depends(require_session),
 ) -> PositionListResponse:
     """Open positions with live MTM, plus aggregate realised/unrealised P&L."""
-    return await controller.list_positions(include_closed=include_closed)
+    return await controller.list_positions(
+        include_closed=include_closed, strategy_key=strategy_key
+    )
 
 
 @position_router.post("/{position_id}/close", response_model=OrderResponse)

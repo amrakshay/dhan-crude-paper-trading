@@ -36,6 +36,7 @@ class PositionService:
 
     async def apply_fill(
         self,
+        strategy_key: str,
         security_id: str,
         trading_symbol: str,
         side: str,
@@ -59,7 +60,8 @@ class PositionService:
         position = await self.repository.get_open_for_security(security_id)
         if position is None:
             position = await self._open_position(
-                security_id, trading_symbol, lot_size, expiry_date, strike_price, option_type
+                strategy_key, security_id, trading_symbol, lot_size, expiry_date,
+                strike_price, option_type,
             )
 
         realized = Decimal("0")
@@ -93,8 +95,8 @@ class PositionService:
                 await self._close_position(position)
 
                 position = await self._open_position(
-                    security_id, trading_symbol, lot_size, expiry_date,
-                    strike_price, option_type,
+                    strategy_key, security_id, trading_symbol, lot_size,
+                    expiry_date, strike_price, option_type,
                 )
                 position.net_quantity = residual if side == OrderSide.BUY.value else -residual
                 position.average_price = _q(price)
@@ -150,9 +152,11 @@ class PositionService:
             )
 
     async def _open_position(
-        self, security_id, trading_symbol, lot_size, expiry_date, strike_price, option_type
+        self, strategy_key, security_id, trading_symbol, lot_size, expiry_date,
+        strike_price, option_type,
     ) -> Position:
         position = Position(
+            strategy_key=strategy_key,
             security_id=security_id,
             trading_symbol=trading_symbol,
             expiry_date=expiry_date,
@@ -173,8 +177,9 @@ class PositionService:
         self.repository.session.add(position)
         await self.repository.session.flush()
         logger.info(
-            "Position opened for %s (security_id=%s, lot size %s, expiry %s)",
-            trading_symbol, security_id, lot_size, expiry_date,
+            "Position opened for %s (strategy=%s, security_id=%s, lot size %s, "
+            "expiry %s)",
+            trading_symbol, strategy_key, security_id, lot_size, expiry_date,
         )
         return position
 

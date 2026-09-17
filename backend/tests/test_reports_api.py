@@ -8,6 +8,9 @@ from src.core.time_utils import utc_now
 from src.database.session import get_session_factory
 from src.orders.database.db_models.order_model import Order, OrderCharge, OrderFill
 
+# Every row in this suite belongs to the one configured strategy module.
+STRATEGY = "mcx-crude-options"
+
 
 async def _seed_round_trip():
     session = get_session_factory()()
@@ -15,6 +18,7 @@ async def _seed_round_trip():
         for side, price in (("BUY", "50"), ("SELL", "60")):
             when = utc_now()
             order = Order(
+                strategy_key=STRATEGY,
                 client_order_id=f"rt-{side}",
                 security_id="576375",
                 trading_symbol="CRUDEOIL 17 SEP 6800 CALL",

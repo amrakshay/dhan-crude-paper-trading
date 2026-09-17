@@ -7,6 +7,7 @@ import pytest
 from src.positions.database.db_operations.position_repository import PositionRepository
 from src.positions.services.position_service import PositionService
 
+STRATEGY = "mcx-crude-options"
 SECURITY = "576375"
 SYMBOL = "CRUDEOIL 17 SEP 6800 CALL"
 LOT = 100
@@ -19,6 +20,7 @@ async def service(db_session):
 
 async def _fill(service, side, quantity, price, charges="0"):
     return await service.apply_fill(
+        strategy_key=STRATEGY,
         security_id=SECURITY,
         trading_symbol=SYMBOL,
         side=side,

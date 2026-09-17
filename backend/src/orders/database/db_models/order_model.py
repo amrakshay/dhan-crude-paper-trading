@@ -24,6 +24,12 @@ class Order(TimestampedModel):
 
     client_order_id = Column(String(36), nullable=False, unique=True, index=True)
 
+    # Which strategy module this belongs to. STORED, not derived from the
+    # instrument at read time: instrument rows are upserted and deactivated
+    # across expiries, so a historical trade would lose the join the moment its
+    # contract expired, and its P&L would silently leave every filtered view.
+    strategy_key = Column(String(64), nullable=False, index=True)
+
     # Contract snapshot, denormalised so history survives an instrument-master
     # refresh that drops the expired security_id.
     security_id = Column(String(32), nullable=False, index=True)
@@ -76,6 +82,7 @@ class Order(TimestampedModel):
     __table_args__ = (
         Index("ix_orders_status_placed", "status", "placed_at"),
         Index("ix_orders_security_placed", "security_id", "placed_at"),
+        Index("ix_orders_strategy_placed", "strategy_key", "placed_at"),
     )
 
 

@@ -30,8 +30,11 @@ class ReportController:
         security_id: Optional[str] = None,
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
+        strategy_key: Optional[str] = None,
     ) -> PnlReportResponse:
-        report = await self.service.build_report(security_id, placed_from, placed_to)
+        report = await self.service.build_report(
+            security_id, placed_from, placed_to, strategy_key
+        )
         logger.debug(
             "Built P&L report (security=%s, from=%s, to=%s): realised gross %s, "
             "charges %s, net %s",
@@ -77,8 +80,11 @@ class ReportController:
         security_id: Optional[str] = None,
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
+        strategy_key: Optional[str] = None,
     ) -> str:
-        report = await self.service.build_report(security_id, placed_from, placed_to)
+        report = await self.service.build_report(
+            security_id, placed_from, placed_to, strategy_key
+        )
         logger.info(
             "Exporting realisations CSV (security=%s, from=%s, to=%s)",
             security_id or "all", placed_from, placed_to,
@@ -116,6 +122,7 @@ class ReportController:
         security_id: Optional[str] = None,
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
+        strategy_key: Optional[str] = None,
     ) -> str:
         """Every order with its full charges breakdown, one row each."""
         logger.info(
@@ -125,6 +132,7 @@ class ReportController:
         repository = OrderRepository(self.session)
         orders, _total = await repository.list_orders(
             security_id=security_id,
+            strategy_key=strategy_key,
             placed_from=placed_from,
             placed_to=placed_to,
             page=0,

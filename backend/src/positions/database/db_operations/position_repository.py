@@ -29,10 +29,16 @@ class PositionRepository(BaseRepository[Position]):
         )
         return list(result.scalars().all())
 
-    async def list_all(self, include_closed: bool = True) -> List[Position]:
+    async def list_all(
+        self,
+        include_closed: bool = True,
+        strategy_key: Optional[str] = None,
+    ) -> List[Position]:
         query = select(Position)
         if not include_closed:
             query = query.where(Position.is_open.is_(True))
+        if strategy_key:
+            query = query.where(Position.strategy_key == strategy_key)
         result = await self.session.execute(query.order_by(Position.opened_at.desc()))
         return list(result.scalars().all())
 

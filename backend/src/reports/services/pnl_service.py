@@ -107,10 +107,12 @@ class PnlService:
         security_id: Optional[str] = None,
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
+        strategy_key: Optional[str] = None,
     ) -> tuple[List[RealisationEvent], Dict[str, _RunningPosition]]:
         """Walk every fill oldest-first, emitting a realisation on each reduce."""
         rows = await self.orders.list_fills(
-            security_id=security_id, placed_from=placed_from, placed_to=placed_to
+            security_id=security_id, placed_from=placed_from, placed_to=placed_to,
+            strategy_key=strategy_key,
         )
 
         positions: Dict[str, _RunningPosition] = defaultdict(_RunningPosition)
@@ -171,10 +173,12 @@ class PnlService:
         security_id: Optional[str] = None,
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
+        strategy_key: Optional[str] = None,
     ) -> tuple[Dict[str, Decimal], Dict[date, Decimal], Decimal]:
         """Charge totals overall, and per IST calendar day."""
         orders, _total = await self.orders.list_orders(
             security_id=security_id,
+            strategy_key=strategy_key,
             placed_from=placed_from,
             placed_to=placed_to,
             page=0,
@@ -320,10 +324,16 @@ class PnlService:
         security_id: Optional[str] = None,
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
+        strategy_key: Optional[str] = None,
     ) -> PnlReport:
-        events, positions = await self.replay_fills(security_id, placed_from, placed_to)
+        # A DISABLED strategy's history is still reported. Its totals must not
+        # move when a toggle does (decision 3), so nothing here filters on
+        # whether a strategy is running -- only on which one is asked for.
+        events, positions = await self.replay_fills(
+            security_id, placed_from, placed_to, strategy_key
+        )
         components, charges_by_day, total_charges = await self.collect_charges(
-            security_id, placed_from, placed_to
+            security_id, placed_from, placed_to, strategy_key
         )
         unrealised, unmarked = self.compute_unrealised(positions)
 

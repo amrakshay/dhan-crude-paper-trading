@@ -58,6 +58,15 @@ async def submit_paper_order(
 @order_router.get("", response_model=OrderListResponse)
 async def list_orders(
     status: Optional[List[str]] = Query(None, description="Filter by order status"),
+    strategy_key: Optional[str] = Query(
+        None,
+        alias="strategyKey",
+        description=(
+            "Filter by strategy module. Omit for every strategy -- the history "
+            "of a DISABLED strategy is still returned, because turning a "
+            "strategy off must not hide trades that already happened."
+        ),
+    ),
     security_id: Optional[str] = Query(None, alias="securityId"),
     expiry: Optional[date] = Query(None),
     placed_from: Optional[datetime] = Query(None, alias="placedFrom"),
@@ -71,6 +80,7 @@ async def list_orders(
     """Order history with full state transitions, fills and charges."""
     return await controller.list_orders(
         statuses=status,
+        strategy_key=strategy_key,
         security_id=security_id,
         expiry_date=expiry,
         placed_from=placed_from,

@@ -35,6 +35,7 @@ from src.orders.database.db_operations.order_repository import OrderRepository
 from src.orders.services import fill_simulator
 from src.positions.database.db_operations.position_repository import PositionRepository
 from src.positions.services.position_service import PositionService
+from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("orders.service")
 
@@ -134,6 +135,20 @@ class OrderService:
             raise OrderValidationError(
                 f"{instrument.trading_symbol} is no longer active (expired series)."
             )
+
+        # Resolved HERE, once, from the contract's own segment and underlying,
+        # and then stored on the order. Never re-derived at read time -- the
+        # instrument row this came from will be deactivated when the series
+        # expires.
+        strategy = get_strategy_registry().for_instrument(
+            instrument.exchange_segment, instrument.underlying_symbol
+        )
+        if strategy is None:
+            raise OrderValidationError(
+                f"{instrument.trading_symbol} ({instrument.exchange_segment} "
+                f"{instrument.underlying_symbol}) belongs to no configured "
+                f"strategy module, so there is nothing to trade it under."
+            )
         if side not in (OrderSide.BUY.value, OrderSide.SELL.value):
             raise OrderValidationError(f"side must be BUY or SELL, got {side!r}")
         if order_type not in (OrderType.MARKET.value, OrderType.LIMIT.value):
@@ -162,6 +177,7 @@ class OrderService:
 
         order = Order(
             client_order_id=uuid.uuid4().hex,
+            strategy_key=strategy.key,
             security_id=instrument.security_id,
             trading_symbol=instrument.trading_symbol,
             expiry_date=instrument.expiry_date,
@@ -391,6 +407,7 @@ class OrderService:
         )
 
         await self.positions.apply_fill(
+            strategy_key=order.strategy_key,
             security_id=order.security_id,
             trading_symbol=order.trading_symbol,
             side=order.side,

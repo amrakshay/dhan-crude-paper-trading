@@ -20,6 +20,12 @@ from src.database.base import Money, PreciseDateTime, TimestampedModel
 class ChartTrade(TimestampedModel):
     __tablename__ = "chart_trades"
 
+    # Which strategy module this belongs to. STORED, not derived from the
+    # instrument at read time: instrument rows are upserted and deactivated
+    # across expiries, so a historical trade would lose the join the moment its
+    # contract expired, and its P&L would silently leave every filtered view.
+    strategy_key = Column(String(64), nullable=False, index=True)
+
     # The contract whose chart was traded (the near-month future).
     underlying_security_id = Column(String(32), nullable=False, index=True)
     underlying_symbol = Column(String(128), nullable=False)

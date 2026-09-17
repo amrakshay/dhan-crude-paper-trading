@@ -62,6 +62,9 @@ class PositionController:
         return None
 
     def _to_response(self, position) -> PositionResponse:
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        registry = get_strategy_registry()
         mark = self._mark_for(position.security_id)
         unrealized = self.service.unrealized_pnl(position, mark)
         response = PositionResponse.model_validate(position)
@@ -73,10 +76,19 @@ class PositionController:
             if position.lot_size
             else None
         )
+        definition = registry.get(position.strategy_key)
+        response.strategy_enabled = registry.is_enabled(position.strategy_key)
+        response.strategy_label = definition.label if definition else None
         return response
 
-    async def list_positions(self, include_closed: bool = False) -> PositionListResponse:
-        positions = await self.repository.list_all(include_closed=include_closed)
+    async def list_positions(
+        self,
+        include_closed: bool = False,
+        strategy_key: Optional[str] = None,
+    ) -> PositionListResponse:
+        positions = await self.repository.list_all(
+            include_closed=include_closed, strategy_key=strategy_key
+        )
         responses = [self._to_response(position) for position in positions]
 
         open_responses = [r for r in responses if r.is_open and r.net_quantity != 0]

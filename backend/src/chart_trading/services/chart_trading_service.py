@@ -310,6 +310,9 @@ class ChartTradingService:
 
         now = utc_now()
         trade = ChartTrade(
+            # The option's own strategy, taken from the order that bought it,
+            # so the chart trade and its order can never disagree.
+            strategy_key=order.strategy_key,
             underlying_security_id=underlying_security_id,
             underlying_symbol=underlying.trading_symbol,
             option_security_id=contract.security_id,

@@ -131,6 +131,7 @@ class OrderController:
     async def list_orders(
         self,
         statuses: Optional[List[str]] = None,
+        strategy_key: Optional[str] = None,
         security_id: Optional[str] = None,
         expiry_date: Optional[date] = None,
         placed_from: Optional[datetime] = None,
@@ -141,6 +142,7 @@ class OrderController:
     ) -> OrderListResponse:
         orders, total = await self.repository.list_orders(
             statuses=statuses,
+            strategy_key=strategy_key,
             security_id=security_id,
             expiry_date=expiry_date,
             placed_from=placed_from,

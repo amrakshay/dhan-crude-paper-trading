@@ -15,6 +15,12 @@ class Position(TimestampedModel):
 
     __tablename__ = "positions"
 
+    # Which strategy module this belongs to. STORED, not derived from the
+    # instrument at read time: instrument rows are upserted and deactivated
+    # across expiries, so a historical trade would lose the join the moment its
+    # contract expired, and its P&L would silently leave every filtered view.
+    strategy_key = Column(String(64), nullable=False, index=True)
+
     security_id = Column(String(32), nullable=False, index=True)
     trading_symbol = Column(String(128), nullable=False)
     expiry_date = Column(Date, nullable=True, index=True)

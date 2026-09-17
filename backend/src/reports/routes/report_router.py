@@ -24,6 +24,15 @@ async def get_report_controller(
 @report_router.get("/pnl", response_model=PnlReportResponse)
 async def get_pnl_report(
     security_id: Optional[str] = Query(None, alias="securityId"),
+    strategy_key: Optional[str] = Query(
+        None,
+        alias="strategyKey",
+        description=(
+            "Filter by strategy module. Omit for ALL strategies, including "
+            "disabled ones -- their history and their totals do not move when "
+            "a toggle does."
+        ),
+    ),
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
@@ -35,19 +44,32 @@ async def get_pnl_report(
     weighted-average rules the live positions use, so the two can never
     disagree.
     """
-    return await controller.build_report(security_id, placed_from, placed_to)
+    return await controller.build_report(
+        security_id, placed_from, placed_to, strategy_key
+    )
 
 
 @report_router.get("/pnl/export.csv")
 async def export_pnl_csv(
     security_id: Optional[str] = Query(None, alias="securityId"),
+    strategy_key: Optional[str] = Query(
+        None,
+        alias="strategyKey",
+        description=(
+            "Filter by strategy module. Omit for ALL strategies, including "
+            "disabled ones -- their history and their totals do not move when "
+            "a toggle does."
+        ),
+    ),
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
     _: SessionPrincipal = Depends(require_session),
 ) -> Response:
     """Every realisation event as CSV."""
-    content = await controller.export_realisations_csv(security_id, placed_from, placed_to)
+    content = await controller.export_realisations_csv(
+        security_id, placed_from, placed_to, strategy_key
+    )
     filename = f"pnl-{ist_now().strftime('%Y%m%d-%H%M')}.csv"
     return Response(
         content=content,
@@ -59,13 +81,24 @@ async def export_pnl_csv(
 @report_router.get("/orders/export.csv")
 async def export_orders_csv(
     security_id: Optional[str] = Query(None, alias="securityId"),
+    strategy_key: Optional[str] = Query(
+        None,
+        alias="strategyKey",
+        description=(
+            "Filter by strategy module. Omit for ALL strategies, including "
+            "disabled ones -- their history and their totals do not move when "
+            "a toggle does."
+        ),
+    ),
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
     _: SessionPrincipal = Depends(require_session),
 ) -> Response:
     """Every order with its full charges breakdown as CSV."""
-    content = await controller.export_orders_csv(security_id, placed_from, placed_to)
+    content = await controller.export_orders_csv(
+        security_id, placed_from, placed_to, strategy_key
+    )
     filename = f"orders-{ist_now().strftime('%Y%m%d-%H%M')}.csv"
     return Response(
         content=content,

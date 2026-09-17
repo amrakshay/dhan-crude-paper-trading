@@ -72,6 +72,7 @@ class OrderChargeResponse(BaseModel):
 class OrderResponse(BaseModel):
     id: int
     client_order_id: str = Field(alias="clientOrderId")
+    strategy_key: str = Field(alias="strategyKey")
     security_id: str = Field(alias="securityId")
     trading_symbol: str = Field(alias="tradingSymbol")
     expiry_date: Optional[date] = Field(None, alias="expiryDate")
