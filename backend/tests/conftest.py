@@ -6,6 +6,7 @@ YAML config and main.py read it at import time.
 import os
 import sys
 import tempfile
+from datetime import date, timedelta
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +30,26 @@ os.environ.setdefault("APP_ADMIN_PASSWORD", SEED_ADMIN_PASSWORD)
 os.environ.setdefault("APP_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("DHAN_SYNTHETIC_FEED", "true")
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB_PATH}"
+
+# ---------------------------------------------------------------------------
+# Expiry dates used across the suite.
+#
+# These are RELATIVE TO TODAY on purpose. The expiries endpoint, the chain's
+# default expiry and the feed's subscription policy all hide a series that has
+# already expired (`ChainService` filters on `ist_today()`), so a hardcoded
+# date turns the suite red on the morning it passes -- which is exactly what
+# happened on 2026-09-18, when the fixtures' 2026-09-17 option expiry became
+# yesterday and four tests started failing with no code change.
+#
+# The SHAPE is the real CRUDEOIL quirk documented in the root CLAUDE.md §5: an
+# option expires a few days BEFORE the future it is written on, so an option
+# expiry may never be mapped to a future by month name.
+# ---------------------------------------------------------------------------
+NEAR_OPTION_EXPIRY = date.today() + timedelta(days=7)
+NEAR_FUTURE_EXPIRY = NEAR_OPTION_EXPIRY + timedelta(days=4)
+FAR_OPTION_EXPIRY = NEAR_OPTION_EXPIRY + timedelta(days=28)
+FAR_FUTURE_EXPIRY = FAR_OPTION_EXPIRY + timedelta(days=4)
+
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402

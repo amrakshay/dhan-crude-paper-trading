@@ -12,6 +12,12 @@ from src.instruments.database.db_operations.instrument_repository import (
 )
 from src.market.services.feed_manager import FeedManager
 from src.market.services.synthetic_feed import SyntheticFeed
+from tests.conftest import (
+    FAR_FUTURE_EXPIRY,
+    FAR_OPTION_EXPIRY,
+    NEAR_FUTURE_EXPIRY,
+    NEAR_OPTION_EXPIRY,
+)
 
 
 def _contract(security_id, instrument_type, expiry, strike=None, option_type=None):
@@ -45,10 +51,10 @@ LADDER_STEP = 50
 async def _seed_universe(session):
     """A future plus a wide strike ladder over two expiries."""
     rows = [
-        _contract("565899", "FUTCOM", date(2026, 9, 21)),
-        _contract("569900", "FUTCOM", date(2026, 10, 19)),
+        _contract("565899", "FUTCOM", NEAR_FUTURE_EXPIRY),
+        _contract("569900", "FUTCOM", FAR_FUTURE_EXPIRY),
     ]
-    for expiry, prefix in ((date(2026, 9, 17), "S"), (date(2026, 10, 15), "O")):
+    for expiry, prefix in ((NEAR_OPTION_EXPIRY, "S"), (FAR_OPTION_EXPIRY, "O")):
         for index in range(LADDER_COUNT):
             strike = Decimal(LADDER_START + index * LADDER_STEP)
             rows.append(
@@ -89,7 +95,7 @@ async def test_only_the_nearest_expiries_are_subscribed(manager):
     await manager.resync()
 
     assert len(manager.subscribed_expiries) == 2
-    assert manager.subscribed_expiries == [date(2026, 9, 17), date(2026, 10, 15)]
+    assert manager.subscribed_expiries == [NEAR_OPTION_EXPIRY, FAR_OPTION_EXPIRY]
 
 
 async def test_resync_is_idempotent(manager):
