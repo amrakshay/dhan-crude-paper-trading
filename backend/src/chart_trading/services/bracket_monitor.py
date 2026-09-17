@@ -102,11 +102,24 @@ class BracketMonitor:
                 ChartTradingService,
             )
 
+            from src.strategies.services.strategy_registry import (
+                get_strategy_registry,
+            )
+
+            registry = get_strategy_registry()
             repository = ChartTradeRepository(session)
             armed = [
                 trade
                 for trade in await repository.list_open()
-                if trade.stop_loss_level is not None or trade.take_profit_level is not None
+                # A disabled strategy's brackets are NOT watched. That is a real
+                # consequence of switching one off -- a stop will not fire --
+                # which is why the toggle warns about it first, and why the
+                # levels are left in place rather than cleared.
+                if registry.is_enabled(trade.strategy_key)
+                and (
+                    trade.stop_loss_level is not None
+                    or trade.take_profit_level is not None
+                )
             ]
             if not armed:
                 return 0

@@ -18,7 +18,11 @@ export const ordersApi = {
 };
 
 export const positionsApi = {
-  list: (includeClosed = false) => api.get(`/positions?includeClosed=${includeClosed}`),
+  list: (includeClosed = false, portfolioId = null) =>
+    api.get(
+      `/positions?includeClosed=${includeClosed}` +
+        (portfolioId ? `&portfolioId=${encodeURIComponent(portfolioId)}` : ''),
+    ),
   close: (id, payload) => api.post(`/positions/${id}/close`, payload),
 };
 

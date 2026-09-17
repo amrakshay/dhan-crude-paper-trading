@@ -97,6 +97,11 @@ export default function ChartTradeHud({
   onAddTarget,
   disabled,
   disabledReason,
+  // One-click entry has no confirm step, so the money context has to be on
+  // screen BEFORE the click -- the same reasoning that already puts the
+  // premium and the charges there.
+  portfolioName,
+  availableBalance,
 }) {
   const theme = useTheme();
   const optionRow = useMarketRow(trade?.optionSecurityId);
@@ -126,6 +131,13 @@ export default function ChartTradeHud({
 
       {error ? <Alert severity="error">{error}</Alert> : null}
       {disabled && disabledReason ? <Alert severity="info">{disabledReason}</Alert> : null}
+
+      {availableBalance !== null && availableBalance !== undefined ? (
+        <Typography variant="caption" color="text.secondary" className="numeric">
+          Trading {portfolioName ?? 'the active portfolio'} · ₹
+          {formatMoney(Number(availableBalance))} available
+        </Typography>
+      ) : null}
 
       <Stack direction="row" spacing={2} alignItems="flex-start" flexWrap="wrap">
         {/* --- the two buttons, each with what it would cost ------------- */}

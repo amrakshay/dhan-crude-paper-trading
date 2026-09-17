@@ -8,12 +8,14 @@ import {
   CircularProgress,
   Collapse,
   FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   InputLabel,
   MenuItem,
   Select,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -32,6 +34,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import CancelIcon from '@mui/icons-material/Cancel';
 import { useTheme } from '@mui/material/styles';
 import { ordersApi } from '../api/trading';
+import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 import { notesApi, reportsApi } from '../api/reports';
 import ChargesBreakdown from '../components/ChargesBreakdown';
 import NoteDialog from '../components/NoteDialog';
@@ -180,6 +183,8 @@ export default function OrderHistoryPage() {
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(25);
   const [noteTarget, setNoteTarget] = useState(null);
+  const [allPortfolios, setAllPortfolios] = useState(false);
+  const { activeId: portfolioId, active: portfolio } = useActivePortfolio();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -187,6 +192,9 @@ export default function OrderHistoryPage() {
       const result = await ordersApi.list({
         status: status ? [status] : undefined,
         search: search || undefined,
+        // The header's scope, unless the user asked for everything. History is
+        // never hidden by a filter you cannot turn off.
+        portfolioId: allPortfolios ? undefined : portfolioId ?? undefined,
         page,
         size,
       });
@@ -205,7 +213,7 @@ export default function OrderHistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [status, search, page, size]);
+  }, [status, search, page, size, portfolioId, allPortfolios]);
 
   useEffect(() => {
     load();
@@ -229,6 +237,11 @@ export default function OrderHistoryPage() {
           <Typography variant="h2">Order History</Typography>
           <Typography variant="body2" color="text.secondary">
             Every order with its state transitions, fills and charges
+            {allPortfolios
+              ? ' — all portfolios'
+              : portfolio
+                ? ` — ${portfolio.name}`
+                : ''}
           </Typography>
         </Box>
         <Button
@@ -263,6 +276,19 @@ export default function OrderHistoryPage() {
             ))}
           </Select>
         </FormControl>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={allPortfolios}
+              onChange={(event) => {
+                setAllPortfolios(event.target.checked);
+                setPage(0);
+              }}
+            />
+          }
+          label={<Typography variant="body2">All portfolios</Typography>}
+        />
         <TextField
           size="small"
           label="Search contract"

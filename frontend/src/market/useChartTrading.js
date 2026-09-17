@@ -8,10 +8,13 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { chartTradingApi } from '../api/chartTrading';
+import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 
 const POLL_INTERVAL_MS = 2000;
 
 export function useChartTrading(securityId, expiry) {
+  const { activeId: portfolioId, active: portfolio, balance, refresh: refreshPortfolio } =
+    useActivePortfolio();
   const [state, setState] = useState(null);
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
@@ -24,7 +27,7 @@ export function useChartTrading(securityId, expiry) {
     if (!securityId) return;
     try {
       const [nextState, nextPreview] = await Promise.all([
-        chartTradingApi.state(securityId),
+        chartTradingApi.state(securityId, portfolioId),
         chartTradingApi.preview(securityId, expiry),
       ]);
       if (busyRef.current) return;
@@ -36,7 +39,7 @@ export function useChartTrading(securityId, expiry) {
     } finally {
       setLoading(false);
     }
-  }, [securityId, expiry]);
+  }, [securityId, expiry, portfolioId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,8 +77,17 @@ export function useChartTrading(securityId, expiry) {
   );
 
   const click = useCallback(
-    (side) => act(() => chartTradingApi.click(securityId, side, expiry)),
-    [act, securityId, expiry],
+    (side) =>
+      act(async () => {
+        const result = await chartTradingApi.click(
+          securityId, side, expiry, portfolioId,
+        );
+        // One click moves money, and the HUD shows the balance beside the
+        // cost, so the header figure must not lag behind the trade.
+        refreshPortfolio?.();
+        return result;
+      }),
+    [act, securityId, expiry, portfolioId, refreshPortfolio],
   );
 
   const setLevels = useCallback(
@@ -92,6 +104,10 @@ export function useChartTrading(securityId, expiry) {
     trade: state?.trade ?? null,
     underlyingPrice: state?.underlyingPrice ?? null,
     preview,
+    // The money context the HUD puts on screen BEFORE the click, because
+    // one-click entry has no confirm step to put it in.
+    portfolioName: portfolio?.name ?? null,
+    availableBalance: balance?.available ?? null,
     loading,
     busy,
     error,

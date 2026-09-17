@@ -8,8 +8,10 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  FormControlLabel,
   Grid,
   Stack,
+  Switch,
   Tab,
   Table,
   TableBody,
@@ -27,6 +29,7 @@ import { LineChart } from '@mui/x-charts/LineChart';
 import { useTheme } from '@mui/material/styles';
 import { reportsApi } from '../api/reports';
 import SyntheticBanner from '../components/SyntheticBanner';
+import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 import { formatPrice, formatQty } from '../utils/format';
 
 function Money({ value, bold = false }) {
@@ -142,13 +145,18 @@ export default function ReportsPage() {
   const [tab, setTab] = useState(0);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [allPortfolios, setAllPortfolios] = useState(false);
+  const { activeId: portfolioId, active: portfolio } = useActivePortfolio();
 
   const params = useMemo(() => {
     const value = {};
     if (from) value.from = `${from}T00:00:00`;
     if (to) value.to = `${to}T23:59:59`;
+    // The header's scope by default, with an explicit way out: the picker is a
+    // convenience, not a filter a reader can be trapped inside.
+    if (!allPortfolios && portfolioId) value.portfolioId = portfolioId;
     return value;
-  }, [from, to]);
+  }, [from, to, allPortfolios, portfolioId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,6 +176,10 @@ export default function ReportsPage() {
 
   const curve = report?.equityCurve ?? [];
   const hasCurve = curve.length > 0;
+  // Equity only exists for a single portfolio: summing cash across unrelated
+  // books would be a number nobody could act on, so the server sends null.
+  const hasEquity = curve.some((point) => point.equity !== null && point.equity !== undefined);
+  const cashFlowDays = curve.filter((point) => Number(point.cashFlow ?? 0) !== 0);
 
   const chargeRows = Object.entries(report?.chargeComponents ?? {});
   const chargeTotal = Number(report?.totalCharges ?? 0);
@@ -179,9 +191,24 @@ export default function ReportsPage() {
           <Typography variant="h2">P&amp;L Reports</Typography>
           <Typography variant="body2" color="text.secondary">
             Realised and unrealised, gross vs net of charges
+            {allPortfolios
+              ? ' — all portfolios'
+              : portfolio
+                ? ` — ${portfolio.name}`
+                : ''}
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={allPortfolios}
+                onChange={(event) => setAllPortfolios(event.target.checked)}
+              />
+            }
+            label={<Typography variant="body2">All portfolios</Typography>}
+          />
           <TextField
             size="small"
             type="date"
@@ -288,9 +315,23 @@ export default function ReportsPage() {
               <Typography variant="h4" sx={{ mb: 1 }}>
                 Equity curve
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Cumulative realised P&amp;L by day. The net line has charges applied on the day
-                they were incurred, so it steps down even on days that only opened positions.
+              <Typography variant="caption" color="text.secondary" component="div">
+                {hasEquity ? (
+                  <>
+                    <strong>Equity</strong> is the opening balance plus every deposit
+                    and withdrawal plus realised P&amp;L net of charges. Days where
+                    money moved in or out are listed below the chart — without
+                    that, a step up from a deposit reads as a trading result.
+                    Open positions are not marked into this line.
+                  </>
+                ) : (
+                  <>
+                    Cumulative realised P&amp;L by day. The net line has charges
+                    applied on the day they were incurred, so it steps down even on
+                    days that only opened positions. Select a single portfolio to
+                    see a real equity curve.
+                  </>
+                )}
               </Typography>
               {hasCurve ? (
                 <Box sx={{ mt: 2 }}>
@@ -298,6 +339,16 @@ export default function ReportsPage() {
                     height={300}
                     xAxis={[{ scaleType: 'point', data: curve.map((point) => point.date) }]}
                     series={[
+                      ...(hasEquity
+                        ? [
+                            {
+                              data: curve.map((point) => Number(point.equity)),
+                              label: 'Equity',
+                              color: theme.market.up,
+                              showMark: curve.length < 40,
+                            },
+                          ]
+                        : []),
                       {
                         data: curve.map((point) => Number(point.cumulativeGross)),
                         label: 'Cumulative gross',
@@ -313,6 +364,23 @@ export default function ReportsPage() {
                     ]}
                     margin={{ left: 70, right: 20, top: 30, bottom: 30 }}
                   />
+                  {cashFlowDays.length > 0 ? (
+                    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Money moved:
+                      </Typography>
+                      {cashFlowDays.map((point) => (
+                        <Chip
+                          key={point.date}
+                          size="small"
+                          variant="outlined"
+                          label={`${point.date} ${
+                            Number(point.cashFlow) >= 0 ? '+' : '−'
+                          }${formatPrice(Math.abs(Number(point.cashFlow)))}`}
+                        />
+                      ))}
+                    </Stack>
+                  ) : null}
                 </Box>
               ) : (
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>

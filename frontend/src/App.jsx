@@ -5,6 +5,7 @@ import RoleRoute from './auth/RoleRoute';
 import LoginPage from './auth/LoginPage';
 import LivePricePage from './pages/LivePricePage';
 import OptionChainPage from './pages/OptionChainPage';
+import PortfoliosPage from './pages/PortfoliosPage';
 import PositionsPage from './pages/PositionsPage';
 import OrderHistoryPage from './pages/OrderHistoryPage';
 import ReportsPage from './pages/ReportsPage';
@@ -12,6 +13,7 @@ import NotesPage from './pages/NotesPage';
 import UsersPage from './pages/UsersPage';
 import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
+import StrategiesPage from './pages/StrategiesPage';
 import SystemHealthPage from './pages/SystemHealthPage';
 
 /**
@@ -37,10 +39,12 @@ export default function App() {
         <Route path="/chain" element={<RoleRoute path="/chain"><OptionChainPage /></RoleRoute>} />
         <Route path="/positions" element={<RoleRoute path="/positions"><PositionsPage /></RoleRoute>} />
         <Route path="/orders" element={<RoleRoute path="/orders"><OrderHistoryPage /></RoleRoute>} />
+        <Route path="/portfolios" element={<RoleRoute path="/portfolios"><PortfoliosPage /></RoleRoute>} />
         <Route path="/reports" element={<RoleRoute path="/reports"><ReportsPage /></RoleRoute>} />
         <Route path="/notes" element={<RoleRoute path="/notes"><NotesPage /></RoleRoute>} />
         <Route path="/users" element={<RoleRoute path="/users"><UsersPage /></RoleRoute>} />
         <Route path="/profile" element={<RoleRoute path="/profile"><ProfilePage /></RoleRoute>} />
+        <Route path="/strategies" element={<RoleRoute path="/strategies"><StrategiesPage /></RoleRoute>} />
         <Route path="/settings" element={<RoleRoute path="/settings"><SettingsPage /></RoleRoute>} />
         <Route path="/health" element={<RoleRoute path="/health"><SystemHealthPage /></RoleRoute>} />
         <Route path="/" element={<Navigate to="/live" replace />} />

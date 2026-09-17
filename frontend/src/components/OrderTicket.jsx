@@ -23,6 +23,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { ordersApi } from '../api/trading';
 import { useMarketRow } from '../market/MarketFeedContext';
+import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 import ChargesBreakdown from './ChargesBreakdown';
 import { formatPrice, formatQty } from '../utils/format';
 
@@ -34,6 +35,11 @@ import { formatPrice, formatQty } from '../utils/format';
  * simulation the real order will run, against the same book, so what is shown
  * is what will happen -- including a warning when the order would only
  * partially fill or would rest instead of filling.
+ *
+ * The same rule now applies to MONEY. The debit is shown beside the active
+ * portfolio's available balance, and Confirm is disabled when it does not fit
+ * -- the server refuses it anyway, but finding that out after clicking is a
+ * worse way to learn it.
  */
 export default function OrderTicket({ open, contract, onClose, onPlaced, defaultSide = 'BUY' }) {
   const theme = useTheme();
@@ -48,6 +54,8 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
 
   const securityId = contract?.securityId;
   const row = useMarketRow(securityId);
+  const { activeId: portfolioId, active: portfolio, refresh: refreshPortfolio } =
+    useActivePortfolio();
   const previewSeq = useRef(0);
 
   useEffect(() => {
@@ -81,6 +89,9 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
         orderType,
         lots: Number(lots),
         limitPrice: orderType === 'LIMIT' ? limitPrice : undefined,
+        // Named explicitly so the server can answer affordability. It never
+        // infers the portfolio from the session.
+        portfolioId: portfolioId ?? undefined,
       });
       // Ignore a stale response that lost the race with a newer edit.
       if (seq === previewSeq.current) setPreview(result);
@@ -92,7 +103,7 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
     } finally {
       if (seq === previewSeq.current) setPreviewing(false);
     }
-  }, [securityId, side, orderType, lots, limitPrice]);
+  }, [securityId, side, orderType, lots, limitPrice, portfolioId]);
 
   // Re-preview on input change, debounced so typing a limit price does not
   // hammer the endpoint.
@@ -112,7 +123,10 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
         orderType,
         lots: Number(lots),
         limitPrice: orderType === 'LIMIT' ? limitPrice : undefined,
+        portfolioId: portfolioId ?? undefined,
       });
+      // The header's available balance has just moved.
+      refreshPortfolio?.();
       onPlaced?.(order);
       onClose?.();
     } catch (placeError) {
@@ -124,8 +138,15 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
 
   const sideColor = side === 'BUY' ? theme.market.up : theme.market.down;
   const netAmount = preview ? Number(preview.netAmount) : null;
+  // `affordable` is null when no portfolio was named, which is not a refusal.
+  const unaffordable = preview?.affordable === false;
   const canPlace =
-    !!preview && !previewing && !placing && !preview.rejectionReason && Number(lots) >= 1;
+    !!preview &&
+    !previewing &&
+    !placing &&
+    !preview.rejectionReason &&
+    !unaffordable &&
+    Number(lots) >= 1;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -226,6 +247,16 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
             </Alert>
           ) : null}
 
+          {unaffordable ? (
+            <Alert severity="error">
+              {portfolio?.name ?? 'This portfolio'} has{' '}
+              <strong>{formatPrice(Number(preview.availableBalance))}</strong>{' '}
+              available and this order needs{' '}
+              <strong>{formatPrice(Number(preview.estimatedDebit))}</strong>.
+              Deposit more, trade fewer lots, or switch portfolio.
+            </Alert>
+          ) : null}
+
           {preview?.wouldPartiallyFill ? (
             <Alert severity="warning">
               The visible book only supports{' '}
@@ -269,6 +300,22 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
               <ChargesBreakdown charges={preview.charges} dense />
 
               <Divider />
+
+              {preview.availableBalance !== null &&
+              preview.availableBalance !== undefined ? (
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="body2" color="text.secondary">
+                    Available in {portfolio?.name ?? 'portfolio'}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    className="numeric"
+                    sx={{ color: unaffordable ? theme.market.down : 'text.primary' }}
+                  >
+                    {formatPrice(Number(preview.availableBalance))}
+                  </Typography>
+                </Stack>
+              ) : null}
 
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography variant="subtitle1">

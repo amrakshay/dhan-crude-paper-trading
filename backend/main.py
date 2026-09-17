@@ -62,6 +62,21 @@ async def _seed_default_administrator() -> None:
         )
 
 
+async def _apply_strategy_state() -> None:
+    from src.database.session import session_scope
+    from src.strategies.services.strategy_state_service import StrategyStateService
+
+    try:
+        async with session_scope() as session:
+            state = await StrategyStateService(session).apply_stored_state()
+        logger.info("Strategy state from the database: %s", state)
+    except Exception:
+        logger.exception(
+            "Could not read stored strategy state; running with the defaults "
+            "from conf/strategies/*.yaml"
+        )
+
+
 async def _ensure_default_portfolio() -> None:
     """Create the configured default portfolio if there is none at all.
 
@@ -196,6 +211,11 @@ async def lifespan(app: FastAPI):
     # each strategy IS comes from those files; whether it is RUNNING comes from
     # the database, applied next.
     _load_strategy_modules()
+    # Which of them are RUNNING comes from the database, and it must be applied
+    # BEFORE the feed starts: the feed reads the enabled set when it builds its
+    # first subscription, so applying this afterwards would start it on the
+    # wrong instruments and only correct itself at the next toggle.
+    await _apply_strategy_state()
 
     # BEFORE the feed starts: settings saved in the UI beat .env, and the feed
     # reads its credentials and its synthetic flag out of the config this
@@ -381,6 +401,7 @@ from src.chart_trading import chart_trading_main_router  # noqa: E402
 from src.orders import orders_main_router  # noqa: E402
 from src.notes import notes_main_router  # noqa: E402
 from src.portfolios import portfolios_main_router  # noqa: E402
+from src.strategies import strategies_main_router  # noqa: E402
 from src.positions import positions_main_router  # noqa: E402
 from src.reports import reports_main_router  # noqa: E402
 from src.settings import settings_main_router  # noqa: E402
@@ -396,6 +417,7 @@ app.include_router(orders_main_router, prefix="/api")
 app.include_router(chart_trading_main_router, prefix="/api")
 app.include_router(positions_main_router, prefix="/api")
 app.include_router(portfolios_main_router, prefix="/api")
+app.include_router(strategies_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")

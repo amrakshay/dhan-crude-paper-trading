@@ -76,6 +76,20 @@ def _transient_task_count(running: Dict[str, int]) -> int:
     return sum(count for name, count in running.items() if not _is_known_task(name))
 
 
+def _greeks_expected() -> bool:
+    from src.strategies.services.strategy_definition import CAPABILITY_GREEKS
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    return get_strategy_registry().capability_active_anywhere(CAPABILITY_GREEKS)
+
+
+def _chart_trading_expected() -> bool:
+    from src.strategies.services.strategy_definition import CAPABILITY_CHART_TRADING
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    return get_strategy_registry().capability_active_anywhere(CAPABILITY_CHART_TRADING)
+
+
 def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
     """Which named tasks should be alive, given the current configuration."""
     expected: Set[str] = set()
@@ -90,7 +104,11 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
             expected.add("synthetic-feed")
         else:
             expected.update({"dhan-feed", "dhan-feed-watchdog"})
-        if config_utils.get_property_value_boolean("greeks_poller.enabled", True):
+        # The greeks poller runs only while some RUNNING strategy wants
+        # greeks. Switching the last one off stops it, and the health page must
+        # not then report it as a missing task -- a false problem on the page
+        # whose whole job is to surface real ones.
+        if _greeks_expected():
             expected.add("greeks-poller")
     else:
         # Credentials missing and synthetic off: start() bails after starting
@@ -99,7 +117,7 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
 
     if config_utils.get_property_value_boolean("trading.matcher_enabled", True):
         expected.add("order-matcher")
-    if config_utils.get_property_value_boolean("chart_trading.enabled", True):
+    if _chart_trading_expected():
         expected.add("bracket-monitor")
 
     return expected

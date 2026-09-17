@@ -169,6 +169,17 @@ class OrderService:
                 f"{instrument.underlying_symbol}) belongs to no configured "
                 f"strategy module, so there is nothing to trade it under."
             )
+        # A disabled strategy refuses with a SPECIFIC message rather than a
+        # 404 that reads like a routing bug. Closing an existing position is
+        # still allowed: switching a strategy off must not trap a trader in a
+        # position it opened.
+        if not get_strategy_registry().is_enabled(strategy.key) and not is_close_order:
+            raise OrderValidationError(
+                f"The {strategy.label} strategy is switched off, so new "
+                f"positions cannot be opened in it. Its open positions can "
+                f"still be closed, and its history is unchanged. Switch it "
+                f"back on from Strategies & Features."
+            )
         if side not in (OrderSide.BUY.value, OrderSide.SELL.value):
             raise OrderValidationError(f"side must be BUY or SELL, got {side!r}")
         if order_type not in (OrderType.MARKET.value, OrderType.LIMIT.value):
@@ -364,8 +375,15 @@ class OrderService:
             return 0
 
         filled = 0
+        registry = get_strategy_registry()
         for order in open_orders:
             if order.order_type != OrderType.LIMIT.value:
+                continue
+            # A disabled strategy's resting orders are FROZEN, not cancelled.
+            # They stay OPEN, nothing fills them, and they resume when the
+            # strategy comes back on -- cancelling them would destroy work an
+            # operator set up, and this way is recoverable.
+            if not registry.is_enabled(order.strategy_key):
                 continue
             remaining = int(order.quantity) - int(order.filled_quantity or 0)
             if remaining <= 0:

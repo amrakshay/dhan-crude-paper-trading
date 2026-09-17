@@ -9,15 +9,23 @@
     "and tests/test_users_api.py asserts a ROLE_USER is refused by the settings",
     "endpoints even when it calls them directly.",
     "",
-    "Paths must match frontend/src/layout/navigation.js."
+    "Paths must match frontend/src/layout/navigation.js.",
+    "",
+    "A page listed here can still be hidden by a FEATURE toggle: the effective",
+    "set is these pages intersected with what the enabled strategies and",
+    "capabilities grant (see pages_for_role). Only /live, /chain, /notes and",
+    "/reports are gated that way; the rest, including everything that shows",
+    "history, are never withdrawn."
   ],
   "pages": [
     "/live",
     "/chain",
     "/positions",
     "/orders",
+    "/portfolios",
     "/reports",
     "/notes",
+    "/strategies",
     "/users",
     "/profile",
     "/settings",
@@ -26,14 +34,16 @@
   "roles": {
     "ROLE_ACCOUNT_ADMIN": {
       "label": "Account admin",
-      "description": "Full access, including Settings, system health and user management.",
+      "description": "Full access, including Settings, system health, portfolios, strategies and user management.",
       "pages": [
         "/live",
         "/chain",
         "/positions",
         "/orders",
+        "/portfolios",
         "/reports",
         "/notes",
+        "/strategies",
         "/users",
         "/profile",
         "/settings",
@@ -42,12 +52,13 @@
     },
     "ROLE_USER": {
       "label": "User",
-      "description": "Everything except Settings and System Health. Sees the user list but cannot change it.",
+      "description": "Everything except Settings, System Health and Strategies. Sees portfolios and the user list but cannot change either.",
       "pages": [
         "/live",
         "/chain",
         "/positions",
         "/orders",
+        "/portfolios",
         "/reports",
         "/notes",
         "/users",

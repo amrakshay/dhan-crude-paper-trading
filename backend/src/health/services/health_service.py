@@ -476,7 +476,59 @@ def build_health(
             "strikeWindow": status.get("strikeWindow"),
             "windowCentre": status.get("windowCentre"),
         },
+        # What is switched on, and the ongoing consequences of what is not.
+        # A strategy switched off with open positions is a CONDITION, not an
+        # event: those positions stop being marked for as long as it is off,
+        # and this page is where that belongs.
+        "features": _features_health(),
         "problems": problems_health(problem_limit),
+    }
+
+
+def _features_health() -> Dict[str, Any]:
+    """Which strategies and capabilities are running, and what is not.
+
+    No secrets here and none possible: a strategy's key, label, underlying and
+    exchange segment are the same public facts the Option Chain page shows.
+    """
+    from src.market.services.feed_manager import get_feed_manager
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    manager = get_feed_manager()
+
+    strategies = []
+    for definition in registry.all():
+        enabled = registry.is_enabled(definition.key)
+        state = manager.strategy_state.get(definition.key)
+        strategies.append(
+            {
+                "key": definition.key,
+                "label": definition.label,
+                "enabled": enabled,
+                "symbol": definition.symbol,
+                "exchangeSegment": definition.exchange_segment,
+                "instrumentsSubscribed": state.instrument_count if state else 0,
+                "subscribedExpiries": (
+                    [expiry.isoformat() for expiry in state.subscribed_expiries]
+                    if state
+                    else []
+                ),
+                "activeCapabilities": sorted(
+                    capability
+                    for capability in definition.capabilities
+                    if registry.capability_active(capability, definition.key)
+                ),
+            }
+        )
+
+    return {
+        "strategies": strategies,
+        "capabilities": registry.capability_states(),
+        "pages": sorted(registry.feature_pages()),
+        "disabledStrategies": [
+            definition.key for definition in registry.disabled()
+        ],
     }
 
 

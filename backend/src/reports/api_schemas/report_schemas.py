@@ -23,6 +23,13 @@ class EquityPointResponse(BaseModel):
     net_pnl: Decimal = Field(alias="netPnl")
     cumulative_gross: Decimal = Field(alias="cumulativeGross")
     cumulative_net: Decimal = Field(alias="cumulativeNet")
+    # Deposits and withdrawals on this day, signed. Carried so the chart can
+    # MARK them: a curve that jumps because money was paid in, with nothing
+    # saying so, reads as a trading result and is not one.
+    cash_flow: Decimal = Field(Decimal("0"), alias="cashFlow")
+    # Opening balance + cash flows + realised net. None in the all-portfolios
+    # view, where summing cash across unrelated books would be meaningless.
+    equity: Optional[Decimal] = None
 
     model_config = ConfigDict(populate_by_name=True)
 

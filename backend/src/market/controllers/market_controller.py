@@ -10,6 +10,7 @@ from src.market.api_schemas.market_schemas import (
 )
 from src.market.services.candle_service import (
     CandleError,
+    FeatureDisabled,
     CandlesUnavailable,
     DEFAULT_TIMEFRAME,
     UnknownTimeframe,
@@ -34,6 +35,10 @@ class MarketController:
             payload = await self.candles.get_candles(security_id, timeframe)
         except UnknownTimeframe as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        except FeatureDisabled as error:
+            # 409, not 404 or 502: the request is well formed and the upstream
+            # is fine -- this is simply switched off.
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except CandlesUnavailable as error:
             # 503: the request is fine, the data source is not configured.
             raise HTTPException(status_code=503, detail=str(error)) from error

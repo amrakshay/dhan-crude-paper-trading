@@ -108,7 +108,20 @@ class ChartTradingService:
 
     @staticmethod
     def _enabled() -> bool:
-        return config_utils.get_property_value_boolean("chart_trading.enabled", True)
+        """Is chart trading effective for at least one running strategy?
+
+        The capability toggle has replaced the ad-hoc `chart_trading.enabled`
+        flag, which is still read as the capability's default so an operator
+        who set it keeps what they configured.
+        """
+        from src.strategies.services.strategy_definition import (
+            CAPABILITY_CHART_TRADING,
+        )
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        return get_strategy_registry().capability_active_anywhere(
+            CAPABILITY_CHART_TRADING
+        )
 
     @property
     def book(self):
@@ -261,7 +274,10 @@ class ChartTradingService:
         must not close the other.
         """
         if not self._enabled():
-            raise ChartTradingError("Chart trading is disabled (chart_trading.enabled=false).")
+            raise ChartTradingError(
+                "Chart trading is switched off. Switch it back on from "
+                "Strategies & Features."
+            )
 
         side = str(side).upper()
         if side not in (SIDE_BUY, SIDE_SELL):

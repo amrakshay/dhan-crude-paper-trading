@@ -341,6 +341,97 @@ async def test_buffered_log_records_reach_the_health_endpoint_already_redacted(
             handler.clear()
 
 
+async def test_the_strategies_endpoint_never_returns_a_secret(
+    auth_client, captured_logs
+):
+    """Strategies & Features shows configuration, so it is checked like Health.
+
+    It reports a strategy's underlying, its rate card version and its margin
+    model -- public facts -- and must never reach into the Dhan credentials or
+    the application secrets that sit in the same config tree.
+    """
+    import os
+
+    token = _sentinel_token()
+    saved = await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    response = await auth_client.get("/api/strategies")
+
+    assert response.status_code == 200, response.text
+    assert token not in response.text
+    for part in token.split("."):
+        if len(part) >= 9:
+            assert part not in response.text
+    assert SENTINEL_CLIENT_ID not in response.text
+    for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+        value = os.environ.get(name)
+        if value and len(value) >= 9:
+            assert value not in response.text, f"{name} reached the strategies payload"
+    assert "jwt_secret" not in response.text
+    assert "encryption_key" not in response.text
+    assert "access_token" not in response.text
+    _assert_clean(captured_logs, token)
+
+
+async def test_the_portfolios_endpoint_never_returns_a_secret(
+    auth_client, captured_logs
+):
+    """Portfolios shows money and configuration; same rule, same assertions."""
+    import os
+
+    token = _sentinel_token()
+    await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+
+    listed = await auth_client.get("/api/portfolios")
+    assert listed.status_code == 200, listed.text
+    portfolio_id = listed.json()["portfolios"][0]["id"]
+    ledger = await auth_client.get(f"/api/portfolios/{portfolio_id}/ledger")
+
+    for response in (listed, ledger):
+        assert token not in response.text
+        for part in token.split("."):
+            if len(part) >= 9:
+                assert part not in response.text
+        assert SENTINEL_CLIENT_ID not in response.text
+        for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+            value = os.environ.get(name)
+            if value and len(value) >= 9:
+                assert value not in response.text
+    _assert_clean(captured_logs, token)
+
+
+async def test_the_health_endpoint_feature_block_carries_no_secret(auth_client):
+    """The features block was added to the health payload; its assertion goes
+    in with it, per the root CLAUDE.md rule."""
+    import os
+
+    response = await auth_client.get("/api/healthcheck/system")
+    features = response.json()["features"]
+    text = str(features)
+
+    assert features["strategies"], "the block must actually report something"
+    for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+        value = os.environ.get(name)
+        if value and len(value) >= 9:
+            assert value not in text
+    assert "token" not in text.lower()
+
+
 async def test_a_plain_user_cannot_read_the_health_endpoints(auth_client):
     """Admin-only at the route, not merely hidden from the sidebar."""
     import httpx

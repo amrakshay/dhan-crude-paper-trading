@@ -25,6 +25,8 @@ import { useAuth } from '../auth/AuthContext';
 import { visibleNavigationItems } from './navigation';
 import FeedStatusIndicator from '../components/FeedStatusIndicator';
 import { MarketFeedProvider } from '../market/MarketFeedContext';
+import { ActivePortfolioProvider } from '../portfolios/ActivePortfolioContext';
+import PortfolioSelector from '../components/PortfolioSelector';
 
 function AppShellInner() {
   const { mode, toggle } = useColorMode();
@@ -63,6 +65,8 @@ function AppShellInner() {
           </Typography>
 
           <Box sx={{ flexGrow: 1 }} />
+
+          <PortfolioSelector />
 
           <FeedStatusIndicator />
 
@@ -153,11 +157,18 @@ function AppShellInner() {
 /**
  * The market feed socket is opened once, around the whole authenticated shell,
  * so navigating between pages never tears it down and reconnects.
+ *
+ * The active portfolio is a SEPARATE provider, deliberately outside the feed
+ * context rather than inside it: the feed context has a performance contract
+ * (rows in a ref, one version bump per batch) and a portfolio change must not
+ * re-render every subscriber to it (frontend/CLAUDE.md section 2).
  */
 export default function AppShell() {
   return (
-    <MarketFeedProvider>
-      <AppShellInner />
-    </MarketFeedProvider>
+    <ActivePortfolioProvider>
+      <MarketFeedProvider>
+        <AppShellInner />
+      </MarketFeedProvider>
+    </ActivePortfolioProvider>
   );
 }

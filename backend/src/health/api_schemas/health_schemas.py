@@ -36,6 +36,10 @@ class SystemHealthResponse(BaseModel):
     market: Dict[str, Any] = Field(default_factory=dict)
     workers: Dict[str, Any] = Field(default_factory=dict)
     data_freshness: Dict[str, Any] = Field(alias="dataFreshness")
+    # Which strategies and capabilities are running. Public facts only -- a
+    # key, a label, an underlying and a segment, all of which the Option Chain
+    # page already shows -- so there is nothing here to redact.
+    features: Dict[str, Any] = Field(default_factory=dict)
     problems: Dict[str, Any]
 
     model_config = ConfigDict(populate_by_name=True)

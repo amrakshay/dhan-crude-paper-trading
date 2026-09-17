@@ -18,6 +18,9 @@ from src.portfolios.database.db_models.portfolio_model import (  # noqa: F401
 )
 from src.positions.database.db_models.position_model import Position  # noqa: F401
 from src.settings.database.db_models.app_setting_model import AppSetting  # noqa: F401
+from src.strategies.database.db_models.feature_toggle_model import (  # noqa: F401
+    FeatureToggle,
+)
 from src.users.database.db_models.user_model import User  # noqa: F401
 
 __all__ = [
@@ -33,5 +36,6 @@ __all__ = [
     "Position",
     "TradeNote",
     "AppSetting",
+    "FeatureToggle",
     "User",
 ]

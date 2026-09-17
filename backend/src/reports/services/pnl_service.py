@@ -297,38 +297,94 @@ class PnlService:
 
     @staticmethod
     def build_equity_curve(
-        events: List[RealisationEvent], charges_by_day: Dict[date, Decimal]
+        events: List[RealisationEvent],
+        charges_by_day: Dict[date, Decimal],
+        cash_flows_by_day: Optional[Dict[date, Decimal]] = None,
+        opening_balance: Optional[Decimal] = None,
     ) -> List[Dict[str, Any]]:
-        """Cumulative realised P&L over time, gross and net of charges.
+        """Cumulative realised P&L, and -- with a portfolio -- real EQUITY.
 
         Points are placed at realisation events. Charges are applied on the day
         they were incurred, so the net line steps down even on days with no
         realisation (for example a day that only opened positions).
+
+        When a portfolio is in scope, `equity` is the line that actually means
+        something: opening balance, plus every deposit and withdrawal, plus
+        realised P&L net of charges. The deposits and withdrawals are carried on
+        each point as `cashFlow` so the chart can MARK them -- a curve that
+        jumps because money was paid in, with nothing saying so, looks like a
+        trading result and is not one.
+
+        Without a portfolio (the all-portfolios view) `equity` is null rather
+        than a sum across books that have nothing to do with each other.
         """
         by_day_gross: Dict[date, Decimal] = defaultdict(lambda: ZERO)
         for event in events:
             by_day_gross[to_ist(event.at).date()] += event.gross_pnl
 
-        all_days = sorted(set(by_day_gross) | set(charges_by_day))
+        cash_flows_by_day = cash_flows_by_day or {}
+        all_days = sorted(
+            set(by_day_gross) | set(charges_by_day) | set(cash_flows_by_day)
+        )
         curve = []
         cumulative_gross = ZERO
         cumulative_net = ZERO
+        cumulative_flow = ZERO
         for day in all_days:
             gross = by_day_gross.get(day, ZERO)
             charges = charges_by_day.get(day, ZERO)
+            flow = cash_flows_by_day.get(day, ZERO)
             cumulative_gross += gross
             cumulative_net += gross - charges
-            curve.append(
-                {
-                    "date": day.isoformat(),
-                    "grossPnl": _q(gross),
-                    "charges": _q(charges),
-                    "netPnl": _q(gross - charges),
-                    "cumulativeGross": _q(cumulative_gross),
-                    "cumulativeNet": _q(cumulative_net),
-                }
-            )
+            cumulative_flow += flow
+            point = {
+                "date": day.isoformat(),
+                "grossPnl": _q(gross),
+                "charges": _q(charges),
+                "netPnl": _q(gross - charges),
+                "cumulativeGross": _q(cumulative_gross),
+                "cumulativeNet": _q(cumulative_net),
+                "cashFlow": _q(flow),
+                "equity": None,
+            }
+            if opening_balance is not None:
+                point["equity"] = _q(
+                    opening_balance + cumulative_flow + cumulative_net
+                )
+            curve.append(point)
         return curve
+
+    async def _cash_flows(
+        self, portfolio_id: Optional[int]
+    ) -> tuple[Dict[date, Decimal], Optional[Decimal]]:
+        """Deposits and withdrawals per IST day, and the balance before them.
+
+        The "opening balance" here is zero by construction: the very first
+        deposit a portfolio receives IS the opening balance, and it is already
+        one of these entries. Returning zero rather than None is what tells the
+        curve builder that equity can be computed at all.
+        """
+        if portfolio_id is None:
+            return {}, None
+
+        from sqlalchemy import select
+
+        from src.portfolios.database.db_models.portfolio_model import (
+            ENTRY_DEPOSIT,
+            ENTRY_WITHDRAWAL,
+            CashLedgerEntry,
+        )
+
+        result = await self.orders.session.execute(
+            select(CashLedgerEntry.entry_at, CashLedgerEntry.amount).where(
+                CashLedgerEntry.portfolio_id == int(portfolio_id),
+                CashLedgerEntry.entry_type.in_([ENTRY_DEPOSIT, ENTRY_WITHDRAWAL]),
+            )
+        )
+        flows: Dict[date, Decimal] = defaultdict(lambda: ZERO)
+        for entry_at, amount in result.all():
+            flows[to_ist(entry_at).date()] += Decimal(str(amount))
+        return dict(flows), ZERO
 
     # --- report ------------------------------------------------------------
     async def build_report(
@@ -349,6 +405,11 @@ class PnlService:
             security_id, placed_from, placed_to, strategy_key, portfolio_id
         )
         unrealised, unmarked = self.compute_unrealised(positions)
+        # Deposits and withdrawals, so the curve can be an equity curve rather
+        # than a P&L line wearing its name. Only meaningful for ONE portfolio:
+        # summing cash across books that have nothing to do with each other
+        # would produce a number nobody could act on.
+        cash_flows, opening_balance = await self._cash_flows(portfolio_id)
 
         realised_gross = _q(sum((event.gross_pnl for event in events), ZERO))
         realised_net = _q(realised_gross - total_charges)
@@ -378,7 +439,9 @@ class PnlService:
                     f"{int(key[0])} {key[1]}" if key[0] is not None else "unknown"
                 ),
             ),
-            equity_curve=self.build_equity_curve(events, charges_by_day),
+            equity_curve=self.build_equity_curve(
+                events, charges_by_day, cash_flows, opening_balance
+            ),
             open_positions_without_marks=unmarked,
             trade_count=len(events),
             win_count=sum(1 for event in events if event.gross_pnl > 0),

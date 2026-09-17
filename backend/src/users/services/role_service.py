@@ -28,12 +28,12 @@ ROLE_PAGES_FILE = "role-pages.json"
 # silently hand out the admin surface.
 FALLBACK_PAGES: Dict[str, List[str]] = {
     UserRole.ACCOUNT_ADMIN.value: [
-        "/live", "/chain", "/positions", "/orders", "/reports", "/notes",
-        "/users", "/profile", "/settings",
+        "/live", "/chain", "/positions", "/orders", "/portfolios", "/reports",
+        "/notes", "/strategies", "/users", "/profile", "/settings",
     ],
     UserRole.USER.value: [
-        "/live", "/chain", "/positions", "/orders", "/reports", "/notes",
-        "/users", "/profile",
+        "/live", "/chain", "/positions", "/orders", "/portfolios", "/reports",
+        "/notes", "/users", "/profile",
     ],
 }
 
@@ -86,7 +86,22 @@ def reload_role_pages() -> Dict[str, Any]:
 
 
 def pages_for_role(role: str) -> List[str]:
-    """Pages this role may see. An unknown role gets nothing."""
+    """Pages this role may see, given what is switched on.
+
+    Effective pages are **role pages INTERSECT enabled-feature pages**. One
+    intersection, computed here, and the sidebar, the client-side routes and
+    anything else reading `/auth/me` follow from it -- there is deliberately no
+    second gating mechanism in the frontend.
+
+    Only pages that a strategy or capability actually grants are gated. A page
+    outside that set (Positions, Order History, Profile, Users, Settings) is
+    never withdrawn by a toggle: history must stay readable when a strategy is
+    switched off, and locking an admin out of Settings because a capability was
+    disabled would be absurd.
+
+    This is still presentation. The API refuses what the role may not do, and a
+    disabled feature's endpoints refuse on their own.
+    """
     roles = load_role_pages().get("roles") or {}
     spec = roles.get(role)
     if spec is None:
@@ -95,7 +110,24 @@ def pages_for_role(role: str) -> List[str]:
             role, role_pages_path(),
         )
         return []
-    return list(spec.get("pages") or [])
+
+    granted = list(spec.get("pages") or [])
+    try:
+        from src.strategies.services.strategy_registry import (
+            StrategyRegistry,
+            get_strategy_registry,
+        )
+
+        gated = StrategyRegistry.gated_pages()
+        available = get_strategy_registry().feature_pages()
+    except Exception:  # noqa: BLE001 - never lock the UI out over a config error
+        logger.exception(
+            "Could not read the strategy registry; showing every page this role "
+            "has rather than hiding pages because of a configuration error"
+        )
+        return granted
+
+    return [page for page in granted if page not in gated or page in available]
 
 
 def can_access_page(role: str, page: str) -> bool:

@@ -90,6 +90,16 @@ class CandlesUnavailable(CandleError):
     """No credentials and no synthetic feed -- there is nothing to draw."""
 
 
+class FeatureDisabled(CandleError):
+    """The chart is switched off for this instrument.
+
+    Its own class so the controller can answer 409 -- the request is valid and
+    the data source is fine, the operator has simply turned this off. A 404
+    would read like a routing bug and a 502 like an upstream failure; both send
+    whoever is debugging it to the wrong place.
+    """
+
+
 @dataclass(frozen=True)
 class Timeframe:
     key: str                      # what the API and the UI call it
@@ -272,6 +282,36 @@ class CandleService:
     def _synthetic_enabled() -> bool:
         return config_utils.get_property_value_boolean("market_feed.synthetic_feed", False)
 
+    @staticmethod
+    def _require_price_chart(security_id: str) -> None:
+        """Refuse with a REASON when the chart is switched off for this
+        instrument, rather than fetching bars nobody asked to pay for.
+
+        A disabled strategy makes no outbound chart request: that is one of the
+        concrete costs switching it off is meant to remove. The refusal names
+        what is off, because a 404 here reads like a routing bug.
+        """
+        from src.market.services.feed_manager import get_feed_manager
+        from src.strategies.services.strategy_definition import CAPABILITY_PRICE_CHART
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        registry = get_strategy_registry()
+        if not registry.is_capability_enabled(CAPABILITY_PRICE_CHART):
+            raise FeatureDisabled(
+                "The price chart is switched off. Switch it back on from "
+                "Strategies & Features."
+            )
+
+        meta = get_feed_manager().book.get(str(security_id)) or {}
+        key = meta.get("strategyKey")
+        if key and not registry.is_enabled(key):
+            definition = registry.get(key)
+            label = definition.label if definition else key
+            raise FeatureDisabled(
+                f"The {label} strategy is switched off, so its chart is not "
+                f"being fetched. Its past trades are unchanged."
+            )
+
     def timeframes(self) -> List[Dict[str, Any]]:
         return [timeframe.as_payload() for timeframe in TIMEFRAMES.values()]
 
@@ -384,6 +424,7 @@ class CandleService:
         security_id = str(security_id).strip()
         if not security_id:
             raise CandleError("A securityId is required")
+        self._require_price_chart(security_id)
         timeframe = get_timeframe(timeframe_key)
 
         synthetic = self._synthetic_enabled()

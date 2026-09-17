@@ -31,6 +31,7 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { positionsApi } from '../api/trading';
+import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 import { useMarketFeed } from '../market/MarketFeedContext';
 import SyntheticBanner from '../components/SyntheticBanner';
 import { formatPrice, formatQty } from '../utils/format';
@@ -82,6 +83,8 @@ export default function PositionsPage() {
   const theme = useTheme();
   const { version } = useMarketFeed();
   const [data, setData] = useState(null);
+  const { activeId: portfolioId, active: portfolio, refresh: refreshPortfolio } =
+    useActivePortfolio();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [includeClosed, setIncludeClosed] = useState(false);
@@ -93,14 +96,14 @@ export default function PositionsPage() {
 
   const load = useCallback(async () => {
     try {
-      setData(await positionsApi.list(includeClosed));
+      setData(await positionsApi.list(includeClosed, portfolioId));
       setError(null);
     } catch (loadError) {
       setError(loadError.message);
     } finally {
       setLoading(false);
     }
-  }, [includeClosed]);
+  }, [includeClosed, portfolioId]);
 
   useEffect(() => {
     load();
@@ -269,6 +272,17 @@ export default function PositionsPage() {
                       <Typography variant="caption" color="text.secondary">
                         {position.expiryDate}
                       </Typography>
+                      {position.strategyEnabled === false ? (
+                        <Tooltip title="This strategy is switched off. The position is real and still counts, but nothing is marking it — the mark is blank rather than stale.">
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            color="warning"
+                            label={`${position.strategyLabel ?? position.strategyKey} · off`}
+                            sx={{ alignSelf: 'flex-start', mt: 0.5 }}
+                          />
+                        </Tooltip>
+                      ) : null}
                     </Stack>
                   </TableCell>
                   <TableCell align="right">

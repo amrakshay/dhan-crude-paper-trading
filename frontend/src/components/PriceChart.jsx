@@ -589,6 +589,8 @@ export default function PriceChart({ securityId, title = 'Price chart', subtitle
           onAddTarget={() => placeLevel('target')}
           disabled={!!error || meta?.count === 0}
           disabledReason={error ? 'No chart data, so nothing can be traded from here.' : null}
+          portfolioName={trading.portfolioName}
+          availableBalance={trading.availableBalance}
         />
       </CardContent>
 
