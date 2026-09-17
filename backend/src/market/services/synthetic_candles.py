@@ -61,10 +61,17 @@ def _gaussian(first: float, second: float) -> float:
 
 
 def _market_hours() -> tuple:
-    open_time = parse_hhmm(config_utils.get_property_value("market_hours.open", "09:00"))
-    close_time = parse_hhmm(config_utils.get_property_value("market_hours.close", "23:30"))
-    days = config_utils.get_property_value_list("market_hours.trading_days", [0, 1, 2, 3, 4])
-    return open_time, close_time, {int(day) for day in days}
+    """Session bounds for the running strategy.
+
+    The synthetic grid must match the hours the strategy actually trades, or
+    the fake bars appear at times the real exchange is shut.
+    """
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    running = registry.enabled()
+    hours = (running[0] if running else registry.default()).market_hours
+    return hours.open, hours.close, {int(day) for day in hours.trading_days}
 
 
 def _session_grid(

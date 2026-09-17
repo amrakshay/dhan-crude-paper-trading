@@ -8,11 +8,19 @@ the live file on 2026-09-16):
 
   LOT_SIZE  -- reads 1.0 for *every* MCX row (158 FUTCOM, 15,844 OPTFUT) while
                NSE rows in the same file carry real values. Dhan does not
-               publish MCX contract size here, so it comes from
-               `contract_specs` in the YAML config instead.
+               publish MCX contract size here, so it comes from the strategy
+               module's `contract_specs` instead.
   TICK_SIZE -- published in paise, not rupees (ALUMINIUM 5.0 = Rs 0.05,
                CARDAMOM 100.0 = Rs 1.00, CRUDEOIL options 10.0 = Rs 0.10).
-               Divided by `contract_specs.tick_size_divisor`.
+               Divided by the strategy's `contract_specs.tick_size_divisor`.
+
+Neither quirk generalises: NSE publishes lot size correctly and needs no tick
+divisor, which is exactly why both live with the strategy rather than here.
+
+**Which rows are wanted comes from the ENABLED strategy modules.** The file is
+scanned once for all of them together -- it is 35 MB, and a pass per strategy
+would be a pass per strategy. A disabled strategy contributes no filter, so
+none of its contracts are ingested or refreshed.
 """
 import csv
 import os
@@ -31,6 +39,8 @@ from src.instruments.database.db_operations.instrument_repository import (
     InstrumentRepository,
 )
 from src.logging_config import get_logger
+from src.strategies.services.strategy_definition import StrategyDefinition
+from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("instruments.master")
 
@@ -121,10 +131,27 @@ def _parse_decimal(value: Optional[str]) -> Optional[Decimal]:
 
 
 class InstrumentMasterService:
-    """Fetches the master CSV and upserts the CRUDEOIL universe from it."""
+    """Fetches the master CSV and upserts the universe every strategy wants."""
 
-    def __init__(self, repository: InstrumentRepository):
+    def __init__(
+        self,
+        repository: InstrumentRepository,
+        strategies: Optional[List[StrategyDefinition]] = None,
+    ):
         self.repository = repository
+        self._strategies = strategies
+
+    def strategies(self) -> List[StrategyDefinition]:
+        """The strategies whose contracts this service ingests.
+
+        Defaults to the RUNNING ones: a disabled strategy must not have rows
+        fetched or refreshed for it. An explicit list (tests, a targeted
+        refresh) overrides that.
+        """
+        if self._strategies is not None:
+            return list(self._strategies)
+        registry = get_strategy_registry()
+        return registry.enabled() or []
 
     # --- configuration -----------------------------------------------------
     @staticmethod
@@ -151,16 +178,12 @@ class InstrumentMasterService:
         ) * 3600
 
     @staticmethod
-    def _configured_lot_size(underlying_symbol: str) -> Optional[int]:
-        specs = config_utils.get_property_dict(f"contract_specs.{underlying_symbol}", {})
-        lot_size = specs.get("lot_size")
-        return int(lot_size) if lot_size else None
+    def _configured_lot_size(strategy: StrategyDefinition) -> Optional[int]:
+        return strategy.lot_size()
 
     @staticmethod
-    def _tick_divisor() -> Decimal:
-        return Decimal(
-            str(config_utils.get_property_value_int("contract_specs.tick_size_divisor", 100))
-        )
+    def _tick_divisor(strategy: StrategyDefinition) -> Decimal:
+        return Decimal(str(strategy.tick_size_divisor or 1))
 
     # --- download ----------------------------------------------------------
     def is_cache_fresh(self) -> bool:
@@ -227,37 +250,45 @@ class InstrumentMasterService:
 
     # --- parse + ingest ----------------------------------------------------
     def parse(self, path: str) -> tuple[List[Dict[str, Any]], int, List[str]]:
-        """Read the CSV and return the rows for the configured underlying."""
-        exchange_id = config_utils.get_property_value("underlying.exchange_id", "MCX")
-        exchange_segment = config_utils.get_property_value(
-            "underlying.exchange_segment", "MCX_COMM"
-        )
-        segment_code = config_utils.get_property_value_int(
-            "underlying.exchange_segment_code", 5
-        )
-        underlying_symbol = config_utils.get_property_value("underlying.symbol", "CRUDEOIL")
-        option_type_name = config_utils.get_property_value(
-            "underlying.option_instrument_type", "OPTFUT"
-        )
-        futures_type_name = config_utils.get_property_value(
-            "underlying.futures_instrument_type", "FUTCOM"
-        )
-        wanted_instruments = {option_type_name, futures_type_name}
+        """Read the CSV once and return the rows every wanted strategy claims.
 
-        configured_lot_size = self._configured_lot_size(underlying_symbol)
-        if not configured_lot_size:
+        One pass for all strategies together. The file is 35 MB; a pass per
+        strategy would cost a full read per strategy for no benefit, since the
+        filters are disjoint (a row belongs to at most one strategy, by its
+        exchange and underlying).
+        """
+        strategies = self.strategies()
+        if not strategies:
             raise InstrumentMasterError(
-                f"No contract_specs.{underlying_symbol}.lot_size configured. "
-                "Dhan's master reports LOT_SIZE=1 for every MCX contract, so the "
-                "real lot size must be supplied in conf/default-config.yaml."
+                "No strategy module is enabled, so there is no instrument "
+                "universe to ingest. Enable one on the Strategies & Features "
+                "page."
             )
-        tick_divisor = self._tick_divisor()
+
+        # (EXCH_ID, UNDERLYING_SYMBOL) -> the strategy that claims those rows.
+        claims: Dict[tuple, StrategyDefinition] = {}
+        for strategy in strategies:
+            claim = (strategy.exchange_id, strategy.symbol)
+            if claim in claims:
+                raise InstrumentMasterError(
+                    f"Strategies {claims[claim].key!r} and {strategy.key!r} both "
+                    f"claim {strategy.exchange_id} {strategy.symbol}; a contract "
+                    f"may belong to only one strategy."
+                )
+            claims[claim] = strategy
+            if not self._configured_lot_size(strategy):
+                raise InstrumentMasterError(
+                    f"No contract_specs.{strategy.symbol}.lot_size configured for "
+                    f"strategy {strategy.key!r}. Dhan's master reports LOT_SIZE=1 "
+                    f"for every MCX contract, so the real lot size must be "
+                    f"supplied in conf/strategies/{strategy.key}.yaml."
+                )
 
         warnings: List[str] = []
         rows: List[Dict[str, Any]] = []
         scanned = 0
         refreshed_at = utc_now()
-        suspicious_lot_sizes = 0
+        suspicious_lot_sizes: Dict[str, int] = {}
 
         with open(path, "r", encoding="utf-8", errors="replace", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -270,13 +301,24 @@ class InstrumentMasterService:
 
             for record in reader:
                 scanned += 1
-                if record.get(COL_EXCH_ID, "").strip() != exchange_id:
-                    continue
-                if record.get(COL_UNDERLYING_SYMBOL, "").strip() != underlying_symbol:
+                strategy = claims.get(
+                    (
+                        record.get(COL_EXCH_ID, "").strip(),
+                        record.get(COL_UNDERLYING_SYMBOL, "").strip(),
+                    )
+                )
+                if strategy is None:
                     continue
                 instrument = record.get(COL_INSTRUMENT, "").strip()
-                if instrument not in wanted_instruments:
+                if instrument not in (
+                    strategy.option_instrument_type,
+                    strategy.futures_instrument_type,
+                ):
                     continue
+
+                underlying_symbol = strategy.symbol
+                configured_lot_size = self._configured_lot_size(strategy)
+                tick_divisor = self._tick_divisor(strategy)
 
                 security_id = record.get(COL_SECURITY_ID, "").strip()
                 if not security_id:
@@ -305,7 +347,9 @@ class InstrumentMasterService:
                     )
                 else:
                     lot_size = configured_lot_size
-                    suspicious_lot_sizes += 1
+                    suspicious_lot_sizes[underlying_symbol] = (
+                        suspicious_lot_sizes.get(underlying_symbol, 0) + 1
+                    )
 
                 tick_size = _parse_decimal(record.get(COL_TICK_SIZE))
                 if tick_size is not None and tick_size > 0:
@@ -318,9 +362,9 @@ class InstrumentMasterService:
                 rows.append(
                     {
                         "security_id": security_id,
-                        "exchange_id": exchange_id,
-                        "exchange_segment": exchange_segment,
-                        "segment_code": segment_code,
+                        "exchange_id": strategy.exchange_id,
+                        "exchange_segment": strategy.exchange_segment,
+                        "segment_code": strategy.exchange_segment_code,
                         "instrument_type": instrument,
                         "underlying_symbol": underlying_symbol,
                         "underlying_scrip": int(underlying_scrip) if underlying_scrip else None,
@@ -341,24 +385,25 @@ class InstrumentMasterService:
                     }
                 )
 
-        if suspicious_lot_sizes:
+        for symbol, count in sorted(suspicious_lot_sizes.items()):
+            strategy = next(one for one in strategies if one.symbol == symbol)
+            configured = self._configured_lot_size(strategy)
             warnings.append(
-                f"{suspicious_lot_sizes} rows had LOT_SIZE<=1 in the master (expected "
-                f"for MCX); used contract_specs.{underlying_symbol}.lot_size="
-                f"{configured_lot_size}"
+                f"{count} {symbol} rows had LOT_SIZE<=1 in the master (expected "
+                f"for MCX); used contract_specs.{symbol}.lot_size={configured}"
             )
             # Expected for MCX today, but load-bearing: if this substitution is
             # ever wrong, every turnover, charge and P&L figure is wrong with it.
             logger.warning(
-                "%s of %s %s rows published LOT_SIZE<=1; substituted the "
-                "configured contract_specs.%s.lot_size=%s. Expected for MCX -- "
-                "see CLAUDE.md section 5.",
-                suspicious_lot_sizes, len(rows), underlying_symbol,
-                underlying_symbol, configured_lot_size,
+                "%s %s rows published LOT_SIZE<=1; substituted the configured "
+                "contract_specs.%s.lot_size=%s from strategy %s. Expected for "
+                "MCX -- see CLAUDE.md section 5.",
+                count, symbol, symbol, configured, strategy.key,
             )
         if not rows:
             raise InstrumentMasterError(
-                f"No {underlying_symbol} contracts found in the instrument master. "
+                f"No {'/'.join(sorted(one.symbol for one in strategies))} "
+                f"contracts found in the instrument master. "
                 f"Scanned {scanned} rows."
             )
 
@@ -375,10 +420,19 @@ class InstrumentMasterService:
         rows, scanned, warnings = self.parse(path)
         counts = await self.repository.upsert_many(rows)
 
-        underlying_symbol = config_utils.get_property_value("underlying.symbol", "CRUDEOIL")
-        deactivated = await self.repository.deactivate_missing(
-            underlying_symbol, [row["security_id"] for row in rows]
-        )
+        # Deactivation is per underlying: a strategy that is off contributed no
+        # rows, and must not have its contracts deactivated as a side effect of
+        # another strategy's refresh.
+        deactivated = 0
+        for strategy in self.strategies():
+            deactivated += await self.repository.deactivate_missing(
+                strategy.symbol,
+                [
+                    row["security_id"]
+                    for row in rows
+                    if row["underlying_symbol"] == strategy.symbol
+                ],
+            )
 
         expiries = sorted({row["expiry_date"] for row in rows if row["expiry_date"]})
 

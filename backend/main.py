@@ -62,6 +62,21 @@ async def _seed_default_administrator() -> None:
         )
 
 
+def _load_strategy_modules() -> None:
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    logger.info(
+        "Strategy modules: %s",
+        {
+            definition.key: (
+                "enabled" if registry.is_enabled(definition.key) else "disabled"
+            )
+            for definition in registry.all()
+        },
+    )
+
+
 async def _apply_stored_settings() -> None:
     """Overlay settings saved in the UI onto the in-memory config.
 
@@ -119,6 +134,12 @@ async def lifespan(app: FastAPI):
     )
 
     await _seed_default_administrator()
+
+    # BEFORE anything reads a strategy: the registry parses conf/strategies/*.yaml
+    # and a malformed one is fatal here rather than at the first request. What
+    # each strategy IS comes from those files; whether it is RUNNING comes from
+    # the database, applied next.
+    _load_strategy_modules()
 
     # BEFORE the feed starts: settings saved in the UI beat .env, and the feed
     # reads its credentials and its synthetic flag out of the config this

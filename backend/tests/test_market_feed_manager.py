@@ -43,6 +43,8 @@ def _contract(security_id, instrument_type, expiry, strike=None, option_type=Non
 
 # The synthetic feed starts at 6800, so the ladder is deliberately wide enough
 # on both sides for a full ATM +/- 20 window to fit without clamping at an edge.
+CRUDE = "mcx-crude-options"
+
 LADDER_START = 5000
 LADDER_COUNT = 80
 LADDER_STEP = 50
@@ -120,7 +122,7 @@ async def test_strike_window_clamps_without_error_at_a_ladder_edge(manager):
 async def test_window_recentres_when_the_underlying_moves(manager):
     await manager.resync()
     original = set(manager.feed.subscribed_security_ids())
-    original_centre = manager._window_centre
+    original_centre = manager.state_for(CRUDE).window_centre
 
     # Move the future well outside the current window.
     manager.book.apply_packet(
@@ -130,7 +132,7 @@ async def test_window_recentres_when_the_underlying_moves(manager):
 
     assert result["subscribed"] > 0, "new strikes must be picked up"
     assert result["unsubscribed"] > 0, "strikes that left the window must be dropped"
-    assert manager._window_centre != original_centre
+    assert manager.state_for(CRUDE).window_centre != original_centre
     assert set(manager.feed.subscribed_security_ids()) != original
 
 

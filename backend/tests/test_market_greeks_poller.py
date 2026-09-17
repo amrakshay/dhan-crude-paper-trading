@@ -6,6 +6,7 @@ import pytest
 from src.core.time_utils import ist_today
 from src.market.services.dhan_option_chain_client import OptionChainSnapshot, OptionLeg
 from src.market.services.greeks_poller import GreeksPoller
+from src.strategies.services.strategy_registry import get_strategy_registry
 from src.market.services.market_book import MarketBook
 
 
@@ -13,6 +14,9 @@ class _StubFeedManager:
     def __init__(self, expiries, near_future_security_id="565899"):
         self.subscribed_expiries = expiries
         self.near_future_security_id = near_future_security_id
+
+
+CRUDE = get_strategy_registry().default()
 
 
 def _snapshot(expiry="2026-09-17"):
@@ -152,7 +156,7 @@ async def test_synthetic_greeks_are_computed_and_flagged(book):
     poller = GreeksPoller(book, _StubFeedManager([expiry]))
     poller.is_synthetic = True
 
-    merged = poller._merge_synthetic_greeks([expiry])
+    merged = poller._merge_synthetic_greeks(CRUDE, [expiry])
 
     assert merged == 2
     call = book.get("XCE")
@@ -170,7 +174,7 @@ async def test_synthetic_greeks_respect_put_call_parity(book):
     poller = GreeksPoller(book, _StubFeedManager([expiry]))
     poller.is_synthetic = True
 
-    poller._merge_synthetic_greeks([expiry])
+    poller._merge_synthetic_greeks(CRUDE, [expiry])
 
     delta_call = book.get("XCE")["delta"]
     delta_put = book.get("XPE")["delta"]
@@ -184,7 +188,7 @@ async def test_synthetic_greeks_need_an_underlying_price(book):
     poller = GreeksPoller(book, _StubFeedManager([expiry]))
     poller.is_synthetic = True
 
-    assert poller._merge_synthetic_greeks([expiry]) == 0
+    assert poller._merge_synthetic_greeks(CRUDE, [expiry]) == 0
 
 
 async def test_synthetic_greeks_ignore_unsubscribed_expiries(book):
@@ -194,7 +198,7 @@ async def test_synthetic_greeks_ignore_unsubscribed_expiries(book):
     poller = GreeksPoller(book, _StubFeedManager([other]))
     poller.is_synthetic = True
 
-    assert poller._merge_synthetic_greeks([other]) == 0
+    assert poller._merge_synthetic_greeks(CRUDE, [other]) == 0
 
 
 async def test_poller_does_not_start_without_credentials_or_synthetic_flag(book):

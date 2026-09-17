@@ -5,19 +5,25 @@ expiry are different dates.** For CRUDEOIL the September options expire
 2026-09-17 while the September future expires 2026-09-21. The chain and the
 underlying future therefore roll on different days, and an option expiry must
 be mapped to its underlying future explicitly rather than by month name.
+
+The RULES here are generic; the DATA they run on is not. Which underlying and
+which instrument types to look at come from a strategy module, passed in at
+construction. A service constructed without one resolves the registry's default
+strategy, which is what every single-strategy call site does.
 """
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence
 
-from src import config_utils
 from src.core.time_utils import ist_today
 from src.instruments.database.db_models.instrument_model import Instrument
 from src.instruments.database.db_operations.instrument_repository import (
     InstrumentRepository,
 )
 from src.logging_config import get_logger
+from src.strategies.services.strategy_definition import StrategyDefinition
+from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("instruments.chain")
 
@@ -32,20 +38,22 @@ class ChainRow:
 
 
 class ChainService:
-    def __init__(self, repository: InstrumentRepository):
+    def __init__(
+        self,
+        repository: InstrumentRepository,
+        strategy: Optional[StrategyDefinition] = None,
+    ):
         self.repository = repository
+        self.strategy = strategy or get_strategy_registry().default()
 
-    @staticmethod
-    def _underlying_symbol() -> str:
-        return config_utils.get_property_value("underlying.symbol", "CRUDEOIL")
+    def _underlying_symbol(self) -> str:
+        return self.strategy.symbol
 
-    @staticmethod
-    def _option_instrument_type() -> str:
-        return config_utils.get_property_value("underlying.option_instrument_type", "OPTFUT")
+    def _option_instrument_type(self) -> str:
+        return self.strategy.option_instrument_type
 
-    @staticmethod
-    def _futures_instrument_type() -> str:
-        return config_utils.get_property_value("underlying.futures_instrument_type", "FUTCOM")
+    def _futures_instrument_type(self) -> str:
+        return self.strategy.futures_instrument_type
 
     # --- expiries ----------------------------------------------------------
     async def list_option_expiries(self, include_past: bool = False) -> List[date]:

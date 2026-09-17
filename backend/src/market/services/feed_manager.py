@@ -3,14 +3,24 @@
 Owns the one upstream connection, the one in-memory book and the one
 broadcaster, and decides which contracts are worth subscribing to.
 
-Subscription policy: the near-month future, plus ATM +/- N strikes (config
-`market_feed.strike_window`, default 20) across the nearest `expiries_to_subscribe`
-option expiries. The full 446-contract chain would fit inside a single
-connection, but subscribing to all three listed expiries by default wastes
-bandwidth on a series nobody is looking at. The window re-centres itself as the
-underlying moves.
+**One connection, many strategies.** Dhan allows five concurrent connections
+per user and two of them mean a desynchronised book, so every ENABLED strategy
+module contributes its targets to the single `DhanFeedClient` rather than
+opening one of its own (root CLAUDE.md section 4). A disabled strategy
+contributes nothing: no instruments on the wire, no greeks poll, no share of
+the connection.
+
+Subscription policy is per strategy: the near-month future, plus ATM +/- N
+strikes (`subscription.strike_window`) across the nearest
+`subscription.expiries_to_subscribe` option expiries. The full 446-contract
+chain would fit inside a single connection, but subscribing to all three listed
+expiries by default wastes bandwidth on a series nobody is looking at. Each
+strategy's window re-centres itself as its own underlying moves, which is why
+the centre and the strike step are per strategy rather than manager-wide.
 """
 import asyncio
+from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -28,8 +38,40 @@ from src.market.services.dhan_feed_client import DhanFeedClient
 from src.market.services.greeks_poller import GreeksPoller
 from src.market.services.market_book import MarketBook, now_ms
 from src.market.services.synthetic_feed import SyntheticFeed
+from src.strategies.services.strategy_definition import StrategyDefinition
+from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("market.manager")
+
+
+@dataclass
+class StrategyFeedState:
+    """What the feed currently holds for one strategy.
+
+    These were scalars on the FeedManager when there was exactly one
+    underlying. They are per strategy because two strategies have two front
+    futures, two strike ladders and two window centres, and collapsing them
+    would re-centre one strategy's window on another's price.
+    """
+
+    key: str
+    near_future_security_id: Optional[str] = None
+    subscribed_expiries: List[date] = field(default_factory=list)
+    window_centre: Optional[Decimal] = None
+    strike_step: Optional[Decimal] = None
+    instrument_count: int = 0
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "strategyKey": self.key,
+            "nearFutureSecurityId": self.near_future_security_id,
+            "subscribedExpiries": [
+                expiry.isoformat() for expiry in self.subscribed_expiries
+            ],
+            "windowCentre": float(self.window_centre) if self.window_centre else None,
+            "strikeStep": float(self.strike_step) if self.strike_step else None,
+            "instrumentCount": self.instrument_count,
+        }
 
 
 class FeedManager:
@@ -46,13 +88,41 @@ class FeedManager:
         self._resync_task: Optional[asyncio.Task] = None
         self._stopping = False
 
-        self.near_future_security_id: Optional[str] = None
-        self.subscribed_expiries: List[Any] = []
-        self._window_centre: Optional[Decimal] = None
-        self._strike_step: Optional[Decimal] = None
+        self.strategy_state: Dict[str, StrategyFeedState] = {}
         self._contract_meta: Dict[str, Dict[str, Any]] = {}
         self.last_resync_ms: Optional[int] = None
         self.last_error: Optional[str] = None
+
+    # --- per-strategy state ------------------------------------------------
+    def state_for(self, strategy_key: str) -> StrategyFeedState:
+        """The feed's state for one strategy, created on first use."""
+        state = self.strategy_state.get(strategy_key)
+        if state is None:
+            state = StrategyFeedState(key=strategy_key)
+            self.strategy_state[strategy_key] = state
+        return state
+
+    def _primary_state(self) -> StrategyFeedState:
+        """State for the first running strategy.
+
+        Single-strategy callers -- the status payload, the synthetic greeks --
+        still ask for "the" front future. With one module running that is
+        unambiguous; with several they should be asking per strategy, which is
+        what `state_for` is for.
+        """
+        for strategy in get_strategy_registry().enabled():
+            state = self.strategy_state.get(strategy.key)
+            if state is not None:
+                return state
+        return StrategyFeedState(key="")
+
+    @property
+    def near_future_security_id(self) -> Optional[str]:
+        return self._primary_state().near_future_security_id
+
+    @property
+    def subscribed_expiries(self) -> List[date]:
+        return list(self._primary_state().subscribed_expiries)
 
     # --- configuration -----------------------------------------------------
     @staticmethod
@@ -64,44 +134,48 @@ class FeedManager:
         return config_utils.get_property_value_boolean("market_feed.synthetic_feed", False)
 
     @staticmethod
-    def _strike_window() -> int:
-        return config_utils.get_property_value_int("market_feed.strike_window", 20)
-
-    @staticmethod
-    def _expiry_count() -> int:
-        return config_utils.get_property_value_int("market_feed.expiries_to_subscribe", 2)
-
-    @staticmethod
-    def _resubscribe_move_strikes() -> int:
-        return config_utils.get_property_value_int("market_feed.resubscribe_move_strikes", 3)
-
-    @staticmethod
-    def _exchange_segment() -> str:
-        return config_utils.get_property_value("underlying.exchange_segment", "MCX_COMM")
+    def _strategies() -> List[StrategyDefinition]:
+        """Every running strategy. A disabled one contributes nothing at all."""
+        return get_strategy_registry().enabled()
 
     # --- market hours ------------------------------------------------------
     @classmethod
-    def market_status(cls) -> Dict[str, Any]:
-        """Whether MCX should be open right now (09:00-23:30 IST, Mon-Fri).
+    def market_status(cls, strategy: Optional[StrategyDefinition] = None) -> Dict[str, Any]:
+        """Whether the strategy's exchange should be open right now.
+
+        MCX runs 09:00-23:30 IST Mon-Fri; NSE runs 09:15-15:30, which is why
+        the hours belong to the strategy module and not to this file.
 
         Informational only: it never gates the feed. If MCX runs late during US
         DST the feed still delivers, and the UI shows "outside market hours"
         rather than pretending the book is stale for a reason it is not.
         """
+        registry = get_strategy_registry()
+        if strategy is None:
+            running = registry.enabled()
+            strategy = running[0] if running else registry.default()
+
+        hours = strategy.market_hours
         now = ist_now()
-        open_time = parse_hhmm(config_utils.get_property_value("market_hours.open", "09:00"))
-        close_time = parse_hhmm(config_utils.get_property_value("market_hours.close", "23:30"))
-        trading_days = config_utils.get_property_value_list("market_hours.trading_days", [0, 1, 2, 3, 4])
-        trading_days = {int(day) for day in trading_days}
+        trading_days = {int(day) for day in hours.trading_days}
 
         is_trading_day = now.weekday() in trading_days
-        is_open = is_trading_day and open_time <= now.time() <= close_time
+        is_open = is_trading_day and hours.open <= now.time() <= hours.close
         return {
             "isOpen": is_open,
             "isTradingDay": is_trading_day,
             "nowIst": now.isoformat(),
-            "opens": open_time.strftime("%H:%M"),
-            "closes": close_time.strftime("%H:%M"),
+            "opens": hours.open.strftime("%H:%M"),
+            "closes": hours.close.strftime("%H:%M"),
+            "strategyKey": strategy.key,
+        }
+
+    @classmethod
+    def market_status_by_strategy(cls) -> Dict[str, Dict[str, Any]]:
+        """Market hours for every running strategy, keyed by strategy."""
+        return {
+            strategy.key: cls.market_status(strategy)
+            for strategy in get_strategy_registry().enabled()
         }
 
     # --- lifecycle ---------------------------------------------------------
@@ -126,10 +200,9 @@ class FeedManager:
             self.is_synthetic = False
             self.feed = DhanFeedClient(self.book, on_state_change=self._on_state_change)
             logger.info(
-                "Starting the live Dhan feed: mode=%s strike_window=%s expiries=%s",
+                "Starting the live Dhan feed: mode=%s strategies=%s",
                 config_utils.get_property_value("market_feed.mode", "FULL"),
-                self._strike_window(),
-                self._expiry_count(),
+                [strategy.key for strategy in self._strategies()],
             )
         else:
             # Never silently invent prices. If the operator wanted fake data
@@ -209,8 +282,10 @@ class FeedManager:
         from src.market.services.candle_service import get_candle_service
 
         get_candle_service().invalidate()
-        self._window_centre = None
-        self._strike_step = None
+        # Every strategy's window centre and strike step are dropped with the
+        # book they were derived from.
+        self.strategy_state = {}
+        self._contract_meta = {}
         self.last_error = None
         self._started = False
         self._stopping = False
@@ -231,74 +306,123 @@ class FeedManager:
 
     # --- subscription management ------------------------------------------
     async def _resolve_targets(self) -> Tuple[List[Tuple[str, str]], Dict[str, Dict[str, Any]]]:
-        """Which contracts should be subscribed right now."""
-        segment = self._exchange_segment()
-        window = self._strike_window()
-        expiry_count = self._expiry_count()
+        """Which contracts should be subscribed right now, across strategies.
+
+        A loop over the running strategies, each contributing to the ONE
+        connection. A strategy that is off appears nowhere in the result, which
+        is what makes "off" free rather than merely hidden.
+        """
+        targets: List[Tuple[str, str]] = []
+        meta: Dict[str, Dict[str, Any]] = {}
+        strategies = self._strategies()
+
+        if not strategies:
+            logger.warning(
+                "No strategy module is enabled; nothing will be subscribed. "
+                "Enable one on the Strategies & Features page."
+            )
+            self.strategy_state = {}
+            return [], {}
+
+        async with session_scope() as session:
+            repository = InstrumentRepository(session)
+            for strategy in strategies:
+                strategy_targets, strategy_meta = await self._resolve_strategy_targets(
+                    strategy, repository
+                )
+                targets.extend(strategy_targets)
+                meta.update(strategy_meta)
+
+        # A strategy switched off since the last resync keeps no state: its
+        # window centre and front future are gone with its subscription.
+        for key in list(self.strategy_state):
+            if key not in {strategy.key for strategy in strategies}:
+                self.strategy_state.pop(key, None)
+
+        logger.debug(
+            "Subscription target set: %s contracts across %s strateg%s",
+            len(targets), len(strategies), "y" if len(strategies) == 1 else "ies",
+        )
+        return targets, meta
+
+    async def _resolve_strategy_targets(
+        self, strategy: StrategyDefinition, repository: InstrumentRepository
+    ) -> Tuple[List[Tuple[str, str]], Dict[str, Dict[str, Any]]]:
+        """One strategy's contribution: its front future plus its ATM window."""
+        segment = strategy.exchange_segment
+        window = strategy.subscription.strike_window
+        expiry_count = strategy.subscription.expiries_to_subscribe
+        state = self.state_for(strategy.key)
 
         targets: List[Tuple[str, str]] = []
         meta: Dict[str, Dict[str, Any]] = {}
 
-        async with session_scope() as session:
-            repository = InstrumentRepository(session)
-            chain_service = ChainService(repository)
+        chain_service = ChainService(repository, strategy)
 
-            near_future = await chain_service.get_near_future()
-            if near_future is None:
-                logger.warning(
-                    "No CRUDEOIL futures contract in the database. Refresh the "
-                    "instrument master (POST /api/instruments/refresh)."
-                )
-                return [], {}
+        near_future = await chain_service.get_near_future()
+        if near_future is None:
+            logger.warning(
+                "No %s futures contract in the database for strategy %s. Refresh "
+                "the instrument master (POST /api/instruments/refresh).",
+                strategy.symbol, strategy.key,
+            )
+            state.near_future_security_id = None
+            state.instrument_count = 0
+            return [], {}
 
-            self.near_future_security_id = near_future.security_id
-            targets.append((segment, near_future.security_id))
-            meta[near_future.security_id] = self._meta_for(near_future)
+        state.near_future_security_id = near_future.security_id
+        targets.append((segment, near_future.security_id))
+        meta[near_future.security_id] = self._meta_for(near_future, strategy)
 
-            # The future's own LTP is what centres the strike window.
-            future_row = self.book.get(near_future.security_id)
-            spot = None
-            if future_row and future_row.get("ltp"):
-                spot = Decimal(str(future_row["ltp"]))
-            elif isinstance(self.feed, SyntheticFeed):
-                # Before the first tick there is no LTP. In synthetic mode the
-                # generator's own price is known, so use it rather than
-                # defaulting to the middle of a 2850-13950 ladder and then
-                # resubscribing a moment later.
-                spot = Decimal(str(self.feed.reference_price))
+        # The future's own LTP is what centres the strike window.
+        future_row = self.book.get(near_future.security_id)
+        spot = None
+        if future_row and future_row.get("ltp"):
+            spot = Decimal(str(future_row["ltp"]))
+        elif isinstance(self.feed, SyntheticFeed):
+            # Before the first tick there is no LTP. In synthetic mode the
+            # generator's own price is known, so use it rather than
+            # defaulting to the middle of a 2850-13950 ladder and then
+            # resubscribing a moment later.
+            spot = Decimal(str(self.feed.reference_price))
 
-            expiries = await chain_service.nearest_option_expiries(expiry_count)
-            self.subscribed_expiries = expiries
+        expiries = await chain_service.nearest_option_expiries(expiry_count)
+        state.subscribed_expiries = expiries
 
-            for expiry in expiries:
-                strikes = await chain_service.list_strikes(expiry)
-                if self._strike_step is None:
-                    self._strike_step = chain_service.infer_strike_step(strikes)
+        for expiry in expiries:
+            strikes = await chain_service.list_strikes(expiry)
+            if state.strike_step is None:
+                state.strike_step = chain_service.infer_strike_step(strikes)
 
-                contracts = await chain_service.get_strike_window(expiry, spot, window)
-                for contract in contracts:
-                    targets.append((segment, contract.security_id))
-                    meta[contract.security_id] = self._meta_for(contract)
+            contracts = await chain_service.get_strike_window(expiry, spot, window)
+            for contract in contracts:
+                targets.append((segment, contract.security_id))
+                meta[contract.security_id] = self._meta_for(contract, strategy)
 
-                if spot is not None:
-                    self._window_centre = chain_service.resolve_atm_strike(strikes, spot)
-                logger.debug(
-                    "Resolved %s contracts for expiry %s (strikes=%s step=%s spot=%s)",
-                    len(contracts), expiry, len(strikes), self._strike_step, spot,
-                )
+            if spot is not None:
+                state.window_centre = chain_service.resolve_atm_strike(strikes, spot)
+            logger.debug(
+                "Resolved %s contracts for %s expiry %s (strikes=%s step=%s spot=%s)",
+                len(contracts), strategy.key, expiry, len(strikes),
+                state.strike_step, spot,
+            )
 
-        logger.debug(
-            "Subscription target set: %s contracts across %s expiries "
-            "(future=%s spot=%s window=+/-%s)",
-            len(targets), len(expiries), self.near_future_security_id, spot, window,
-        )
+        state.instrument_count = len(targets)
         return targets, meta
 
     @staticmethod
-    def _meta_for(instrument) -> Dict[str, Any]:
-        """Static contract details attached to a book row."""
+    def _meta_for(
+        instrument, strategy: Optional[StrategyDefinition] = None
+    ) -> Dict[str, Any]:
+        """Static contract details attached to a book row.
+
+        The strategy key travels with the contract metadata so a consumer can
+        tell which module a row belongs to WITHOUT a lookup per packet. This is
+        resolved once, when the subscription is built.
+        """
         return {
             "securityId": instrument.security_id,
+            "strategyKey": strategy.key if strategy else None,
             "tradingSymbol": instrument.trading_symbol,
             "instrumentType": instrument.instrument_type,
             "optionType": instrument.option_type,
@@ -331,8 +455,12 @@ class FeedManager:
         wanted = {security_id for _segment, security_id in targets}
 
         to_add = [(segment, sid) for segment, sid in targets if sid not in current]
+        # Unsubscribing needs the segment the contract was subscribed UNDER,
+        # which with more than one strategy is no longer a single value. The
+        # feed client remembers it; falling back to the first running
+        # strategy's segment keeps single-strategy behaviour identical.
         to_remove = [
-            (self._exchange_segment(), security_id)
+            (self._segment_for_subscribed(security_id), security_id)
             for security_id in current
             if security_id not in wanted
         ]
@@ -353,38 +481,63 @@ class FeedManager:
         if added or removed:
             logger.info(
                 "Feed resync: +%s -%s (now %s instruments, centre=%s)",
-                added, removed, self.feed.subscribed_count, self._window_centre,
+                added, removed, self.feed.subscribed_count,
+                {
+                    key: float(state.window_centre) if state.window_centre else None
+                    for key, state in self.strategy_state.items()
+                },
             )
         return {"subscribed": added, "unsubscribed": removed}
 
-    async def _resync_loop(self) -> None:
-        """Re-centre the strike window as the underlying moves.
+    def _segment_for_subscribed(self, security_id: str) -> str:
+        """The exchange segment a currently-subscribed contract belongs to."""
+        meta = self._contract_meta.get(security_id) or self.book.get(security_id) or {}
+        key = meta.get("strategyKey")
+        if key:
+            strategy = get_strategy_registry().get(key)
+            if strategy is not None:
+                return strategy.exchange_segment
+        running = self._strategies()
+        if running:
+            return running[0].exchange_segment
+        return get_strategy_registry().default().exchange_segment
 
-        Only resubscribes once the move is material (default 3 strikes), so a
+    async def _resync_loop(self) -> None:
+        """Re-centre each strategy's strike window as its underlying moves.
+
+        Only resubscribes once a move is material (default 3 strikes), so a
         price oscillating around a strike boundary does not churn the
-        subscription on every tick.
+        subscription on every tick. One strategy drifting is enough to trigger
+        a resync, which recomputes every running strategy's targets -- the diff
+        against the live subscription makes that cheap.
         """
         while not self._stopping:
             await asyncio.sleep(5)
             try:
-                if self.feed is None or self.near_future_security_id is None:
+                if self.feed is None:
                     continue
 
-                future_row = self.book.get(self.near_future_security_id)
-                if not future_row or not future_row.get("ltp"):
-                    continue
-                if self._window_centre is None or self._strike_step is None:
-                    await self.resync()
-                    continue
+                for strategy in self._strategies():
+                    state = self.strategy_state.get(strategy.key)
+                    if state is None or state.near_future_security_id is None:
+                        continue
 
-                spot = Decimal(str(future_row["ltp"]))
-                drift_strikes = abs(spot - self._window_centre) / self._strike_step
-                if drift_strikes >= self._resubscribe_move_strikes():
-                    logger.info(
-                        "Underlying moved %.1f strikes from the window centre; resyncing",
-                        float(drift_strikes),
-                    )
-                    await self.resync()
+                    future_row = self.book.get(state.near_future_security_id)
+                    if not future_row or not future_row.get("ltp"):
+                        continue
+                    if state.window_centre is None or state.strike_step is None:
+                        await self.resync()
+                        break
+
+                    spot = Decimal(str(future_row["ltp"]))
+                    drift_strikes = abs(spot - state.window_centre) / state.strike_step
+                    if drift_strikes >= strategy.subscription.resubscribe_move_strikes:
+                        logger.info(
+                            "%s moved %.1f strikes from its window centre; resyncing",
+                            strategy.key, float(drift_strikes),
+                        )
+                        await self.resync()
+                        break
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -392,6 +545,8 @@ class FeedManager:
 
     # --- status ------------------------------------------------------------
     def status(self) -> Dict[str, Any]:
+        primary = self._primary_state()
+        running = self._strategies()
         feed_status = (
             self.feed.status()
             if self.feed is not None
@@ -404,12 +559,25 @@ class FeedManager:
             "book": self.book.stats(),
             "fanout": self.broadcaster.stats(),
             "market": self.market_status(),
-            "nearFutureSecurityId": self.near_future_security_id,
+            "marketByStrategy": self.market_status_by_strategy(),
+            # The single-strategy fields stay, resolved against the first
+            # running strategy, so every existing client keeps working. A
+            # multi-strategy client reads `strategies` instead.
+            "nearFutureSecurityId": primary.near_future_security_id,
             "subscribedExpiries": [
-                expiry.isoformat() for expiry in self.subscribed_expiries
+                expiry.isoformat() for expiry in primary.subscribed_expiries
             ],
-            "strikeWindow": self._strike_window(),
-            "windowCentre": float(self._window_centre) if self._window_centre else None,
+            "strikeWindow": (
+                running[0].subscription.strike_window if running else None
+            ),
+            "windowCentre": (
+                float(primary.window_centre) if primary.window_centre else None
+            ),
+            "strategies": [
+                self.strategy_state[strategy.key].as_dict()
+                for strategy in running
+                if strategy.key in self.strategy_state
+            ],
             "lastResyncMs": self.last_resync_ms,
             "error": self.last_error,
         }

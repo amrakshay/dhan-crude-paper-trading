@@ -1,0 +1,140 @@
+# ---------------------------------------------------------------------------
+# STRATEGY MODULE: MCX CRUDEOIL options.
+#
+# A strategy module is a bundle of everything that is specific to trading one
+# thing: the underlying and its exchange segment, the instrument types to pull
+# out of Dhan's master, the contract specification, the market hours, the
+# subscription policy, the charge rate card, the margin model, and which
+# generic capabilities it supports.
+#
+# Everything NOT in this file is generic and lives in default-config.yaml:
+# the server, the database, auth, the Dhan connection itself, the fanout
+# interval and the fill simulator.
+#
+# WHETHER THIS STRATEGY IS ON is NOT declared here. `enabled_by_default` only
+# decides the state a brand-new installation starts in; after that the live
+# state is a row in the `feature_toggles` table, owned by the Strategies &
+# Features page. The YAML says what a strategy IS; the database says whether
+# it is running.
+#
+# Every number below was verified against the live MCX contract and Dhan's own
+# data on 2026-09-16 -- see the root CLAUDE.md section 5 for why several of
+# them cannot be taken from Dhan's instrument master.
+# ---------------------------------------------------------------------------
+
+key: "mcx-crude-options"
+label: "MCX Crude Options"
+description: >-
+  Options on the MCX CRUDEOIL futures contract, traded from the future's own
+  price chart. A Buy holds an ATM call and a Sell an ATM put, so the worst case
+  is always the premium paid.
+enabled_by_default: true
+
+underlying:
+  # MCX CRUDEOIL. UnderlyingScrip 294 = CRUDEOIL, 556 = CRUDEOILM (mini).
+  symbol: "CRUDEOIL"
+  underlying_scrip: 294
+  exchange_segment: "MCX_COMM"
+  exchange_segment_code: 5          # numeric code used by the binary feed
+  exchange_id: "MCX"
+  option_instrument_type: "OPTFUT"  # options ON the futures contract
+  futures_instrument_type: "FUTCOM"
+
+contract_specs:
+  # -------------------------------------------------------------------------
+  # Contract size does NOT come from Dhan's instrument master.
+  #
+  # Verified against the live master on 2026-09-16: every MCX row reports
+  # LOT_SIZE=1.0 (all 158 FUTCOM and all 15,844 OPTFUT rows), while NSE rows in
+  # the same file carry real values (NIFTY OPTIDX = 65). Dhan's master simply
+  # does not publish MCX contract size, so it is configured here from MCX's own
+  # contract specification instead. If this number is wrong, every turnover,
+  # charge and P&L figure in the application is wrong with it.
+  #
+  # A strategy on another segment must NOT assume this quirk generalises: NSE
+  # publishes lot size correctly and needs no tick-size divisor at all.
+  #
+  # Source: MCX CRUDEOIL contract specification
+  #   https://www.mcxindia.com/products/energy/crude-oil
+  # as-of: 2026-09-16
+  # -------------------------------------------------------------------------
+  CRUDEOIL:
+    lot_size: 100         # barrels per lot
+    quotation_unit: "barrel"
+  CRUDEOILM:
+    lot_size: 10          # mini contract, barrels per lot
+    quotation_unit: "barrel"
+
+  # Dhan publishes TICK_SIZE in paise, not rupees. Verified 2026-09-16 across
+  # several commodities: ALUMINIUM 5.0 -> Rs 0.05, COPPER 5.0 -> Rs 0.05,
+  # CARDAMOM 100.0 -> Rs 1.00, COTTON 1000.0 -> Rs 10.00, CRUDEOIL futures
+  # 100.0 -> Rs 1.00, CRUDEOIL options 10.0 -> Rs 0.10. Divide by this to get
+  # rupees.
+  tick_size_divisor: 100
+
+market_hours:
+  # MCX evening session. NSE equity and index options are 09:15-15:30, which is
+  # why these live with the strategy and not in default-config.yaml.
+  timezone: "Asia/Kolkata"
+  open: "09:00"
+  close: "23:30"
+  close_us_dst: "23:55"
+  trading_days: [0, 1, 2, 3, 4]     # Mon-Fri (Python weekday numbering)
+
+subscription:
+  # The near-month future plus ATM +/- strike_window strikes across the nearest
+  # expiries_to_subscribe option expiries. These contracts are contributed to
+  # the ONE process-wide feed connection; they are not a connection of their
+  # own (root CLAUDE.md section 4).
+  strike_window: 20
+  expiries_to_subscribe: 2
+  resubscribe_move_strikes: 3       # re-centre the window after the underlying
+                                    # moves this many strikes
+
+greeks:
+  # Dhan rate limit: ONE request per 3 seconds per unique underlying+expiry.
+  # The interval itself is Dhan's and stays global in default-config.yaml; how
+  # many expiries this strategy asks for is its own business.
+  expiries_to_poll: 2
+
+charges:
+  # conf/charges/mcx-commodity-options.yaml. Commodity options pay CTT, not
+  # STT, and MCX's transaction charge is not NSE's -- the rate card is part of
+  # the strategy, the engine that applies it is not.
+  rate_card: "mcx-commodity-options"
+
+margin:
+  # -------------------------------------------------------------------------
+  # APPROXIMATION -- NOT WHAT A BROKER WOULD BLOCK.
+  #
+  # Real MCX margin on a short option is SPAN + exposure, computed by the
+  # exchange from risk-array files this tool does not consume. This is a flat
+  # proxy so that a portfolio balance means something when a short position is
+  # open; it is not a margin calculation and must never be displayed as
+  # "margin required" without the word estimate next to it.
+  #
+  # basis: 10% of notional is the order of magnitude of MCX initial margin on
+  #        CRUDEOIL futures (the exchange's own IM has run roughly 9-12% of
+  #        contract value through 2026). A short option's true requirement
+  #        varies with moneyness and volatility and can exceed this
+  #        substantially.
+  # as-of: 2026-09-18
+  # confidence: APPROXIMATION
+  # -------------------------------------------------------------------------
+  model: "percent_of_notional"
+  short_option_percent_of_notional: 0.10
+
+capabilities:
+  # Generic features this strategy supports. A capability the strategy does not
+  # list can never be switched on for it, and a capability switched off
+  # globally is off here too -- the effective state is the intersection.
+  #
+  # A future cash-equity strategy would not list option-chain or greeks: it has
+  # no options to chain, and a capability it cannot support must not be
+  # advertised.
+  - "option-chain"
+  - "price-chart"
+  - "chart-trading"
+  - "greeks"
+  - "trade-notes"
+  - "pnl-reports"

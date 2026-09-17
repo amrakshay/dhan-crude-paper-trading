@@ -13,6 +13,10 @@ Two rules this module exists to honour:
 2. **Expiries are polled concurrently, each respecting its own 3s limit.** Dhan
    rate limits one unique request per 3 seconds; the client serialises per
    (underlying, expiry) so two expiries can be in flight at once.
+3. **A strategy that is off is never polled.** The greeks poll is an outbound
+   REST call against the Dhan token, so skipping a disabled strategy is one of
+   the concrete costs that switching it off is meant to remove -- not merely a
+   hidden column in the UI.
 
 In synthetic mode there is no upstream to poll, so greeks are computed locally
 with Black-76 from the synthetic prices. Those are clearly flagged
@@ -32,6 +36,11 @@ from src.market.services.dhan_option_chain_client import (
     OptionChainRateLimited,
 )
 from src.market.services.market_book import MarketBook, now_ms
+from src.strategies.services.strategy_definition import (
+    CAPABILITY_GREEKS,
+    StrategyDefinition,
+)
+from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("market.greeks")
 
@@ -55,23 +64,44 @@ class GreeksPoller:
     # --- configuration -----------------------------------------------------
     @staticmethod
     def _enabled() -> bool:
-        return config_utils.get_property_value_boolean("greeks_poller.enabled", True)
+        """Is the greeks capability on for at least one running strategy?
+
+        The capability toggle has replaced the ad-hoc `greeks_poller.enabled`
+        flag, which is still read as the capability's default so an operator
+        who set it keeps what they configured.
+        """
+        return get_strategy_registry().capability_active_anywhere(CAPABILITY_GREEKS)
 
     @staticmethod
     def _interval() -> float:
+        # Dhan's own rate limit, not a per-strategy choice.
         return config_utils.get_property_value_float("greeks_poller.interval_seconds", 3.0)
 
     @staticmethod
-    def _expiry_count() -> int:
-        return config_utils.get_property_value_int("greeks_poller.expiries_to_poll", 2)
+    def _strategies() -> List[StrategyDefinition]:
+        """Running strategies whose greeks capability is effective."""
+        registry = get_strategy_registry()
+        return [
+            strategy
+            for strategy in registry.enabled()
+            if registry.capability_active(CAPABILITY_GREEKS, strategy.key)
+        ]
 
-    @staticmethod
-    def _underlying_scrip() -> int:
-        return config_utils.get_property_value_int("underlying.underlying_scrip", 294)
+    def _expiries_for(self, strategy: StrategyDefinition) -> List[date]:
+        """Which expiries to poll for one strategy.
 
-    @staticmethod
-    def _underlying_segment() -> str:
-        return config_utils.get_property_value("underlying.exchange_segment", "MCX_COMM")
+        Read from the feed's per-strategy state: only a SUBSCRIBED expiry is
+        polled, so an expiry nobody is watching never costs a request.
+        """
+        states = getattr(self.feed_manager, "strategy_state", None)
+        if states is None:
+            # A caller that predates per-strategy state (the poller's own test
+            # doubles) exposes one flat list.
+            expiries = list(getattr(self.feed_manager, "subscribed_expiries", []))
+        else:
+            state = states.get(strategy.key)
+            expiries = list(state.subscribed_expiries) if state else []
+        return expiries[: strategy.greeks_expiries_to_poll]
 
     # --- lifecycle ---------------------------------------------------------
     async def start(self, is_synthetic: bool = False) -> None:
@@ -122,35 +152,19 @@ class GreeksPoller:
 
     # --- polling -----------------------------------------------------------
     async def poll_once(self) -> int:
-        expiries = list(self.feed_manager.subscribed_expiries)[: self._expiry_count()]
-        if not expiries:
-            return 0
+        """One pass over every strategy whose greeks capability is effective."""
+        merged = 0
+        polled: List[date] = []
 
-        if self.is_synthetic:
-            merged = self._merge_synthetic_greeks(expiries)
-        else:
-            # Different expiries may be in flight at once; the client enforces
-            # the 3s limit per (underlying, expiry).
-            results = await asyncio.gather(
-                *(self._poll_expiry(expiry) for expiry in expiries),
-                return_exceptions=True,
-            )
-            merged = 0
-            for expiry, result in zip(expiries, results):
-                if isinstance(result, OptionChainRateLimited):
-                    logger.warning(
-                        "Rate limited polling greeks for expiry %s (Dhan allows "
-                        "one request per %.1fs per underlying+expiry); will retry",
-                        expiry, self._interval(),
-                    )
-                elif isinstance(result, Exception):
-                    self.last_error = str(result)
-                    logger.error(
-                        "Greeks poll for expiry %s failed: %s: %s",
-                        expiry, type(result).__name__, result,
-                    )
-                else:
-                    merged += result
+        for strategy in self._strategies():
+            expiries = self._expiries_for(strategy)
+            if not expiries:
+                continue
+            polled.extend(expiries)
+            merged += await self._poll_strategy(strategy, expiries)
+
+        if not polled:
+            return 0
 
         self.poll_count += 1
         self.last_poll_ms = now_ms()
@@ -158,13 +172,46 @@ class GreeksPoller:
         logger.debug(
             "Greeks poll #%s merged %s leg(s) across expiries %s (synthetic=%s)",
             self.poll_count, merged,
-            [expiry.isoformat() for expiry in expiries], self.is_synthetic,
+            [expiry.isoformat() for expiry in polled], self.is_synthetic,
         )
         return merged
 
-    async def _poll_expiry(self, expiry: date) -> int:
+    async def _poll_strategy(
+        self, strategy: StrategyDefinition, expiries: List[date]
+    ) -> int:
+        if self.is_synthetic:
+            return self._merge_synthetic_greeks(strategy, expiries)
+
+        # Different expiries may be in flight at once; the client enforces
+        # the 3s limit per (underlying, expiry).
+        results = await asyncio.gather(
+            *(self._poll_expiry(expiry, strategy) for expiry in expiries),
+            return_exceptions=True,
+        )
+        merged = 0
+        for expiry, result in zip(expiries, results):
+            if isinstance(result, OptionChainRateLimited):
+                logger.warning(
+                    "Rate limited polling greeks for expiry %s (Dhan allows "
+                    "one request per %.1fs per underlying+expiry); will retry",
+                    expiry, self._interval(),
+                )
+            elif isinstance(result, Exception):
+                self.last_error = str(result)
+                logger.error(
+                    "Greeks poll for expiry %s failed: %s: %s",
+                    expiry, type(result).__name__, result,
+                )
+            else:
+                merged += result
+        return merged
+
+    async def _poll_expiry(
+        self, expiry: date, strategy: Optional[StrategyDefinition] = None
+    ) -> int:
+        strategy = strategy or get_strategy_registry().default()
         snapshot = await self.client.fetch_option_chain(
-            self._underlying_scrip(), self._underlying_segment(), expiry.isoformat()
+            strategy.underlying_scrip, strategy.exchange_segment, expiry.isoformat()
         )
         if snapshot.underlying_last_price is not None:
             self.underlying_last_price = snapshot.underlying_last_price
@@ -204,9 +251,17 @@ class GreeksPoller:
         return merged
 
     # --- synthetic ---------------------------------------------------------
-    def _merge_synthetic_greeks(self, expiries: List[date]) -> int:
+    def _merge_synthetic_greeks(
+        self, strategy: StrategyDefinition, expiries: List[date]
+    ) -> int:
         """Black-76 greeks off the synthetic prices. NOT real market greeks."""
-        future_id = self.feed_manager.near_future_security_id
+        states = getattr(self.feed_manager, "strategy_state", None)
+        state = states.get(strategy.key) if states is not None else None
+        future_id = (
+            state.near_future_security_id
+            if state is not None
+            else getattr(self.feed_manager, "near_future_security_id", None)
+        )
         future_row = self.book.get(future_id) if future_id else None
         if not future_row or not future_row.get("ltp"):
             return 0

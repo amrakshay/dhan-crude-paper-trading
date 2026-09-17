@@ -11,9 +11,18 @@ class FeedStatusResponse(BaseModel):
     book: Dict[str, Any]
     fanout: Dict[str, Any]
     market: Dict[str, Any]
+    # Market hours are a property of the strategy's exchange, so with more than
+    # one running there is more than one answer. `market` stays as the first
+    # running strategy's, for clients that predate the split.
+    market_by_strategy: Dict[str, Any] = Field(
+        default_factory=dict, alias="marketByStrategy"
+    )
+    # The feed's per-strategy state: front future, subscribed expiries, window
+    # centre and instrument count for each running strategy.
+    strategies: List[Dict[str, Any]] = Field(default_factory=list)
     near_future_security_id: Optional[str] = Field(None, alias="nearFutureSecurityId")
     subscribed_expiries: List[str] = Field(default_factory=list, alias="subscribedExpiries")
-    strike_window: int = Field(alias="strikeWindow")
+    strike_window: Optional[int] = Field(None, alias="strikeWindow")
     window_centre: Optional[float] = Field(None, alias="windowCentre")
     last_resync_ms: Optional[int] = Field(None, alias="lastResyncMs")
     error: Optional[str] = None

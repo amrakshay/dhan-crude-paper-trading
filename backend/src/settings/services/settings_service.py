@@ -391,12 +391,16 @@ class SettingsService:
             )
             return result
 
-        underlying_scrip = config_utils.get_property_value_int(
-            "underlying.underlying_scrip", 294
-        )
-        underlying_segment = config_utils.get_property_value(
-            "underlying.exchange_segment", "MCX_COMM"
-        )
+        # The probe is a cheap authenticated read against whichever underlying
+        # is actually configured, so it stays correct for a strategy that is
+        # not CRUDEOIL.
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        registry = get_strategy_registry()
+        running = registry.enabled()
+        probe_strategy = running[0] if running else registry.default()
+        underlying_scrip = probe_strategy.underlying_scrip
+        underlying_segment = probe_strategy.exchange_segment
         client = DhanOptionChainClient(client_id=client_id, access_token=access_token)
 
         try:

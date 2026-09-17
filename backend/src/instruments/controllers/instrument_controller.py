@@ -110,7 +110,7 @@ class InstrumentController:
 
         return ChainResponse(
             expiry=expiry,
-            underlyingSymbol=config_utils.get_property_value("underlying.symbol", "CRUDEOIL"),
+            underlyingSymbol=self.chain_service.strategy.symbol,
             underlyingFuture=InstrumentResponse.model_validate(future) if future else None,
             strikeStep=strike_step,
             rows=[

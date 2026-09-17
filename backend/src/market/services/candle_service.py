@@ -247,9 +247,26 @@ class CandleService:
         self._cache: Dict[tuple, tuple] = {}
 
     # --- configuration -----------------------------------------------------
-    @staticmethod
-    def _exchange_segment() -> str:
-        return config_utils.get_property_value("underlying.exchange_segment", "MCX_COMM")
+    def _exchange_segment(self, security_id: Optional[str] = None) -> str:
+        """The segment to ask Dhan for, resolved from the instrument's strategy.
+
+        The book's registered metadata carries the strategy key (attached once,
+        when the subscription was built), so this is a dictionary lookup rather
+        than a guess or a second database read.
+        """
+        from src.market.services.feed_manager import get_feed_manager
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        registry = get_strategy_registry()
+        if security_id is not None:
+            meta = get_feed_manager().book.get(str(security_id)) or {}
+            key = meta.get("strategyKey")
+            if key:
+                strategy = registry.get(key)
+                if strategy is not None:
+                    return strategy.exchange_segment
+        running = registry.enabled()
+        return (running[0] if running else registry.default()).exchange_segment
 
     @staticmethod
     def _synthetic_enabled() -> bool:

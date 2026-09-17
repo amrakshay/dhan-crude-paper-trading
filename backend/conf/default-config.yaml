@@ -96,44 +96,39 @@ dhan:
   instrument_master_max_age_hours: 12
   http_timeout_seconds: 30
 
-underlying:
-  # MCX CRUDEOIL. UnderlyingScrip 294 = CRUDEOIL, 556 = CRUDEOILM (mini).
-  symbol: "CRUDEOIL"
-  underlying_scrip: 294
-  exchange_segment: "MCX_COMM"
-  exchange_segment_code: 5          # numeric code used by the binary feed
-  exchange_id: "MCX"
-  option_instrument_type: "OPTFUT"  # options ON the futures contract
-  futures_instrument_type: "FUTCOM"
+# ---------------------------------------------------------------------------
+# STRATEGY MODULES live in conf/strategies/, one YAML per strategy.
+#
+# Everything specific to trading one thing moved there on 2026-09-18: the
+# underlying and its exchange segment, the contract specification, the market
+# hours, the subscription policy, the charge rate card and the margin model.
+# What is left in this file is generic -- it would be identical for an NSE
+# index-options strategy.
+#
+# Whether a strategy is RUNNING is not in YAML at all: it is a row in
+# `feature_toggles`, owned by the Strategies & Features page, so switching one
+# off is an operator action rather than a redeploy.
+# ---------------------------------------------------------------------------
 
-contract_specs:
-  # -------------------------------------------------------------------------
-  # Contract size does NOT come from Dhan's instrument master.
+capabilities:
+  # Generic features, each of which can be switched off everywhere at once.
+  # A strategy additionally declares which of them it supports; the effective
+  # state is the intersection, so a capability cannot be switched on for a
+  # strategy that cannot support it.
   #
-  # Verified against the live master on 2026-09-16: every MCX row reports
-  # LOT_SIZE=1.0 (all 158 FUTCOM and all 15,844 OPTFUT rows), while NSE rows in
-  # the same file carry real values (NIFTY OPTIDX = 65). Dhan's master simply
-  # does not publish MCX contract size, so it is configured here from MCX's own
-  # contract specification instead. If this number is wrong, every turnover,
-  # charge and P&L figure in the application is wrong with it.
-  #
-  # Source: MCX CRUDEOIL contract specification
-  #   https://www.mcxindia.com/products/energy/crude-oil
-  # as-of: 2026-09-16
-  # -------------------------------------------------------------------------
-  CRUDEOIL:
-    lot_size: 100         # barrels per lot
-    quotation_unit: "barrel"
-  CRUDEOILM:
-    lot_size: 10          # mini contract, barrels per lot
-    quotation_unit: "barrel"
-
-  # Dhan publishes TICK_SIZE in paise, not rupees. Verified 2026-09-16 across
-  # several commodities: ALUMINIUM 5.0 -> Rs 0.05, COPPER 5.0 -> Rs 0.05,
-  # CARDAMOM 100.0 -> Rs 1.00, COTTON 1000.0 -> Rs 10.00, CRUDEOIL futures
-  # 100.0 -> Rs 1.00, CRUDEOIL options 10.0 -> Rs 0.10. Divide by this to get
-  # rupees.
-  tick_size_divisor: 100
+  # These are the DEFAULTS for a fresh installation. After that the live state
+  # is a `feature_toggles` row.
+  option-chain:
+    enabled: true
+  price-chart:
+    enabled: true
+  trade-notes:
+    enabled: true
+  pnl-reports:
+    enabled: true
+  # chart-trading and greeks take their defaults from the older
+  # `chart_trading.enabled` / `greeks_poller.enabled` flags below, so an
+  # operator who had set either keeps what they configured.
 
 market_feed:
   enabled: true
@@ -152,10 +147,9 @@ market_feed:
 
   mode: "FULL"                      # TICKER | QUOTE | FULL. Options need FULL
                                     # (5-level depth + OI).
-  strike_window: 20                 # subscribe ATM +/- N strikes ...
-  expiries_to_subscribe: 2          # ... across the nearest N option expiries
-  resubscribe_move_strikes: 3       # re-centre the window after the underlying
-                                    # moves this many strikes
+  # strike_window, expiries_to_subscribe and resubscribe_move_strikes are per
+  # strategy: see the `subscription:` block in conf/strategies/*.yaml. Each
+  # enabled strategy contributes its own targets to THIS one connection.
   max_instruments_per_subscribe: 100
   max_instruments_per_connection: 5000
   # Dhan allows 5 concurrent feed connections per user. This process uses
@@ -176,20 +170,21 @@ fanout:
   max_client_queue: 64
 
 greeks_poller:
+  # The default for the `greeks` capability, which is what actually gates the
+  # poller now. Kept under its old name so an operator who set it keeps it.
   enabled: true
   # Dhan rate limit: ONE request per 3 seconds per unique underlying+expiry.
-  # Different expiries may be polled concurrently.
+  # Different expiries may be polled concurrently. The limit is Dhan's, so it
+  # stays global; how many expiries a strategy asks for is in its own YAML.
   interval_seconds: 3.0
-  expiries_to_poll: 2
 
-market_hours:
-  timezone: "Asia/Kolkata"
-  open: "09:00"
-  close: "23:30"
-  close_us_dst: "23:55"
-  trading_days: [0, 1, 2, 3, 4]     # Mon-Fri (Python weekday numbering)
+# market_hours moved to conf/strategies/*.yaml on 2026-09-18. MCX trades
+# 09:00-23:30 IST and NSE 09:15-15:30, so the session is a property of the
+# strategy, not of the application.
 
 chart_trading:
+  # `enabled` here is the default for the `chart-trading` capability, which is
+  # what gates the feature now.
   # One-click trading from the futures chart. A Buy buys the nearest ATM CALL
   # and a Sell the nearest ATM PUT -- never a written option, so the worst case
   # is always the premium paid. The stop-loss and take-profit lines dragged onto
