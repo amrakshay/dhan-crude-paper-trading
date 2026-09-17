@@ -187,5 +187,12 @@ class PreviewOrderResponse(BaseModel):
     net_amount: Decimal = Field(alias="netAmount")
     charges: Optional[Dict[str, Any]] = None
     fills: List[PreviewFillResponse] = []
+    # Present only when a portfolio was named. `affordable` is what the ticket
+    # gates its Confirm button on; the two figures beside it are what the
+    # trader needs to see to understand the refusal.
+    portfolio_id: Optional[int] = Field(None, alias="portfolioId")
+    available_balance: Optional[Decimal] = Field(None, alias="availableBalance")
+    estimated_debit: Optional[Decimal] = Field(None, alias="estimatedDebit")
+    affordable: Optional[bool] = None
 
     model_config = ConfigDict(populate_by_name=True)

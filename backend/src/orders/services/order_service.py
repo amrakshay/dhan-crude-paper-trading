@@ -193,6 +193,38 @@ class OrderService:
         )
         if quantity <= 0:
             raise OrderValidationError("Order quantity must be positive")
+
+        # Funds, in the validation block with every other rule rather than
+        # scattered. Priced off the limit where there is one and off the live
+        # mark otherwise: an estimate, because what a market order actually
+        # pays is only known once it walks the book -- which is why the check
+        # runs AGAIN at fill.
+        reference_price = limit_price
+        if reference_price is None:
+            row = self.book.get(str(instrument.security_id)) or {}
+            if row.get("ask"):
+                reference_price = Decimal(str(row["ask"]))
+            elif row.get("ltp"):
+                reference_price = Decimal(str(row["ltp"]))
+        if reference_price is not None:
+            refusal = await self._check_funds(
+                portfolio_id=portfolio.id,
+                side=side,
+                quantity=quantity,
+                price=Decimal(str(reference_price)),
+                strategy_key=strategy.key,
+                lot_size=int(instrument.lot_size),
+                is_close_order=is_close_order,
+            )
+            if refusal:
+                logger.warning(
+                    "Order refused for funds in portfolio %s: %s %s lot(s) of %s -- %s",
+                    portfolio.name, side, lots, instrument.trading_symbol, refusal,
+                )
+                raise OrderValidationError(
+                    f"{refusal} Deposit into {portfolio.name!r}, or trade fewer lots."
+                )
+
         now = utc_now()
 
         order = Order(
@@ -357,6 +389,30 @@ class OrderService:
             if not result.is_filled:
                 continue
 
+            # SECOND funds check, at the fill rather than at placement. A
+            # resting order can sit for hours while other trades spend the
+            # money it was affordable against, and filling it anyway would put
+            # the portfolio into a negative balance that nothing asked for.
+            refusal = await self._check_funds(
+                portfolio_id=order.portfolio_id,
+                side=order.side,
+                quantity=result.filled_quantity,
+                price=Decimal(str(result.average_price)),
+                strategy_key=order.strategy_key,
+                lot_size=int(order.lot_size),
+                is_close_order=bool(order.is_close_order),
+            )
+            if refusal:
+                # REJECTED, not partially filled to fit. Filling what fits
+                # would be the simulator quietly choosing a different trade
+                # from the one that was placed.
+                await self._reject(
+                    order,
+                    f"{refusal} The order was affordable when it was placed; "
+                    f"it is not now.",
+                )
+                continue
+
             await self._apply_fills(order, result)
             await self._finalise(
                 order,
@@ -368,6 +424,97 @@ class OrderService:
             filled += 1
 
         return filled
+
+    # --- funds -------------------------------------------------------------
+    async def _estimated_debit(
+        self,
+        side: str,
+        quantity: int,
+        price: Decimal,
+        strategy_key: str,
+        lot_size: int,
+    ) -> Decimal:
+        """What this execution would take out of a portfolio.
+
+        A BUY costs the premium plus charges. A SELL to open RECEIVES premium
+        but ties up margin, and the margin estimate is larger than the credit
+        for anything but a deep out-of-the-money option -- so the debit to check
+        against is the margin, less what comes in.
+
+        Deliberately an over-estimate at the margins rather than an under-one:
+        this is a paper simulator, and erring towards refusing a trade is the
+        direction backend/CLAUDE.md section 4 says to err in.
+        """
+        from src.portfolios.services.balance_service import BalanceService
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        price = Decimal(str(price))
+        quantity = int(quantity)
+        consideration = (price * quantity).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
+        engine = ChargesEngine.for_strategy_key(strategy_key)
+        charges = Decimal(
+            str(
+                engine.compute_order_charges_for_quantity(
+                    side=side, premium=price, quantity=quantity, lot_size=lot_size
+                ).total
+            )
+        )
+
+        if str(side).upper() == OrderSide.BUY.value:
+            return consideration + charges
+
+        strategy = get_strategy_registry().get(strategy_key)
+        percent = (
+            Decimal(str(strategy.margin.short_option_percent_of_notional))
+            if strategy
+            else Decimal("0")
+        )
+        margin = (percent * consideration).quantize(
+            MONEY_QUANTUM, rounding=ROUND_HALF_UP
+        )
+        return (margin - consideration + charges).max(charges)
+
+    async def _check_funds(
+        self,
+        portfolio_id: int,
+        side: str,
+        quantity: int,
+        price: Decimal,
+        strategy_key: str,
+        lot_size: int,
+        is_close_order: bool,
+    ) -> Optional[str]:
+        """None if affordable, otherwise why not, naming the shortfall.
+
+        A CLOSING order is never refused for funds. Closing a long releases
+        money and closing a short releases margin; refusing it would trap a
+        trader in a position precisely when they most need out of it.
+        """
+        if is_close_order:
+            return None
+
+        from src.portfolios.services.balance_service import BalanceService
+
+        required = await self._estimated_debit(
+            side, quantity, price, strategy_key, lot_size
+        )
+        if required <= 0:
+            return None
+
+        available = await BalanceService(
+            self.orders.session, book=self._book
+        ).available_balance(portfolio_id)
+        if required <= available:
+            return None
+
+        shortfall = (required - available).quantize(
+            MONEY_QUANTUM, rounding=ROUND_HALF_UP
+        )
+        return (
+            f"Insufficient funds: this would need {required} but only "
+            f"{available} is available -- short by {shortfall}."
+        )
 
     # --- state transitions -------------------------------------------------
     async def _apply_fills(self, order: Order, result: fill_simulator.FillResult) -> None:
@@ -629,6 +776,7 @@ class OrderService:
         order_type: str,
         lots: int,
         limit_price: Optional[Decimal] = None,
+        portfolio_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """What this order would do, WITHOUT placing it.
 
@@ -725,4 +873,58 @@ class OrderService:
             "grossValue": gross.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP),
             "netAmount": net.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP),
             "limitPrice": limit,
+            # Affordability against a named portfolio, so the ticket can show
+            # the debit beside the available balance and disable Confirm when
+            # it does not fit -- the same rule as showing charges before the
+            # button is enabled, applied to money.
+            **(
+                await self._affordability(
+                    portfolio_id, side, estimated_quantity, indicative_price,
+                    instrument,
+                )
+            ),
+        }
+
+    async def _affordability(
+        self,
+        portfolio_id: Optional[int],
+        side: str,
+        quantity: int,
+        price: Optional[Decimal],
+        instrument,
+    ) -> Dict[str, Any]:
+        """What a portfolio has, and whether this order fits inside it."""
+        if portfolio_id is None or price is None or quantity <= 0:
+            return {}
+
+        from src.portfolios.services.balance_service import BalanceService
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        strategy = get_strategy_registry().for_instrument(
+            instrument.exchange_segment, instrument.underlying_symbol
+        )
+        if strategy is None:
+            return {}
+
+        try:
+            available = await BalanceService(
+                self.orders.session, book=self._book
+            ).available_balance(int(portfolio_id))
+        except Exception:  # noqa: BLE001 - a preview must still render
+            logger.exception(
+                "Could not read the available balance for portfolio %s; the "
+                "preview will not show affordability",
+                portfolio_id,
+            )
+            return {}
+
+        required = await self._estimated_debit(
+            side, quantity, Decimal(str(price)), strategy.key,
+            int(instrument.lot_size),
+        )
+        return {
+            "portfolioId": int(portfolio_id),
+            "availableBalance": available,
+            "estimatedDebit": required,
+            "affordable": required <= available,
         }

@@ -76,6 +76,7 @@ class OrderController:
                 order_type=request.order_type,
                 lots=request.lots,
                 limit_price=request.limit_price,
+                portfolio_id=request.portfolio_id,
             )
         except OrderValidationError as exc:
             logger.debug(
@@ -110,6 +111,10 @@ class OrderController:
                 )
                 for fill in preview["fills"]
             ],
+            portfolioId=preview.get("portfolioId"),
+            availableBalance=preview.get("availableBalance"),
+            estimatedDebit=preview.get("estimatedDebit"),
+            affordable=preview.get("affordable"),
         )
 
     async def cancel_paper_order(self, order_id: int) -> OrderResponse:
