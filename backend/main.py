@@ -64,6 +64,12 @@ async def _seed_default_administrator() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Nothing recorded when this process started, so the health page had no
+    # uptime to report. This is that one line.
+    from src.health.services.process_stats import mark_started
+
+    mark_started()
+
     logger.info(
         "Crude paper-trading backend starting up (config=%s, logs=%s)",
         config_utils.get_config_path(),
@@ -153,7 +159,16 @@ class LogRequestsMiddleware(BaseHTTPMiddleware):
     line. An inbound `X-Request-Id` is honoured if the caller supplies one.
     """
 
-    IGNORED_PATHS = {"/", "/api/healthcheck/status", "/api/docs", "/api/openapi.json"}
+    # The system health page polls, and it reports on this very log -- an
+    # entry per poll would be the monitor distorting what it monitors.
+    IGNORED_PATHS = {
+        "/",
+        "/api/healthcheck/status",
+        "/api/healthcheck/system",
+        "/api/healthcheck/problems",
+        "/api/docs",
+        "/api/openapi.json",
+    }
 
     # A request slower than this is worth knowing about: nothing here should
     # take seconds.
@@ -238,6 +253,7 @@ async def health_check() -> JSONResponse:
 from src.auth import auth_main_router  # noqa: E402
 from src.instruments import instruments_main_router  # noqa: E402
 from src.charges import charges_main_router  # noqa: E402
+from src.health import health_main_router  # noqa: E402
 from src.chart_trading import chart_trading_main_router  # noqa: E402
 from src.orders import orders_main_router  # noqa: E402
 from src.notes import notes_main_router  # noqa: E402
@@ -251,6 +267,7 @@ app.include_router(auth_main_router, prefix="/api")
 app.include_router(instruments_main_router, prefix="/api")
 app.include_router(market_main_router, prefix="/api")
 app.include_router(charges_main_router, prefix="/api")
+app.include_router(health_main_router, prefix="/api")
 app.include_router(orders_main_router, prefix="/api")
 app.include_router(chart_trading_main_router, prefix="/api")
 app.include_router(positions_main_router, prefix="/api")

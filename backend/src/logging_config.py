@@ -14,7 +14,7 @@ import os
 import sys
 from typing import Optional
 
-from src import log_redaction
+from src import log_buffer, log_redaction
 
 _APP_LOGGER_NAME = "dcpt"
 _ACCESS_LOGGER_NAME = "dcpt.access"
@@ -138,6 +138,15 @@ def configure_logging(
 
     _configure_fallback(level or "INFO", access_level or level or "INFO")
     _apply_levels(level, access_level)
+
+    # Keep the last N WARNING+ records in memory for the system health page.
+    # Attached here rather than at a call site (see backend/CLAUDE.md section
+    # 8), and last, so it sits alongside the file and stdout handlers rather
+    # than in front of them. It has its own RedactingFormatter, so what the
+    # health endpoint serves is scrubbed by the same layer that protects
+    # app.log.
+    log_buffer.install(logging.getLogger(_APP_LOGGER_NAME))
+
     _CONFIGURED = True
 
     if failure:
@@ -163,6 +172,7 @@ def reset_logging_for_tests() -> None:
                 handler.close()
             except Exception:  # pragma: no cover - best effort
                 pass
+    log_buffer.reset_for_tests()
     _CONFIGURED = False
 
 

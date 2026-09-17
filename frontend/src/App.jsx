@@ -12,6 +12,7 @@ import NotesPage from './pages/NotesPage';
 import UsersPage from './pages/UsersPage';
 import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
+import SystemHealthPage from './pages/SystemHealthPage';
 
 /**
  * `RoleRoute` checks the page against the role -> pages mapping the server
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/users" element={<RoleRoute path="/users"><UsersPage /></RoleRoute>} />
         <Route path="/profile" element={<RoleRoute path="/profile"><ProfilePage /></RoleRoute>} />
         <Route path="/settings" element={<RoleRoute path="/settings"><SettingsPage /></RoleRoute>} />
+        <Route path="/health" element={<RoleRoute path="/health"><SystemHealthPage /></RoleRoute>} />
         <Route path="/" element={<Navigate to="/live" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/live" replace />} />

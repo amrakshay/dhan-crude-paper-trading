@@ -84,3 +84,34 @@ export function formatCountdown(seconds) {
   if (minutes > 0) return `${minutes}m ${String(secs).padStart(2, '0')}s`;
   return `${secs}s`;
 }
+
+/** Resident memory and similar byte counts, in the unit a human would pick. */
+export function formatBytes(value, fallback = '—') {
+  if (value === null || value === undefined || Number.isNaN(value)) return fallback;
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = value / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+
+/**
+ * A duration in seconds as uptime reads best: days and hours once it is long,
+ * seconds while it is still short. Distinct from `formatCountdown`, which
+ * counts *down* to a deadline and therefore never shows days.
+ */
+export function formatDuration(seconds, fallback = '—') {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return fallback;
+  const total = Math.floor(seconds);
+  if (total < 60) return `${total}s`;
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m ${total % 60}s`;
+}

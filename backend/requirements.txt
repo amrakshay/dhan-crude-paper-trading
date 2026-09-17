@@ -37,6 +37,14 @@ bcrypt==4.2.1
 # src/settings/services/crypto_service.py.
 cryptography==44.0.0
 
+# --- process metrics (the system health page) ---
+# RSS, CPU percentage, open file descriptors and the OS thread count, which
+# stdlib cannot give portably: resource.getrusage() offers peak RSS and CPU
+# *time* and nothing else. Pure wheels on macOS/arm64 and Linux, so no build
+# step, and imported lazily -- if it is ever missing the health page says the
+# figures are unavailable instead of failing.
+psutil==6.1.1
+
 # --- tests ---
 pytest==8.3.4
 pytest-asyncio==0.25.0

@@ -20,12 +20,13 @@
     "/notes",
     "/users",
     "/profile",
-    "/settings"
+    "/settings",
+    "/health"
   ],
   "roles": {
     "ROLE_ACCOUNT_ADMIN": {
       "label": "Account admin",
-      "description": "Full access, including Settings and user management.",
+      "description": "Full access, including Settings, system health and user management.",
       "pages": [
         "/live",
         "/chain",
@@ -35,12 +36,13 @@
         "/notes",
         "/users",
         "/profile",
-        "/settings"
+        "/settings",
+        "/health"
       ]
     },
     "ROLE_USER": {
       "label": "User",
-      "description": "Everything except Settings. Sees the user list but cannot change it.",
+      "description": "Everything except Settings and System Health. Sees the user list but cannot change it.",
       "pages": [
         "/live",
         "/chain",

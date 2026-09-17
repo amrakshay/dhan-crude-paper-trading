@@ -125,10 +125,17 @@ async def market_websocket(websocket: WebSocket, token: Optional[str] = Query(No
     # a deactivated or deleted user is refused a socket exactly as they are
     # refused a request, rather than only when their token eventually expires.
     candidate = websocket.cookies.get(AuthService.cookie_name()) or token
+    # Counted as well as logged: a run of refusals is an auth problem, and
+    # until the system health page existed it reached a human only as a
+    # scattering of warnings in app.log. get_feed_manager() is safe here --
+    # the broadcaster survives reconfigure() precisely so it is the stable
+    # place to keep a process-lifetime counter.
+    broadcaster = get_feed_manager().broadcaster
     try:
         async with session_scope() as session:
             principal = await resolve_principal(candidate, session)
     except HTTPException as exc:
+        broadcaster.record_rejected_handshake()
         logger.warning(
             "Rejected a WebSocket handshake from %s: %s",
             websocket.client.host if websocket.client else "unknown",
@@ -138,6 +145,7 @@ async def market_websocket(websocket: WebSocket, token: Optional[str] = Query(No
         return
 
     if principal.must_change_password:
+        broadcaster.record_rejected_handshake()
         logger.warning(
             "Rejected a WebSocket handshake for %s: password change required",
             principal.email,
@@ -148,9 +156,9 @@ async def market_websocket(websocket: WebSocket, token: Optional[str] = Query(No
     await websocket.accept()
     logger.debug("WebSocket accepted for %s", principal)
 
-    manager = get_feed_manager()
-    broadcaster = manager.broadcaster
-    client = broadcaster.register(websocket, client_id=uuid.uuid4().hex[:8])
+    client = broadcaster.register(
+        websocket, client_id=uuid.uuid4().hex[:8], user_email=principal.email
+    )
 
     async def send_loop() -> None:
         while True:

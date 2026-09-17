@@ -161,8 +161,16 @@ by-expiry / by-strike slices and the equity curve possible at all.
 
 - `SettingsService.apply_to_config()` mutates the in-memory config dict from
   `config_utils`. That is deliberate: it means every existing caller picks up the
-  UI value without touching a single call site. It runs in the lifespan **before
-  the feed starts**, and again after each save.
+  UI value without touching a single call site. It runs after each save.
+
+  > **It does NOT run at startup**, although this file previously said it ran
+  > "in the lifespan before the feed starts". `apply_to_config()` is called
+  > from `save()` and nowhere else -- verified 2026-09-17 by the system health
+  > page, which now reports the divergence between what is stored and what the
+  > process is actually using. Consequence: after a restart the app runs on
+  > `.env`, so a token saved in the UI is not the one the feed uses. Fix by
+  > calling it in `main.py`'s lifespan before `get_feed_manager().start()`,
+  > then delete this note and the matching one in the root `CLAUDE.md`.
 - Only keys in `MANAGED_KEYS` are ever read back out, so a stray row cannot start
   influencing configuration.
 - **Secrets go in `encrypted_value`, never `value`** — the repository enforces
@@ -352,6 +360,54 @@ position. Everything in it exists to keep that translation honest.
 - The rupee figures attached to a level are **estimates from the option's
   current delta**, not limits. Keep them labelled as estimates wherever they
   surface.
+
+---
+
+## 10c. System health
+
+`src/health/` aggregates what this process already knows about itself. It owns
+no tables, ships no migration, and has a `database/` folder holding exactly one
+read-only repository (the `alembic_version` row) because repositories own
+queries even when a feature owns no schema.
+
+- **Almost nothing here is new measurement.** Nine components already exposed a
+  `status()` or `stats()` dict and only `FeedManager.status()` was reachable
+  from the API. Prefer joining an existing counter over adding one, and reach
+  singletons (`get_feed_manager`, `get_order_matcher`, `get_bracket_monitor`,
+  `get_candle_service`) **inside** the function, per section 1.
+- **`task_inspector` is the answer to "threads".** There is no thread pool; the
+  concurrency is the eight named asyncio tasks. Membership of
+  `TASK_DESCRIPTIONS` is what identifies an application task — not a name
+  shape. Starlette names its per-request tasks after the coroutine, so a
+  `Task-N` filter let framework plumbing into the table as an "unexpected"
+  application task. Anything not in the set is counted as transient.
+- **Every task row is judged against what should be running**
+  (`expected_task_names`), because a task that died silently is the failure
+  this table exists to catch. Adding a named task means adding it to
+  `TASK_DESCRIPTIONS` *and* to `expected_task_names`, or the page will report
+  it as unexpected forever.
+- **Counter epochs are a claim about code, and they are pinned by a test.**
+  `reconfigure()` replaces the feed client (its counters reset) but does not
+  replace the greeks poller — constructed once in `FeedManager.__init__`, only
+  stopped and restarted — nor the broadcaster. Verified against a live
+  reconfigure;
+  `test_the_counter_epochs_match_what_reconfigure_actually_rebuilds` asserts it.
+- **`Broadcaster.clients()` lives on the broadcaster**, not in the health
+  package. Reaching into `_clients` from outside would make the queue part of
+  the public surface. `ClientConnection` uses `__slots__` — adding a field
+  means adding the slot.
+- **The synthetic feed gets a different card, not a fake one.** In synthetic
+  mode there is no upstream socket, so `hasUpstreamConnection` is false and the
+  inactivity headroom is `None` rather than a comfortable-looking number
+  against a cliff that does not apply. Same honesty rule as the chart.
+- **Secrets: see the root `CLAUDE.md`.** Add a field, add its assertion in
+  `tests/test_no_secrets_in_logs.py` in the same change.
+
+`src/log_buffer.py` is the recent-warnings buffer. It is installed from
+`configure_logging()` and nowhere else (section 8), holds records **already
+formatted through `RedactingFormatter`** because an HTTP endpoint reads them,
+counts every record it has seen (not just the ones still held) so a wrapped
+buffer cannot under-report, and never raises out of `emit`.
 
 ---
 

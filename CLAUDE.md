@@ -140,13 +140,40 @@ state as `SYNTHETIC`, and the UI shows a permanent banner.
 **Fill simulation stays pessimistic.** See `backend/CLAUDE.md` §4. Do not make
 fills more generous without being asked.
 
+**The health page displays internals, so it must never display a secret.**
+`src/health/` exists to answer "what is this process doing", which makes it the
+likeliest place in the codebase to leak one. The Dhan token is a
+`crypto_service.mask()` plus `inspect_token()` metadata, the database URL goes
+through `database.connection.redact_database_url` (the same redactor the log
+uses — do not write a second one), and log lines are served from
+`src/log_buffer.py`, which stores records already formatted through
+`RedactingFormatter`. Every one of these has an assertion in
+`tests/test_no_secrets_in_logs.py` pointed at the endpoint itself. If you add a
+field to the health payload, add its no-secrets assertion in the same change.
+
+**The health page must not distort what it monitors.** Nothing it reports is
+measured on the tick path — every number is either already-existing component
+state or an `asyncio.all_tasks()` walk. It polls at 5 s, and both its endpoints
+are in `LogRequestsMiddleware.IGNORED_PATHS` so the polling does not fill the
+access log the page reports on. Do not add timing or sampling inside
+`apply_packet` to feed it.
+
 **Money is `Decimal`, never `float`.** Timestamps are stored naive-UTC.
 
 **Settings from the UI beat `.env`.** `SettingsService.apply_to_config()` overlays
-stored settings onto the in-memory config at startup (before the feed starts)
-and after every save. Do not read `DHAN_*` from `os.environ` directly — go
-through `config_utils`, or you will see the `.env` fallback instead of what the
-operator actually configured.
+stored settings onto the in-memory config. Do not read `DHAN_*` from
+`os.environ` directly — go through `config_utils`, or you will see the `.env`
+fallback instead of what the operator actually configured.
+
+> **This paragraph used to say the overlay also runs "at startup (before the
+> feed starts)". It does not.** `apply_to_config()` is called from
+> `SettingsService.save()` and from nowhere else — verified 2026-09-17 while
+> building the system health page, which is what caught it. A process that
+> restarts after a save therefore runs on `.env`, and a Dhan token configured
+> in the UI is silently not the one the feed uses. The health page detects and
+> reports the divergence; nothing fixes it yet. See README's "Known gaps". If
+> you fix it, call `apply_to_config()` in `main.py`'s lifespan **before**
+> `get_feed_manager().start()`, and delete this note.
 
 **The Dhan access token is encrypted at rest and never leaves the server.**
 Responses carry a mask and decoded JWT metadata only. If you add a settings
@@ -187,6 +214,9 @@ backend/src/market/services/candle_service.py       timeframes, aggregation, cac
 frontend/src/components/PriceChart.jsx              the chart; see frontend/NOTICE
 backend/src/chart_trading/                         one-click trading from the chart
 backend/src/chart_trading/services/bracket_monitor.py   server-side SL/TP watcher
+backend/src/health/                the system health page's backend (no tables)
+backend/src/log_buffer.py          in-memory ring buffer of recent WARNING+ records
+frontend/src/pages/SystemHealthPage.jsx            the system health page
 backend/tests/test_no_real_orders.py   the safety suite
 frontend/src/theme/tokens.js       palette ported from the Privacera portal
 frontend/src/market/               the single shared WebSocket context

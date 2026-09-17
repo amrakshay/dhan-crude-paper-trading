@@ -189,6 +189,35 @@ the draggable SL/TP lines, `useChartTrading.js` the state.
 
 ---
 
+## 5c. The system health page
+
+`src/pages/SystemHealthPage.jsx`, admin-only (`/health` in
+`backend/conf/role-pages.json`, and `require_admin` on the routes -- the
+sidebar is presentation, section 5).
+
+- **It polls at 5 s, slower than Positions' 2 s.** Nothing on it changes
+  meaningfully faster, and a health page that is itself a load source is
+  reporting on a system it distorted. It shows an "as of" age that ticks
+  locally once a second (the Settings countdown trick) so a stalled poll is
+  visible, plus a manual Refresh and a switch to stop polling entirely.
+- **It uses no market data and opens no socket.** Everything comes from
+  `GET /api/healthcheck/system`. Do not wire it to `MarketFeedContext` -- a
+  page that reports on the feed must not depend on the feed being healthy.
+- **Section 3's honesty rules apply hardest here.** In synthetic mode the
+  upstream card says "no upstream connection" instead of rendering a healthy
+  socket; the Credentials card shows the *effective* configuration and warns
+  when saved settings are not in effect; "measuring..." is shown for a CPU
+  reading that has no previous sample rather than 0%; and a resource figure
+  that cannot be read says so rather than showing a dash that reads as zero.
+- The last-message age is rendered as **headroom against Dhan's 40 s drop**,
+  with a bar, because the raw integer means nothing without the threshold.
+- Numbers go through `src/utils/format.js` (`formatAge`, `formatBytes`,
+  `formatDuration`, `formatCompact`) and colours through `theme.market.*` /
+  `theme.palette.*`. `formatDuration` is uptime (days and hours);
+  `formatCountdown` counts down to a deadline. They are not interchangeable.
+
+---
+
 ## 6. Conventions
 
 - API access goes through `src/api/` (`client.js` wraps fetch and raises

@@ -7,6 +7,7 @@ import StickyNote2Icon from '@mui/icons-material/StickyNote2';
 import GroupIcon from '@mui/icons-material/Group';
 import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
+import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 
 /**
  * Every page the app has. Which of them a given role actually sees is decided
@@ -26,6 +27,7 @@ export const navigationItems = [
   { path: '/users', label: 'Users', icon: GroupIcon },
   { path: '/profile', label: 'Profile', icon: PersonIcon },
   { path: '/settings', label: 'Settings', icon: SettingsIcon },
+  { path: '/health', label: 'System Health', icon: MonitorHeartIcon },
 ];
 
 /** The sidebar for a role, in the order declared above. */

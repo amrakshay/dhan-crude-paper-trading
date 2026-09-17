@@ -243,6 +243,140 @@ async def test_no_response_body_ever_carries_a_password_hash(auth_client):
         assert "$2b$" not in body
 
 
+# --- the system health endpoint, whose whole job is to display internals ----
+# This is the single most likely place in the application to leak a secret,
+# because "show me the configuration" is its reason to exist. Every one of
+# these asserts a sentinel is absent from the RESPONSE BODY, not just the log.
+async def test_the_health_endpoint_never_returns_the_dhan_access_token(
+    auth_client, captured_logs
+):
+    token = _sentinel_token()
+    saved = await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    response = await auth_client.get("/api/healthcheck/system")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # The token must be reported as present, with a mask and an expiry -- the
+    # page is useless if it cannot say the token is about to die -- but the
+    # token itself must be nowhere in the payload.
+    assert body["credentials"]["token"]["present"] is True
+    assert body["credentials"]["token"]["masked"]
+    assert body["credentials"]["token"]["expiresAt"]
+    assert token not in response.text
+    # A JWT is three dot-separated parts; a leak of only the signature would
+    # still be a leak, so each part is checked on its own.
+    for part in token.split("."):
+        if len(part) >= 9:
+            assert part not in response.text
+    _assert_clean(captured_logs, token)
+
+
+async def test_the_health_endpoint_never_returns_the_jwt_or_encryption_secrets(
+    auth_client,
+):
+    """Both are in the in-memory config this page reports on."""
+    import os
+
+    response = await auth_client.get("/api/healthcheck/system")
+
+    assert response.status_code == 200
+    for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+        value = os.environ.get(name)
+        if value and len(value) >= 9:
+            assert value not in response.text, f"{name} reached the health payload"
+    # Config keys that hold secrets must not be echoed either.
+    assert "jwt_secret" not in response.text
+    assert "encryption_key" not in response.text
+
+
+async def test_the_health_endpoint_redacts_a_database_password(auth_client, monkeypatch):
+    """The database URL is displayed, so its password must be removed first."""
+    from src.health.services import health_service
+
+    secret = "database-password-DO-NOT-SHOW-5c1e77"
+    url = f"mysql+aiomysql://dcpt:{secret}@db.internal:3306/crude?charset=utf8mb4"
+    # Patched where it is *used*: health_service imported the name, so it holds
+    # its own reference and patching src.database.connection would not be seen.
+    monkeypatch.setattr(health_service, "get_database_url", lambda: url)
+
+    response = await auth_client.get("/api/healthcheck/system")
+
+    assert response.status_code == 200
+    assert secret not in response.text
+    assert "dcpt:***@db.internal" in response.json()["process"]["database"]["urlRedacted"]
+
+
+async def test_buffered_log_records_reach_the_health_endpoint_already_redacted(
+    auth_client,
+):
+    """The buffer is read by HTTP, so it must hold scrubbed text, not raw records."""
+    from src import log_buffer, log_redaction
+
+    secret = "buffered-secret-DO-NOT-SHOW-2fa901"
+    log_redaction.register_secret(secret)
+    logger = get_logger("tests.health.buffer")
+    try:
+        logger.warning("upstream rejected %s", secret)
+
+        response = await auth_client.get("/api/healthcheck/system")
+
+        assert response.status_code == 200
+        entries = response.json()["problems"]["entries"]
+        assert any("upstream rejected" in entry["message"] for entry in entries)
+        assert secret not in response.text
+        assert log_redaction.REDACTED in response.text
+    finally:
+        log_redaction.clear_secrets()
+        handler = log_buffer.get_handler()
+        if handler is not None:
+            handler.clear()
+
+
+async def test_a_plain_user_cannot_read_the_health_endpoints(auth_client):
+    """Admin-only at the route, not merely hidden from the sidebar."""
+    import httpx
+
+    created = await auth_client.post(
+        "/api/users",
+        json={
+            "email": "health.reader@abc.com",
+            "firstName": "Health",
+            "lastName": "Reader",
+            "password": "health-reader-password",
+            "role": "ROLE_USER",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    import main
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        login = await client.post(
+            "/api/auth/login",
+            json={"email": "health.reader@abc.com", "password": "health-reader-password"},
+        )
+        assert login.status_code == 200, login.text
+        assert (await client.get("/api/healthcheck/system")).status_code == 403
+        assert (await client.get("/api/healthcheck/problems")).status_code == 403
+
+
+async def test_an_anonymous_caller_cannot_read_the_health_endpoints(api_client):
+    assert (await api_client.get("/api/healthcheck/system")).status_code == 401
+    assert (await api_client.get("/api/healthcheck/problems")).status_code == 401
+    # The plain liveness probe stays open -- it carries nothing.
+    assert (await api_client.get("/api/healthcheck/status")).status_code == 200
+
+
 def test_a_registered_secret_is_scrubbed_from_a_traceback(captured_logs):
     """The formatter, not the call site, is the last line of defence."""
     secret = "traceback-secret-DO-NOT-LOG-91ac44"

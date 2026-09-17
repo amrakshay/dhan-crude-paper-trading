@@ -28,6 +28,7 @@ source.
 | **P&L reports** | Realised and unrealised, by day / expiry / strike, gross vs net, charges by component, equity curve, CSV export |
 | **Trade notes** | Free-text notes on completed trades — searchable, editable, visible from history and reports |
 | **Settings** | Dhan credentials and feed mode editable in the UI, with a token validator and a live expiry countdown — **account admins only** |
+| **System health** | One page answering "is this thing healthy and what is it doing right now?" — uptime, the eight named background tasks, the upstream feed against Dhan's 40 s drop cliff, every connected browser tab, Dhan API usage, token expiry and recent warnings — **account admins only** |
 | **Users** | Real user accounts with two roles, add/edit/delete, per-account status, and a forced password change on first login |
 | **Profile** | Your own details and password; email is read-only |
 
@@ -415,6 +416,75 @@ Alembic's own `Running upgrade …` lines land in `app.log`.
 
 ---
 
+## System health
+
+`/health` (account admins only) answers "is this healthy and what is it doing
+right now?" without SSH-ing in to read `app.log`. One endpoint,
+`GET /api/healthcheck/system`, aggregates what nine components already knew
+about themselves and were never asked.
+
+**There are no threads to monitor.** This is one process, one uvicorn worker,
+one asyncio event loop — `server.py` forces `workers=1` because more workers
+means more upstream Dhan connections and a desynchronised book. There is no
+thread pool. The honest equivalent is the eight **named asyncio tasks**, and
+the page lists them with what each one is for, its interval, its progress
+counter and its last error:
+
+```
+dhan-feed          dhan-feed-watchdog   synthetic-feed     broadcaster
+greeks-poller      feed-resync          order-matcher      bracket-monitor
+```
+
+Each row is judged against what *should* be running for the current
+configuration, because the failure worth catching is a task that died
+silently — a dead `greeks-poller` does not announce itself, the greeks just
+stop moving and look merely stale. Framework tasks (per-request, per-socket)
+are counted, not listed.
+
+**The two kinds of WebSocket are two separate cards**, because they fail
+differently and "WebSocket: connected" hides both failures:
+
+* **The upstream Dhan feed** — exactly one, and the scarce resource. Its
+  last-message age is shown as *headroom against the 40 s cliff Dhan drops us
+  at*, not as a bare integer; a reconnect count that climbs while the state
+  reads healthy is flapping; subscription and connection budgets are shown
+  against their ceilings. **In synthetic mode the card says "no upstream
+  connection" rather than showing a healthy socket that does not exist.**
+* **The browser fan-out sockets** — one row per open tab: client id, who opened
+  it, how long it has been open, whether it took the whole book or narrowed to
+  a few ids, depth on or off, and **how many times it fell behind and had its
+  queue reset**. That last number is the point: a slow tab silently dropping
+  data was previously visible only in the disconnect log line.
+
+The greeks poller and the charts client are plain HTTPS, so they get their own
+card — a connected feed says nothing about whether greeks are arriving.
+
+**Counters are labelled with their epoch, because they do not all reset
+together.** `FeedManager.reconfigure()` (which a settings save triggers)
+*replaces* the feed client, so `framesReceived`, `packetsApplied` and
+`reconnects` reset. It does **not** replace the greeks poller — that is
+constructed once and merely stopped and restarted — nor the broadcaster, which
+is deliberately kept alive so open tabs are not stranded. Verified against a
+live reconfigure; `tests/test_health_api.py` pins it.
+
+**It never returns a secret.** The Dhan access token is a mask plus its decoded
+expiry, the database URL goes through the same redactor the log uses, and the
+recent-warnings list is read from an in-memory buffer that has already been
+through `RedactingFormatter`. `tests/test_no_secrets_in_logs.py` asserts each
+of these against the endpoint directly.
+
+**Recent warnings and errors** come from a bounded in-memory ring buffer (the
+last 250 WARNING+ records), attached in `configure_logging()`. It is
+process-scoped and empty after a restart — the page says so, and `app.log`
+remains the durable record.
+
+The page polls every 5 s with a visible "as of" age and a manual Refresh.
+`/api/healthcheck/system` and `/api/healthcheck/problems` are both in
+`LogRequestsMiddleware.IGNORED_PATHS`, so polling does not fill the access log
+the page reports on.
+
+---
+
 ## Switching SQLite → MySQL
 
 Change one line in `.env`:
@@ -633,6 +703,44 @@ not carried over.
 
 ## Known gaps
 
+* **Settings saved in the UI do not survive a restart into the running
+  configuration.** `SettingsService.apply_to_config()` overlays stored settings
+  onto the in-memory config, and it is called from `save()` **only** — nothing
+  calls it during startup. So a process that restarts after a save runs on its
+  `.env` values while the Settings page still shows what was saved: a Dhan
+  token configured in the UI is silently not the one the feed uses. Found while
+  verifying the system health page, which now detects and reports the
+  divergence (Credentials card, and a line in the headline summary) — but
+  detecting it is not fixing it. **Workaround: re-save on the Settings page
+  after every restart.** Note this contradicts what `CLAUDE.md` §4 and
+  `backend/CLAUDE.md` §7 claim; the documentation describes the intent, the
+  code does not implement it.
+* **The system health page's process metrics need `psutil`.** Memory, CPU, open
+  file descriptors and the OS thread count come from it; if it is ever missing
+  the card says the figures are unavailable rather than guessing. The CPU
+  percentage is averaged over the interval since the previous poll, so the
+  first reading after a page load is shown as "measuring…" rather than as 0%.
+* **The health page cannot see other processes.** "1 of 5 connections used" is
+  scoped to *this* process, and says so. A second instance started against the
+  same Dhan credentials takes another of the five slots invisibly.
+* **No database pool statistics.** SQLite uses a `NullPool`, so there is
+  nothing to report and the page says that rather than implying otherwise. The
+  MySQL branch does configure `pool_size=10, max_overflow=20`, but MySQL has
+  never been executed against a live server here, so those numbers are reported
+  as *configured*, never as observed.
+* **The charge rate card's per-rate as-of dates are YAML comments.** The health
+  page reports the rate-card `version` but cannot say "this rate is N days
+  stale", because the dates are not structured fields. Promoting them to real
+  keys in `conf/charges.yaml` would fix it; parsing comments would not.
+* **The health page has never been seen against a live Dhan token.** The
+  inactivity headroom, the reconnect count, the real feed's `mode`/`requestCode`
+  and the option chain client's request counters were all exercised with the
+  synthetic feed and with a forced status, not against `wss://api-feed.dhan.co`.
+  The arithmetic is unit-tested; the values it reads are not.
+* **This application's own API has no request metrics.** No counters, no
+  latency histogram, no error rate — the access log is the only record, and the
+  health page says so rather than showing an empty chart. The middleware does
+  log a warning above 1000 ms.
 * **The default administrator's password is never forced to rotate.** The
   seeded `trader@abc.com` account is created with `must_change_password = false`,
   so whatever `APP_ADMIN_PASSWORD` was set to stands until someone changes it in

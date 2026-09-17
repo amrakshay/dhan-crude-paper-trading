@@ -32,10 +32,12 @@ class ClientConnection:
 
     __slots__ = (
         "websocket", "queue", "security_ids", "include_depth",
-        "needs_snapshot", "dropped", "client_id",
+        "needs_snapshot", "dropped", "client_id", "connected_at_ms", "user_email",
     )
 
-    def __init__(self, websocket, client_id: str, max_queue: int) -> None:
+    def __init__(
+        self, websocket, client_id: str, max_queue: int, user_email: Optional[str] = None
+    ) -> None:
         self.websocket = websocket
         self.client_id = client_id
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue)
@@ -45,6 +47,13 @@ class ClientConnection:
         self.include_depth: bool = True
         self.needs_snapshot: bool = True
         self.dropped: int = 0
+        self.connected_at_ms: int = now_ms()
+        # Who opened this socket. The handshake already resolves a principal to
+        # make the auth decision; keeping the email means the health page can
+        # say whose tab is holding a subscription open instead of listing
+        # anonymous ids. It is not used for any authorisation decision -- the
+        # socket was authorised once, at the handshake.
+        self.user_email: Optional[str] = user_email
 
     def wants(self, security_id: str) -> bool:
         return self.security_ids is None or security_id in self.security_ids
@@ -70,6 +79,11 @@ class Broadcaster:
         self._status_provider = None
         self.broadcasts = 0
         self.rows_sent = 0
+        # Handshakes refused before a socket existed (bad cookie, expired
+        # session, password change owed). These are logged individually but
+        # were never counted, so an auth problem looked to the operator like
+        # "the page just does not update".
+        self.rejected_handshakes = 0
         self._last_summary_ms = 0
         self._summary_baseline = (0, 0)
         self._stale_warned = False
@@ -181,8 +195,10 @@ class Broadcaster:
         )
 
     # --- clients -----------------------------------------------------------
-    def register(self, websocket, client_id: str) -> ClientConnection:
-        client = ClientConnection(websocket, client_id, self._max_queue())
+    def register(
+        self, websocket, client_id: str, user_email: Optional[str] = None
+    ) -> ClientConnection:
+        client = ClientConnection(websocket, client_id, self._max_queue(), user_email)
         self._clients.add(client)
         logger.debug(
             "Registered client %s with a %s-message queue", client_id, self._max_queue()
@@ -198,9 +214,44 @@ class Broadcaster:
             client.client_id, len(self._clients), client.dropped,
         )
 
+    def record_rejected_handshake(self) -> None:
+        """One more socket refused at the handshake. The caller does the logging."""
+        self.rejected_handshakes += 1
+
     @property
     def client_count(self) -> int:
         return len(self._clients)
+
+    def clients(self) -> List[Dict[str, Any]]:
+        """One row per connected browser tab, for the system health page.
+
+        This lives here rather than in the health package because `_clients`
+        is the broadcaster's own state: reaching into it from outside would
+        make the queue an implicit part of the public surface. Everything
+        reported already existed on ClientConnection; none of it was reachable.
+        """
+        rows = []
+        for client in list(self._clients):
+            rows.append(
+                {
+                    "clientId": client.client_id,
+                    "user": client.user_email,
+                    "connectedAtMs": client.connected_at_ms,
+                    "connectedForMs": now_ms() - client.connected_at_ms,
+                    # None means the tab is taking the whole book.
+                    "securityIds": (
+                        None if client.security_ids is None else sorted(client.security_ids)
+                    ),
+                    "includeDepth": client.include_depth,
+                    "needsSnapshot": client.needs_snapshot,
+                    # How many times this tab fell behind and had its queue
+                    # reset. Non-zero means it is losing intermediate updates.
+                    "dropped": client.dropped,
+                    "queued": client.queue.qsize(),
+                }
+            )
+        rows.sort(key=lambda row: row["connectedAtMs"])
+        return rows
 
     # --- payloads ----------------------------------------------------------
     def _project(self, row: Dict[str, Any], include_depth: bool) -> Dict[str, Any]:
@@ -295,4 +346,10 @@ class Broadcaster:
             "intervalMs": config_utils.get_property_value_int(
                 "fanout.broadcast_interval_ms", 100
             ),
+            "maxClientQueue": self._max_queue(),
+            "rejectedHandshakes": self.rejected_handshakes,
+            # Total resyncs across every tab currently connected. A client that
+            # has since disconnected took its count with it -- the per-client
+            # rows in clients() are the live detail.
+            "droppedTotal": sum(client.dropped for client in self._clients),
         }

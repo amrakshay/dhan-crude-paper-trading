@@ -158,6 +158,12 @@ market_feed:
                                     # moves this many strikes
   max_instruments_per_subscribe: 100
   max_instruments_per_connection: 5000
+  # Dhan allows 5 concurrent feed connections per user. This process uses
+  # exactly one and fans it out to every browser tab; the number is here so the
+  # system health page can show the budget rather than hardcode it. A second
+  # instance on the same credentials (a spare-port verification run, say) takes
+  # a second slot, which this process cannot see.
+  max_connections_per_user: 5
   reconnect_backoff_initial_seconds: 1.0
   reconnect_backoff_max_seconds: 30.0
   server_inactivity_timeout_seconds: 40   # Dhan drops us after 40s of silence

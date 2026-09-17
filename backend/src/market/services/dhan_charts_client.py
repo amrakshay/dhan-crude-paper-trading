@@ -221,6 +221,21 @@ class DhanChartsClient:
                 await asyncio.sleep(MIN_REQUEST_INTERVAL_SECONDS - elapsed)
         self._last_request_at[key] = time.monotonic()
 
+    def stats(self) -> Dict[str, Any]:
+        """Request counters, same shape as DhanOptionChainClient.stats().
+
+        Counted since this client was constructed. Unlike the option chain
+        client, this one is not rebuilt by FeedManager.reconfigure() -- it
+        hangs off candle_service, whose cache is invalidated there but whose
+        client instance is not replaced. The health page labels the epoch.
+        """
+        return {
+            "requests": self.request_count,
+            "errors": self.error_count,
+            "rateLimited": self.rate_limited_count,
+            "minIntervalSeconds": MIN_REQUEST_INTERVAL_SECONDS,
+        }
+
     # --- requests ----------------------------------------------------------
     async def _post(self, endpoint: str, body: Dict[str, Any]) -> Dict[str, Any]:
         if endpoint not in (ENDPOINT_DAILY, ENDPOINT_INTRADAY):
