@@ -12,6 +12,24 @@ from src.orders.database.db_models.order_model import Order, OrderCharge, OrderF
 STRATEGY = "mcx-crude-options"
 
 
+
+def _breakdown(**amounts):
+    """A stored charge breakdown, in the shape the engine writes.
+
+    The line items ARE the breakdown now, so a fixture that sets only
+    total_charges would leave a report with nothing to break out.
+    """
+    import json
+
+    return json.dumps(
+        [
+            {"name": name, "label": name.replace("_", " ").capitalize(),
+             "amount": str(amount), "rawAmount": str(amount),
+             "rate": None, "base": None, "formula": "", "note": ""}
+            for name, amount in amounts.items()
+        ]
+    )
+
 async def _seed_round_trip():
     session = get_session_factory()()
     try:
@@ -48,11 +66,16 @@ async def _seed_round_trip():
                 OrderCharge(
                     order_id=order.id,
                     turnover=Decimal(price) * 100,
-                    brokerage=Decimal("20.00"), ctt=Decimal("2.50"),
-                    exchange_transaction_charge=Decimal("2.09"),
-                    sebi_turnover_fee=Decimal("0.01"), stamp_duty=Decimal("0.15"),
-                    gst=Decimal("3.98"), total_charges=Decimal("28.73"),
+                    total_charges=Decimal("28.73"),
                     rates_version="2026-09-16",
+                    breakdown_json=_breakdown(
+                        brokerage=Decimal("20.00"),
+                        ctt=Decimal("2.50"),
+                        exchange_transaction_charge=Decimal("2.09"),
+                        sebi_turnover_fee=Decimal("0.01"),
+                        stamp_duty=Decimal("0.15"),
+                        gst=Decimal("3.98"),
+                    ),
                 )
             )
         await session.commit()

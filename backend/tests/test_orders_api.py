@@ -168,9 +168,10 @@ async def test_a_sell_pays_ctt_and_no_stamp_duty(ready_client):
         json={"securityId": SECURITY_ID, "side": "SELL", "orderType": "MARKET", "lots": 1},
     )
     charges = response.json()["charges"]
+    amounts = {c["name"]: Decimal(c["amount"]) for c in charges["components"]}
 
-    assert Decimal(charges["ctt"]) > 0
-    assert Decimal(charges["stampDuty"]) == 0
+    assert amounts["ctt"] > 0
+    assert amounts["stamp_duty"] == 0
 
 
 async def test_a_buy_pays_stamp_duty_and_no_ctt(ready_client):
@@ -179,9 +180,10 @@ async def test_a_buy_pays_stamp_duty_and_no_ctt(ready_client):
         json={"securityId": SECURITY_ID, "side": "BUY", "orderType": "MARKET", "lots": 1},
     )
     charges = response.json()["charges"]
+    amounts = {c["name"]: Decimal(c["amount"]) for c in charges["components"]}
 
-    assert Decimal(charges["ctt"]) == 0
-    assert Decimal(charges["stampDuty"]) > 0
+    assert amounts["ctt"] == 0
+    assert amounts["stamp_duty"] > 0
 
 
 async def test_an_order_beyond_the_visible_book_partially_fills(ready_client):

@@ -1,11 +1,18 @@
 # ===========================================================================
 # MCX COMMODITY OPTIONS CHARGE RATES
 #
+# One rate card. A strategy module names the card it is charged under
+# (`charges.rate_card` in conf/strategies/*.yaml); the ENGINE that applies a
+# card is generic, only the rates are not. An NSE equity strategy would get its
+# own card here paying STT rather than CTT -- they are different taxes on
+# different transactions, not the same tax at a different rate.
+#
 # Every rate carries a PRIMARY source URL and an as-of date. Update rates here
 # and nowhere else -- no rate is hardcoded in Python.
 #
 # Scope: options on MCX commodity futures (INSTRUMENT = OPTFUT), non-agri
 # commodity (crude oil). Researched and cross-checked 2026-09-16.
+# Moved here from conf/charges.yaml on 2026-09-18, unchanged.
 #
 # Confidence markers used below:
 #   CONFIRMED   - read verbatim from a primary source (MCX / MCXCCL / SEBI /
@@ -15,6 +22,20 @@
 
 version: "2026-09-16"
 currency: "INR"
+
+labels:
+  # How each line item is printed. The UI takes the label from the CARD rather
+  # than keeping its own list, so a card that adds a tax names it once, here,
+  # and every surface prints it correctly. A line item with no label here is
+  # title-cased, which is readable but not pretty -- "Ctt" rather than "CTT".
+  brokerage: "Brokerage"
+  ctt: "CTT"
+  ctt_exercise: "CTT (on exercise)"
+  exchange_transaction_charge: "Exchange transaction charge"
+  sebi_turnover_fee: "SEBI turnover fee"
+  sebi_turnover_fee_exercise: "SEBI turnover fee (on exercise)"
+  stamp_duty: "Stamp duty"
+  gst: "GST"
 
 brokerage:
   # Discount-broker flat rate. Not a statutory charge -- set it to whatever

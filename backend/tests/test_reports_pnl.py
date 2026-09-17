@@ -24,6 +24,24 @@ class _StubBook:
         return self._rows.get(str(security_id))
 
 
+
+def _breakdown(**amounts):
+    """A stored charge breakdown, in the shape the engine writes.
+
+    The line items ARE the breakdown now, so a fixture that sets only
+    total_charges would leave a report with nothing to break out.
+    """
+    import json
+
+    return json.dumps(
+        [
+            {"name": name, "label": name.replace("_", " ").capitalize(),
+             "amount": str(amount), "rawAmount": str(amount),
+             "rate": None, "base": None, "formula": "", "note": ""}
+            for name, amount in amounts.items()
+        ]
+    )
+
 async def _order(session, side, quantity, price, when=None, security_id=SECURITY,
                  symbol=SYMBOL, strike="6800", option_type="CE", charges="20.00"):
     """Create a filled order with its fill and charges rows."""
@@ -60,11 +78,16 @@ async def _order(session, side, quantity, price, when=None, security_id=SECURITY
         OrderCharge(
             order_id=order.id,
             turnover=Decimal(str(price)) * quantity,
-            brokerage=Decimal("20.00"),
-            ctt=Decimal("0"), exchange_transaction_charge=Decimal("0"),
-            sebi_turnover_fee=Decimal("0"), stamp_duty=Decimal("0"),
-            gst=Decimal("0"), total_charges=Decimal(charges),
+            total_charges=Decimal(charges),
             rates_version="test",
+            breakdown_json=_breakdown(
+                brokerage=Decimal("20.00"),
+                ctt=Decimal("0"),
+                exchange_transaction_charge=Decimal("0"),
+                sebi_turnover_fee=Decimal("0"),
+                stamp_duty=Decimal("0"),
+                gst=Decimal("0"),
+            ),
         )
     )
     await session.flush()
@@ -170,9 +193,11 @@ async def test_charges_are_broken_out_by_component(db_session, service_factory):
 
     report = await service_factory().build_report()
 
+    # The names come from the rate card the order was charged under, not from
+    # a list this codebase keeps.
     assert set(report.charge_components) == {
-        "brokerage", "ctt", "exchangeTransactionCharge",
-        "sebiTurnoverFee", "stampDuty", "gst",
+        "brokerage", "ctt", "exchange_transaction_charge",
+        "sebi_turnover_fee", "stamp_duty", "gst",
     }
     assert report.charge_components["brokerage"] == Decimal("20.00")
 

@@ -6,6 +6,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.charges.services.charge_persistence import charge_components, component_labels
 from src.core.time_utils import to_ist
 from src.logging_config import get_logger
 from src.orders.database.db_operations.order_repository import OrderRepository
@@ -140,26 +141,36 @@ class ReportController:
         )
         charges = await repository.list_charges_for_orders([order.id for order in orders])
 
+        # The charge columns are whatever line items the orders in this export
+        # actually carry, in a stable order, rather than a fixed list of the
+        # taxes MCX happens to levy. An export spanning two rate cards shows
+        # both cards' taxes, and a card that adds one needs no change here.
+        labels = component_labels(list(charges.values()))
+        component_names = sorted(labels)
+
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
             [
-                "placed_at_ist", "order_id", "client_order_id", "trading_symbol",
+                "placed_at_ist", "order_id", "client_order_id", "strategy_key",
+                "trading_symbol",
                 "security_id", "expiry", "strike", "option_type", "side",
                 "order_type", "lots", "quantity", "limit_price", "status",
-                "filled_quantity", "average_fill_price", "turnover", "brokerage",
-                "ctt", "exchange_transaction_charge", "sebi_turnover_fee",
-                "stamp_duty", "gst", "total_charges", "rates_version",
+                "filled_quantity", "average_fill_price", "turnover",
+                *component_names,
+                "total_charges", "rates_version",
                 "rejection_reason",
             ]
         )
         for order in orders:
             charge = charges.get(order.id)
+            amounts = charge_components(charge) if charge else {}
             writer.writerow(
                 [
                     to_ist(order.placed_at).isoformat(),
                     order.id,
                     order.client_order_id,
+                    order.strategy_key,
                     order.trading_symbol,
                     order.security_id,
                     order.expiry_date.isoformat() if order.expiry_date else "",
@@ -174,12 +185,7 @@ class ReportController:
                     order.filled_quantity,
                     order.average_fill_price if order.average_fill_price is not None else "",
                     charge.turnover if charge else "",
-                    charge.brokerage if charge else "",
-                    charge.ctt if charge else "",
-                    charge.exchange_transaction_charge if charge else "",
-                    charge.sebi_turnover_fee if charge else "",
-                    charge.stamp_duty if charge else "",
-                    charge.gst if charge else "",
+                    *[amounts.get(name, "") for name in component_names],
                     charge.total_charges if charge else "",
                     charge.rates_version if charge else "",
                     order.rejection_reason or "",

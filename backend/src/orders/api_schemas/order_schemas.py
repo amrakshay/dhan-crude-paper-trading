@@ -3,7 +3,13 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+)
 
 from src.core.time_utils import as_utc_aware
 
@@ -56,17 +62,38 @@ class OrderFillResponse(BaseModel):
 
 
 class OrderChargeResponse(BaseModel):
+    """Charges as they were computed at fill time.
+
+    The line items are `components`, whose names come from the rate card the
+    order was charged under -- an MCX order has a `ctt` component, an equity
+    order would have `stt`. There is deliberately no fixed field per tax.
+    """
+
     turnover: Decimal
-    brokerage: Decimal
-    ctt: Decimal
-    exchange_transaction_charge: Decimal = Field(alias="exchangeTransactionCharge")
-    sebi_turnover_fee: Decimal = Field(alias="sebiTurnoverFee")
-    stamp_duty: Decimal = Field(alias="stampDuty")
-    gst: Decimal
     total_charges: Decimal = Field(alias="totalCharges")
     rates_version: Optional[str] = Field(None, alias="ratesVersion")
+    components: List[Dict[str, Any]] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @classmethod
+    def from_model(cls, charge) -> "OrderChargeResponse":
+        import json
+
+        components: List[Dict[str, Any]] = []
+        if charge.breakdown_json:
+            try:
+                components = json.loads(charge.breakdown_json)
+            except (TypeError, ValueError):
+                # A row whose breakdown cannot be parsed still has a real
+                # total; showing no line items is honest, inventing them is not.
+                components = []
+        return cls(
+            turnover=charge.turnover,
+            totalCharges=charge.total_charges,
+            ratesVersion=charge.rates_version,
+            components=components,
+        )
 
 
 class OrderResponse(BaseModel):
@@ -97,6 +124,18 @@ class OrderResponse(BaseModel):
     charges: Optional[OrderChargeResponse] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_validator("charges", mode="before")
+    @classmethod
+    def _charges(cls, value):
+        """The line items live in breakdown_json, not in columns.
+
+        Pydantic's from_attributes would only see the ORM columns, so the
+        components would silently come back empty.
+        """
+        if value is None or isinstance(value, (dict, OrderChargeResponse)):
+            return value
+        return OrderChargeResponse.from_model(value)
 
     @field_serializer("placed_at", "last_event_at", "completed_at")
     def _ts(self, value: Optional[datetime]) -> Optional[str]:

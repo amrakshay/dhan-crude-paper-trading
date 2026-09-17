@@ -16,22 +16,33 @@ class ChargeEstimateRequest(BaseModel):
 
 
 class ChargeComponentResponse(BaseModel):
+    """One line item. `name` comes from the rate card, not from this codebase.
+
+    `label` is what a UI should print, so a card can introduce a tax without
+    the frontend needing a new hardcoded string for it.
+    """
+
     name: str
+    label: str = ""
     amount: str
+    raw_amount: Optional[str] = Field(None, alias="rawAmount")
     rate: Optional[str] = None
     base: Optional[str] = None
     formula: str = ""
     note: str = ""
 
+    model_config = ConfigDict(populate_by_name=True)
+
 
 class ChargeBreakdownResponse(BaseModel):
+    """Turnover, total and the line items.
+
+    There are deliberately no per-tax fields: which taxes exist is a property
+    of the rate card, and a fixed field per tax is what would make adding one
+    a schema migration.
+    """
+
     turnover: str
-    brokerage: str
-    ctt: str
-    exchange_transaction_charge: str = Field(alias="exchangeTransactionCharge")
-    sebi_turnover_fee: str = Field(alias="sebiTurnoverFee")
-    stamp_duty: str = Field(alias="stampDuty")
-    gst: str
     total: str
     rates_version: str = Field(alias="ratesVersion")
     rounding_mode: str = Field(alias="roundingMode")

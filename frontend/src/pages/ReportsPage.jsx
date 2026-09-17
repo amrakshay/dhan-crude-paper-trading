@@ -109,14 +109,30 @@ function BucketTable({ rows, keyLabel }) {
   );
 }
 
+/**
+ * Display names for the charge components a rate card can emit.
+ *
+ * This is a nicety, not a list of what exists: the server aggregates whatever
+ * line items the orders in range actually carry, so an unknown name is
+ * title-cased rather than dropped. A second strategy on a second rate card
+ * therefore shows its own taxes here without a frontend change.
+ */
 const CHARGE_LABELS = {
   brokerage: 'Brokerage',
   ctt: 'CTT',
-  exchangeTransactionCharge: 'Exchange txn',
-  sebiTurnoverFee: 'SEBI fee',
-  stampDuty: 'Stamp duty',
+  ctt_exercise: 'CTT (exercise)',
+  exchange_transaction_charge: 'Exchange txn',
+  sebi_turnover_fee: 'SEBI fee',
+  sebi_turnover_fee_exercise: 'SEBI fee (exercise)',
+  stamp_duty: 'Stamp duty',
   gst: 'GST',
 };
+
+function chargeLabel(key) {
+  if (CHARGE_LABELS[key]) return CHARGE_LABELS[key];
+  const words = String(key ?? '').replace(/_/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+}
 
 export default function ReportsPage() {
   const theme = useTheme();
@@ -321,7 +337,7 @@ export default function ReportsPage() {
                         <Box key={key}>
                           <Stack direction="row" justifyContent="space-between">
                             <Typography variant="body2" color="text.secondary">
-                              {CHARGE_LABELS[key] ?? key}
+                              {chargeLabel(key)}
                             </Typography>
                             <Typography variant="body2" className="numeric">
                               {formatPrice(amount)}

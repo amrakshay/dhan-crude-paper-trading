@@ -5,6 +5,7 @@ these tests care about two things: that it is stamped from the CONTRACT at
 placement, and that filtering by it never hides history -- including the
 history of a strategy that has since been switched off.
 """
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -114,11 +115,17 @@ async def _seed_order(strategy_key: str, security_id="576375", price="50"):
             OrderCharge(
                 order_id=order.id,
                 turnover=Decimal(price) * 100,
-                brokerage=Decimal("20.00"),
-                ctt=Decimal("0"), exchange_transaction_charge=Decimal("0"),
-                sebi_turnover_fee=Decimal("0"), stamp_duty=Decimal("0"),
-                gst=Decimal("0"), total_charges=Decimal("20.00"),
+                total_charges=Decimal("20.00"),
                 rates_version="test",
+                breakdown_json=json.dumps(
+                    [
+                        {
+                            "name": "brokerage", "label": "Brokerage",
+                            "amount": "20.00", "rawAmount": "20.00",
+                            "rate": None, "base": None, "formula": "", "note": "",
+                        }
+                    ]
+                ),
             )
         )
         await session.commit()

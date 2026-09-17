@@ -136,17 +136,18 @@ class OrderCharge(TimestampedModel):
         unique=True,
         index=True,
     )
+    # turnover, total_charges and rates_version are real columns because they
+    # are queried and aggregated. The individual taxes are NOT: which taxes
+    # exist is a property of the rate card an order was charged under (MCX pays
+    # CTT, an equity card would pay STT), and a column per tax is what would
+    # make adding one a schema migration.
     turnover = Column(Money, nullable=False, default=0)
-    brokerage = Column(Money, nullable=False, default=0)
-    ctt = Column(Money, nullable=False, default=0)
-    exchange_transaction_charge = Column(Money, nullable=False, default=0)
-    sebi_turnover_fee = Column(Money, nullable=False, default=0)
-    stamp_duty = Column(Money, nullable=False, default=0)
-    gst = Column(Money, nullable=False, default=0)
     total_charges = Column(Money, nullable=False, default=0)
     # Which rate-card version produced these numbers, so an old order can still
-    # be explained after rates are updated in conf/charges.yaml.
+    # be explained after rates are updated in conf/charges/<card>.yaml.
     rates_version = Column(String(32), nullable=True)
+    # The line items: [{name, label, amount, rawAmount, rate, base, formula,
+    # note}]. Read back through src/charges/services/charge_persistence.py.
     breakdown_json = Column(Text, nullable=True)
 
     order = relationship("Order", back_populates="charges")

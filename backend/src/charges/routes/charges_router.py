@@ -56,5 +56,5 @@ async def reload_rate_card(
     controller: ChargesController = Depends(get_charges_controller),
     _: SessionPrincipal = Depends(require_session),
 ) -> RateCardResponse:
-    """Re-read conf/charges.yaml without restarting, after editing rates."""
+    """Re-read the charge rate cards without restarting, after editing rates."""
     return controller.reload_rates()

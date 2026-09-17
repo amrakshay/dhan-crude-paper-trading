@@ -1,9 +1,16 @@
-"""MCX commodity-options charges engine.
+"""Charges engine.
+
+The ENGINE is generic; the RATES are not. A strategy module names the rate card
+it is charged under, and the card is read from
+``<CONFIG_PATH>/charges/<card>.yaml``. Commodity options pay CTT on the sell
+side of the premium; an equity strategy would pay STT, which is a different tax
+on a different transaction -- so it gets a different card, not a different
+number in this one.
 
 Correct and auditable is the whole point of this module. Rules it follows:
 
-* Every rate comes from ``conf/charges.yaml``, which carries a primary source
-  URL and an as-of date beside each number. No rate is hardcoded here.
+* Every rate comes from the rate card, which carries a primary source URL and
+  an as-of date beside each number. No rate is hardcoded here.
 * All arithmetic is ``Decimal``. Floats would make the totals irreproducible.
 * Every computed charge is returned with the inputs and the formula that
   produced it, so any figure on a contract note can be explained later.
@@ -11,6 +18,11 @@ Correct and auditable is the whole point of this module. Rules it follows:
   side of the premium.
 * GST applies to brokerage + exchange transaction charge + SEBI turnover fee.
   It does NOT apply to the trade value, to CTT, or to stamp duty.
+* **The component list is the breakdown.** `ChargeBreakdown.components` is the
+  source of truth and is what gets persisted, returned and exported; the named
+  attributes (`ctt`, `gst`, ...) are conveniences that read out of it. That is
+  what lets a new tax appear without a schema migration, and what stops an
+  equity card having to pretend its STT is a CTT.
 
 Rounding is a deliberate, configurable choice rather than an accident -- see
 `rounding.mode` in the rate card. Discount brokers round stamp duty to whole
@@ -46,67 +58,164 @@ class ChargeComponent:
     base: Optional[Decimal] = None
     formula: str = ""
     note: str = ""
+    # The unrounded figure `amount` was quantised from. Kept so a disputed
+    # paisa can be traced to the arithmetic rather than to the 2dp result.
+    raw_amount: Optional[Decimal] = None
+    label: Optional[str] = None
+
+    def display_label(self) -> str:
+        """Human label. Falls back to the name, so a card can add a tax
+        without the UI needing to learn it."""
+        if self.label:
+            return self.label
+        return self.name.replace("_", " ").strip().capitalize()
 
     def as_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
+            "label": self.display_label(),
             "amount": str(self.amount),
+            "rawAmount": str(self.raw_amount) if self.raw_amount is not None else None,
             "rate": str(self.rate) if self.rate is not None else None,
             "base": str(self.base) if self.base is not None else None,
             "formula": self.formula,
             "note": self.note,
         }
 
+    def with_label(self, label: Optional[str]) -> "ChargeComponent":
+        if not label:
+            return self
+        return ChargeComponent(
+            name=self.name, amount=self.amount, rate=self.rate, base=self.base,
+            formula=self.formula, note=self.note, raw_amount=self.raw_amount,
+            label=label,
+        )
+
+    def rounded(self, amount: Decimal) -> "ChargeComponent":
+        """The same component carrying its final, rounded amount."""
+        return ChargeComponent(
+            name=self.name,
+            amount=amount,
+            rate=self.rate,
+            base=self.base,
+            formula=self.formula,
+            note=self.note,
+            raw_amount=self.amount,
+            label=self.label,
+        )
+
 
 @dataclass(frozen=True)
 class ChargeBreakdown:
-    """Full charges for one order (or one leg of a round trip)."""
+    """Full charges for one order (or one leg of a round trip).
+
+    `components` is the breakdown. `turnover`, `total`, `rates_version` and
+    `rounding_mode` are the only scalars that stand on their own -- they are
+    aggregated and queried, so they stay real columns. Everything else is a
+    line item whose NAME comes from the rate card, which is what lets a card
+    introduce a tax this codebase has never heard of without a migration, a
+    schema change or a hardcoded label.
+
+    The named properties below (`ctt`, `gst`, ...) read out of the component
+    list. They are conveniences for a commodity card, not structure.
+    """
 
     turnover: Decimal
-    brokerage: Decimal
-    ctt: Decimal
-    exchange_transaction_charge: Decimal
-    sebi_turnover_fee: Decimal
-    stamp_duty: Decimal
-    gst: Decimal
     total: Decimal
     rates_version: str
     rounding_mode: str
     components: List[ChargeComponent] = field(default_factory=list)
 
+    # --- reading components ------------------------------------------------
+    def amount(self, name: str) -> Decimal:
+        """One component's final amount, or zero when the card has no such
+        charge. Zero is correct here: a card that does not levy a tax levies
+        zero of it."""
+        return sum(
+            (component.amount for component in self.components if component.name == name),
+            ZERO,
+        )
+
+    @property
+    def brokerage(self) -> Decimal:
+        return self.amount("brokerage")
+
+    @property
+    def ctt(self) -> Decimal:
+        return self.amount("ctt")
+
+    @property
+    def exchange_transaction_charge(self) -> Decimal:
+        return self.amount("exchange_transaction_charge")
+
+    @property
+    def sebi_turnover_fee(self) -> Decimal:
+        return self.amount("sebi_turnover_fee")
+
+    @property
+    def stamp_duty(self) -> Decimal:
+        return self.amount("stamp_duty")
+
+    @property
+    def gst(self) -> Decimal:
+        return self.amount("gst")
+
     def as_dict(self) -> Dict[str, Any]:
         return {
             "turnover": str(self.turnover),
-            "brokerage": str(self.brokerage),
-            "ctt": str(self.ctt),
-            "exchangeTransactionCharge": str(self.exchange_transaction_charge),
-            "sebiTurnoverFee": str(self.sebi_turnover_fee),
-            "stampDuty": str(self.stamp_duty),
-            "gst": str(self.gst),
             "total": str(self.total),
             "ratesVersion": self.rates_version,
             "roundingMode": self.rounding_mode,
             "components": [component.as_dict() for component in self.components],
         }
 
+    def component_amounts(self) -> Dict[str, Decimal]:
+        """{name: amount}, summed across legs. What the reports aggregate."""
+        totals: Dict[str, Decimal] = {}
+        for component in self.components:
+            totals[component.name] = totals.get(component.name, ZERO) + component.amount
+        return totals
+
     def __add__(self, other: "ChargeBreakdown") -> "ChargeBreakdown":
-        """Combine two legs (e.g. the buy and sell of a round trip)."""
+        """Combine two legs (e.g. the buy and sell of a round trip).
+
+        Components with the same name are merged, so a round trip shows one
+        `ctt` line rather than two. The formula and note of the first leg are
+        kept; the rate and base are dropped, because a merged line item has no
+        single base and printing one of the two would be a lie.
+        """
         if not isinstance(other, ChargeBreakdown):
             return NotImplemented
+
+        merged: List[ChargeComponent] = []
+        seen: Dict[str, int] = {}
+        for component in [*self.components, *other.components]:
+            if component.name in seen:
+                index = seen[component.name]
+                existing = merged[index]
+                merged[index] = ChargeComponent(
+                    name=existing.name,
+                    amount=existing.amount + component.amount,
+                    rate=existing.rate if existing.rate == component.rate else None,
+                    base=None,
+                    formula="combined across legs",
+                    note=existing.note,
+                    raw_amount=(
+                        (existing.raw_amount or existing.amount)
+                        + (component.raw_amount or component.amount)
+                    ),
+                    label=existing.label,
+                )
+            else:
+                seen[component.name] = len(merged)
+                merged.append(component)
+
         return ChargeBreakdown(
             turnover=self.turnover + other.turnover,
-            brokerage=self.brokerage + other.brokerage,
-            ctt=self.ctt + other.ctt,
-            exchange_transaction_charge=(
-                self.exchange_transaction_charge + other.exchange_transaction_charge
-            ),
-            sebi_turnover_fee=self.sebi_turnover_fee + other.sebi_turnover_fee,
-            stamp_duty=self.stamp_duty + other.stamp_duty,
-            gst=self.gst + other.gst,
             total=self.total + other.total,
             rates_version=self.rates_version,
             rounding_mode=self.rounding_mode,
-            components=[*self.components, *other.components],
+            components=merged,
         )
 
 
@@ -117,45 +226,116 @@ def _decimal(value: Any, name: str) -> Decimal:
 
 
 class ChargesEngine:
-    """Computes charges from the YAML rate card.
+    """Computes charges from a rate card.
 
-    The rate card is loaded from ``<CONFIG_PATH>/charges.yaml`` and cached; call
-    ``reload()`` after editing it.
+    The card is chosen by name -- ``<CONFIG_PATH>/charges/<card>.yaml`` -- and
+    each strategy module names the card it is charged under. Cards are cached
+    per name; call ``reload()`` after editing one.
     """
 
-    _rates: Optional[Dict[str, Any]] = None
+    # One cache entry per card, so two strategies on two cards do not evict
+    # each other.
+    _rate_cards: Dict[str, Dict[str, Any]] = {}
 
-    def __init__(self, rates: Optional[Dict[str, Any]] = None) -> None:
+    DEFAULT_RATE_CARD = "mcx-commodity-options"
+    CHARGES_DIRNAME = "charges"
+    # The card lived at conf/charges.yaml until 2026-09-18, when it moved into
+    # conf/charges/ so a second strategy could have its own. A config directory
+    # that still has the old file keeps working rather than failing to price.
+    LEGACY_RATE_CARD_FILE = "charges.yaml"
+
+    def __init__(
+        self,
+        rates: Optional[Dict[str, Any]] = None,
+        rate_card: Optional[str] = None,
+    ) -> None:
         self._override = rates
+        self._rate_card = rate_card or self.DEFAULT_RATE_CARD
+
+    @classmethod
+    def for_strategy(cls, strategy) -> "ChargesEngine":
+        """The engine a strategy's trades are charged by."""
+        return cls(rate_card=strategy.charges_rate_card)
+
+    @classmethod
+    def for_strategy_key(cls, strategy_key: Optional[str]) -> "ChargesEngine":
+        """The engine for a stored strategy key.
+
+        A key that no longer names a configured strategy falls back to the
+        default card rather than failing: an old order still has to be
+        explainable after its strategy has been removed.
+        """
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        strategy = get_strategy_registry().get(strategy_key) if strategy_key else None
+        if strategy is None:
+            return cls()
+        return cls.for_strategy(strategy)
+
+    @property
+    def rate_card_name(self) -> str:
+        """Which card this engine is charging under."""
+        return self._rate_card
 
     # --- rate card ---------------------------------------------------------
     @classmethod
-    def load_rates(cls, force: bool = False) -> Dict[str, Any]:
-        if cls._rates is not None and not force:
-            return cls._rates
+    def card_path(cls, card: str) -> str:
+        import os
+
+        return os.path.join(
+            config_utils.get_config_path(), cls.CHARGES_DIRNAME, f"{card}.yaml"
+        )
+
+    @classmethod
+    def load_rates(
+        cls, force: bool = False, card: Optional[str] = None
+    ) -> Dict[str, Any]:
+        card = card or cls.DEFAULT_RATE_CARD
+        if not force and card in cls._rate_cards:
+            return cls._rate_cards[card]
 
         import os
 
         import yaml
 
-        path = os.path.join(config_utils.get_config_path(), "charges.yaml")
+        path = cls.card_path(card)
         if not os.path.exists(path):
-            raise ChargesConfigError(
-                f"Charge rate card not found at {path}. It carries every rate "
-                "used by this application, with its source and as-of date."
+            legacy = os.path.join(
+                config_utils.get_config_path(), cls.LEGACY_RATE_CARD_FILE
             )
+            if card == cls.DEFAULT_RATE_CARD and os.path.exists(legacy):
+                logger.warning(
+                    "Reading the rate card from the pre-2026-09-18 location %s. "
+                    "Move it to %s so a second strategy can have its own card.",
+                    legacy, path,
+                )
+                path = legacy
+            else:
+                raise ChargesConfigError(
+                    f"Charge rate card {card!r} not found at {path}. A rate card "
+                    f"carries every rate used to charge one strategy, with its "
+                    f"source and as-of date."
+                )
         with open(path, "r", encoding="utf-8") as handle:
-            cls._rates = yaml.safe_load(handle) or {}
-        logger.info("Loaded charge rates version %s", cls._rates.get("version"))
-        return cls._rates
+            cls._rate_cards[card] = yaml.safe_load(handle) or {}
+        logger.info(
+            "Loaded charge rate card %s version %s",
+            card, cls._rate_cards[card].get("version"),
+        )
+        return cls._rate_cards[card]
 
     @classmethod
-    def reload(cls) -> Dict[str, Any]:
-        return cls.load_rates(force=True)
+    def reload(cls, card: Optional[str] = None) -> Dict[str, Any]:
+        if card is None:
+            cls._rate_cards = {}
+            return cls.load_rates(force=True)
+        return cls.load_rates(force=True, card=card)
 
     @property
     def rates(self) -> Dict[str, Any]:
-        return self._override if self._override is not None else self.load_rates()
+        if self._override is not None:
+            return self._override
+        return self.load_rates(card=self._rate_card)
 
     @property
     def version(self) -> str:
@@ -164,6 +344,12 @@ class ChargesEngine:
     @property
     def rounding_mode(self) -> str:
         return str((self.rates.get("rounding") or {}).get("mode", "exact"))
+
+    def label_for(self, name: str) -> Optional[str]:
+        """The card's display label for a line item, if it names one."""
+        labels = self.rates.get("labels") or {}
+        label = labels.get(name)
+        return str(label) if label else None
 
     def _total_dp(self) -> Decimal:
         places = int(
@@ -410,18 +596,32 @@ class ChargesEngine:
             gst_amount, total,
         )
 
+        # Each component carries its FINAL rounded amount and the raw figure it
+        # came from. The total is still the rounded sum of the raw components,
+        # not the sum of the rounded ones -- rounding each line first would
+        # change totals that have been verified against a broker calculator.
+        # The two can therefore differ by a paisa, which is a property of
+        # rounding rather than an error, and is why the raw amount is kept.
+        components = [
+            component.rounded(self._round_money(amount)).with_label(
+                self.label_for(component.name)
+            )
+            for component, amount in (
+                (brokerage, brokerage.amount),
+                (ctt, ctt.amount),
+                (exchange_charge, exchange_charge.amount),
+                (sebi_fee, sebi_amount),
+                (stamp_duty, stamp_amount),
+                (gst, gst_amount),
+            )
+        ]
+
         return ChargeBreakdown(
             turnover=self._round_money(turnover),
-            brokerage=self._round_money(brokerage.amount),
-            ctt=self._round_money(ctt.amount),
-            exchange_transaction_charge=self._round_money(exchange_charge.amount),
-            sebi_turnover_fee=self._round_money(sebi_amount),
-            stamp_duty=self._round_money(stamp_amount),
-            gst=self._round_money(gst_amount),
             total=self._round_money(total),
             rates_version=self.version,
             rounding_mode=self.rounding_mode,
-            components=[brokerage, ctt, exchange_charge, sebi_fee, stamp_duty, gst],
+            components=components,
         )
 
     def compute_order_charges_for_quantity(
@@ -513,16 +713,19 @@ class ChargesEngine:
         total = ctt.amount + sebi_amount
         return ChargeBreakdown(
             turnover=self._round_money(notional),
-            brokerage=ZERO,
-            ctt=self._round_money(ctt.amount),
-            exchange_transaction_charge=ZERO,
-            sebi_turnover_fee=self._round_money(sebi_amount),
-            stamp_duty=ZERO,
-            gst=ZERO,
             total=self._round_money(total),
             rates_version=self.version,
             rounding_mode=self.rounding_mode,
-            components=components,
+            # Exercise is a DIFFERENT taxable transaction from a trade -- Sl.5
+            # rather than Sl.3 -- so its components keep their own names. A
+            # breakdown that called this "ctt" would merge two taxes that a
+            # contract note keeps apart.
+            components=[
+                component.rounded(self._round_money(component.amount)).with_label(
+                    self.label_for(component.name)
+                )
+                for component in components
+            ],
         )
 
     def rate_card(self) -> Dict[str, Any]:

@@ -175,7 +175,10 @@ def test_exercise_ctt_on_settlement_price(engine):
     result = engine.compute_exercise_charges(Decimal("5500"), LOT_SIZE, 1)
 
     assert result.turnover == Decimal("550000.00")
-    assert result.ctt == Decimal("0.55")
+    # Exercise CTT is Sl.5, a different taxable transaction from the Sl.3 CTT
+    # on a sale, so it is its own line item rather than merged into "ctt".
+    assert result.amount("ctt_exercise") == Decimal("0.55")
+    assert result.ctt == Decimal("0.00"), "no sale, so no Sl.3 CTT"
     assert result.total == Decimal("0.55")
 
 
@@ -191,6 +194,7 @@ def test_exercise_does_not_attract_the_ordinary_trading_charges(engine):
 def test_exercise_sebi_notional_leg_is_off_by_default(engine):
     """SEBI mandates it; brokers omit it. Default matches broker notes."""
     result = engine.compute_exercise_charges(Decimal("5500"), LOT_SIZE, 1)
+    assert result.amount("sebi_turnover_fee_exercise") == Decimal("0")
     assert result.sebi_turnover_fee == Decimal("0")
 
 
@@ -201,7 +205,8 @@ def test_exercise_sebi_notional_leg_can_be_enabled():
 
     result = engine.compute_exercise_charges(Decimal("5500"), LOT_SIZE, 1)
 
-    assert result.sebi_turnover_fee == Decimal("0.55")   # 0.000001 * 550000
+    # 0.000001 * 550000
+    assert result.amount("sebi_turnover_fee_exercise") == Decimal("0.55")
     assert result.total == Decimal("1.10")
 
 

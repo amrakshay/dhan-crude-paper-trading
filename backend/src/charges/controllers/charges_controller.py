@@ -35,7 +35,7 @@ class ChargesController:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ChargesConfigError as exc:
             logger.exception(
-                "The charge rate card is unusable -- check conf/charges.yaml"
+                "The charge rate card is unusable -- check conf/charges/<card>.yaml"
             )
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return self._to_response(breakdown)

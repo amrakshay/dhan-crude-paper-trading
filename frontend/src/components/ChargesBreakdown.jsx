@@ -3,53 +3,72 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { formatPrice } from '../utils/format';
 
 /**
- * Itemised charges. Every line is named the way the statute or the exchange
- * names it, so a figure here can be traced to conf/charges.yaml.
+ * Itemised charges, driven by the components the server sends.
+ *
+ * The line items are NOT listed here. Which charges exist is a property of the
+ * rate card an order was charged under — MCX commodity options pay CTT, an NSE
+ * equity strategy would pay STT — so the server sends {name, label, amount,
+ * note} per line and this renders whatever it is given. A hardcoded list would
+ * silently drop a tax the moment a second rate card appeared.
+ *
+ * Each line's tooltip is the `note` from the rate card, which carries the
+ * statute or circular the number comes from.
  */
-const LINES = [
-  { key: 'brokerage', label: 'Brokerage', hint: 'Flat per executed order' },
-  {
-    key: 'ctt',
-    label: 'CTT',
-    hint: 'Commodities Transaction Tax (not STT) — 0.05% of premium, sell side only',
-  },
-  {
-    key: 'exchangeTransactionCharge',
-    label: 'Exchange txn charge',
-    hint: 'MCX: Rs 41.80 per lakh of premium turnover, per side',
-  },
-  { key: 'sebiTurnoverFee', label: 'SEBI turnover fee', hint: 'Rs 10 per crore' },
-  { key: 'stampDuty', label: 'Stamp duty', hint: '0.003% of premium, buy side only' },
-  {
-    key: 'gst',
-    label: 'GST',
-    hint: '18% of brokerage + exchange charge + SEBI fee. Not on trade value, CTT or stamp duty.',
-  },
-];
+
+/** Fallbacks for line items whose card predates the label field. */
+const FALLBACK_LABELS = {
+  brokerage: 'Brokerage',
+  ctt: 'CTT',
+  ctt_exercise: 'CTT (exercise)',
+  exchange_transaction_charge: 'Exchange txn charge',
+  sebi_turnover_fee: 'SEBI turnover fee',
+  sebi_turnover_fee_exercise: 'SEBI fee (exercise)',
+  stamp_duty: 'Stamp duty',
+  gst: 'GST',
+};
+
+function labelFor(component) {
+  if (component.label) return component.label;
+  if (FALLBACK_LABELS[component.name]) return FALLBACK_LABELS[component.name];
+  const words = String(component.name || '').replace(/_/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Charge';
+}
 
 export default function ChargesBreakdown({ charges, dense = false }) {
   if (!charges) return null;
 
-  const value = (key) => Number(charges[key] ?? charges[key.replace(/([A-Z])/g, '_$1').toLowerCase()] ?? 0);
+  const components = Array.isArray(charges.components) ? charges.components : [];
   const total = Number(charges.total ?? charges.totalCharges ?? 0);
 
   return (
     <Stack spacing={dense ? 0.25 : 0.5}>
-      {LINES.map((line) => (
-        <Stack key={line.key} direction="row" justifyContent="space-between" alignItems="center">
+      {components.map((component) => (
+        <Stack
+          key={component.name}
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+        >
           <Stack direction="row" spacing={0.5} alignItems="center">
             <Typography variant="body2" color="text.secondary">
-              {line.label}
+              {labelFor(component)}
             </Typography>
-            <Tooltip title={line.hint}>
-              <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled' }} />
-            </Tooltip>
+            {component.note ? (
+              <Tooltip title={component.note}>
+                <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled' }} />
+              </Tooltip>
+            ) : null}
           </Stack>
           <Typography variant="body2" className="numeric">
-            {formatPrice(value(line.key))}
+            {formatPrice(Number(component.amount ?? 0))}
           </Typography>
         </Stack>
       ))}
+      {components.length === 0 ? (
+        <Typography variant="caption" color="text.disabled">
+          No itemised breakdown stored for this order.
+        </Typography>
+      ) : null}
       <Divider sx={{ my: 0.5 }} />
       <Stack direction="row" justifyContent="space-between">
         <Typography variant="body2" sx={{ fontWeight: 600 }}>

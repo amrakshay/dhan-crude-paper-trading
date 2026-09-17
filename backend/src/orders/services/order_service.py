@@ -58,6 +58,8 @@ class OrderService:
         self.orders = order_repository
         self.instruments = instrument_repository
         self.positions = PositionService(position_repository)
+        # Replaced per order with the engine for that order's strategy, so two
+        # strategies on two rate cards are charged under their own.
         self.charges = ChargesEngine()
         self._book = book
 
@@ -429,7 +431,8 @@ class OrderService:
         """
         import json
 
-        breakdown = self.charges.compute_order_charges_for_quantity(
+        engine = ChargesEngine.for_strategy_key(order.strategy_key)
+        breakdown = engine.compute_order_charges_for_quantity(
             side=order.side,
             premium=Decimal(str(order.average_fill_price)),
             quantity=int(order.filled_quantity),
@@ -437,16 +440,13 @@ class OrderService:
             strike_price=order.strike_price,
         )
 
+        # The COMPONENTS are the breakdown. turnover, total and rates_version
+        # stay real columns because they are queried and aggregated; the line
+        # items do not, so a rate card can add a tax without a migration.
         await self.orders.upsert_charges(
             order,
             {
                 "turnover": breakdown.turnover,
-                "brokerage": breakdown.brokerage,
-                "ctt": breakdown.ctt,
-                "exchange_transaction_charge": breakdown.exchange_transaction_charge,
-                "sebi_turnover_fee": breakdown.sebi_turnover_fee,
-                "stamp_duty": breakdown.stamp_duty,
-                "gst": breakdown.gst,
                 "total_charges": breakdown.total,
                 "rates_version": breakdown.rates_version,
                 "breakdown_json": json.dumps(
@@ -592,7 +592,13 @@ class OrderService:
         indicative_price = result.average_price or limit
         charges = None
         if indicative_price is not None:
-            charges = self.charges.compute_order_charges(
+            strategy = get_strategy_registry().for_instrument(
+                instrument.exchange_segment, instrument.underlying_symbol
+            )
+            engine = (
+                ChargesEngine.for_strategy(strategy) if strategy else self.charges
+            )
+            charges = engine.compute_order_charges(
                 side=side,
                 premium=indicative_price,
                 lot_size=int(instrument.lot_size),

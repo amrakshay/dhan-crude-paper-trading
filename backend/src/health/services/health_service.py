@@ -466,7 +466,7 @@ def build_health(
             "instruments": instrument_status,
             "chargeRatesVersion": rates_version,
             "chargeRatesNote": (
-                "The per-rate as-of dates live in comments in conf/charges.yaml, "
+                "The per-rate as-of dates live in comments in the rate card, "
                 "not as structured fields, so staleness per rate cannot be "
                 "computed without promoting them to real keys."
             ),

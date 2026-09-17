@@ -23,6 +23,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, List, Optional
 
 from src.constants import OrderSide
+from src.charges.services.charge_persistence import charge_components
 from src.core.time_utils import to_ist
 from src.logging_config import get_logger
 from src.orders.database.db_operations.order_repository import OrderRepository
@@ -188,10 +189,11 @@ class PnlService:
             [order.id for order in orders]
         )
 
-        components: Dict[str, Decimal] = {
-            "brokerage": ZERO, "ctt": ZERO, "exchangeTransactionCharge": ZERO,
-            "sebiTurnoverFee": ZERO, "stampDuty": ZERO, "gst": ZERO,
-        }
+        # Component names are NOT enumerated here. They come from whichever rate
+        # card each order was charged under, so a report spanning two
+        # strategies shows both cards' line items and a new tax needs no change
+        # to this function.
+        components: Dict[str, Decimal] = {}
         by_day: Dict[date, Decimal] = defaultdict(lambda: ZERO)
         total = ZERO
 
@@ -199,14 +201,8 @@ class PnlService:
             charge = charge_map.get(order.id)
             if charge is None:
                 continue
-            components["brokerage"] += Decimal(str(charge.brokerage or 0))
-            components["ctt"] += Decimal(str(charge.ctt or 0))
-            components["exchangeTransactionCharge"] += Decimal(
-                str(charge.exchange_transaction_charge or 0)
-            )
-            components["sebiTurnoverFee"] += Decimal(str(charge.sebi_turnover_fee or 0))
-            components["stampDuty"] += Decimal(str(charge.stamp_duty or 0))
-            components["gst"] += Decimal(str(charge.gst or 0))
+            for name, amount in charge_components(charge).items():
+                components[name] = components.get(name, ZERO) + amount
 
             order_total = Decimal(str(charge.total_charges or 0))
             total += order_total

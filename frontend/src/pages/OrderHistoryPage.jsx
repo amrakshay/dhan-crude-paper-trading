@@ -122,12 +122,10 @@ function OrderDetail({ order, notes, onAddNote }) {
           {order.charges ? (
             <ChargesBreakdown
               charges={{
-                brokerage: order.charges.brokerage,
-                ctt: order.charges.ctt,
-                exchangeTransactionCharge: order.charges.exchangeTransactionCharge,
-                sebiTurnoverFee: order.charges.sebiTurnoverFee,
-                stampDuty: order.charges.stampDuty,
-                gst: order.charges.gst,
+                // The line items come from the rate card this order was
+                // charged under, so they are passed through rather than
+                // picked out field by field.
+                components: order.charges.components,
                 total: order.charges.totalCharges,
                 ratesVersion: order.charges.ratesVersion,
               }}
