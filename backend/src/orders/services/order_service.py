@@ -110,13 +110,19 @@ class OrderService:
         limit_price: Optional[Decimal] = None,
         is_close_order: bool = False,
         quantity_override: Optional[int] = None,
+        portfolio_id: Optional[int] = None,
     ) -> Order:
-        """Submit a paper order.
+        """Submit a paper order into one portfolio.
 
         `quantity_override` closes an exact barrel quantity that is not a whole
         number of lots. A market order can partially fill below one lot (the
         visible book simply ran out), and without this the residual position
         would be impossible to close.
+
+        `portfolio_id` says whose money is at stake. Omitting it is only
+        unambiguous while exactly one portfolio is active; with several, the
+        resolver refuses rather than guessing, because a trade landing in the
+        wrong book is the failure the portfolio selector exists to prevent.
         """
         side = str(side).upper()
         order_type = str(order_type).upper()
@@ -127,6 +133,18 @@ class OrderService:
             security_id, side, order_type, lots, limit_price, is_close_order,
             quantity_override,
         )
+
+        from src.portfolios.services.portfolio_service import (
+            PortfolioError,
+            PortfolioService,
+        )
+
+        try:
+            portfolio = await PortfolioService(
+                self.orders.session, book=self._book
+            ).resolve_for_trading(portfolio_id)
+        except PortfolioError as error:
+            raise OrderValidationError(str(error)) from error
 
         instrument = await self.instruments.get_by_security_id(str(security_id))
         if instrument is None:
@@ -180,6 +198,7 @@ class OrderService:
         order = Order(
             client_order_id=uuid.uuid4().hex,
             strategy_key=strategy.key,
+            portfolio_id=portfolio.id,
             security_id=instrument.security_id,
             trading_symbol=instrument.trading_symbol,
             expiry_date=instrument.expiry_date,
@@ -207,8 +226,9 @@ class OrderService:
         )
 
         logger.info(
-            "Paper order %s placed: %s %s %s lot(s) of %s (qty %s, limit %s)",
-            order.client_order_id, side, order_type, lots,
+            "Paper order %s placed in portfolio %s: %s %s %s lot(s) of %s "
+            "(qty %s, limit %s)",
+            order.client_order_id, portfolio.name, side, order_type, lots,
             instrument.trading_symbol, quantity, limit_price,
         )
 
@@ -410,6 +430,7 @@ class OrderService:
 
         await self.positions.apply_fill(
             strategy_key=order.strategy_key,
+            portfolio_id=order.portfolio_id,
             security_id=order.security_id,
             trading_symbol=order.trading_symbol,
             side=order.side,
@@ -421,6 +442,68 @@ class OrderService:
             option_type=order.option_type,
             charges=incremental_charges,
         )
+
+        await self._record_cash_effect(
+            order,
+            quantity=result.filled_quantity,
+            price=result.average_price,
+            incremental_charges=incremental_charges,
+            at=now,
+        )
+
+    async def _record_cash_effect(
+        self,
+        order: Order,
+        quantity: int,
+        price: Decimal,
+        incremental_charges: Decimal,
+        at,
+    ) -> None:
+        """The money this fill moved, as append-only ledger entries.
+
+        A BUY debits the premium; a SELL credits it. Charges are always a
+        debit, and only the DELTA is recorded -- charges are recomputed on the
+        cumulative executed quantity rather than accumulated per fill
+        (backend/CLAUDE.md section 5), so posting the full figure again on a
+        second fill would charge the portfolio twice for one order.
+        """
+        from src.portfolios.database.db_models.portfolio_model import (
+            ENTRY_CHARGES,
+            ENTRY_TRADE_CREDIT,
+            ENTRY_TRADE_DEBIT,
+        )
+        from src.portfolios.database.db_operations.portfolio_repository import (
+            CashLedgerRepository,
+        )
+
+        ledger = CashLedgerRepository(self.orders.session)
+        consideration = (Decimal(str(price)) * Decimal(int(quantity))).quantize(
+            MONEY_QUANTUM, rounding=ROUND_HALF_UP
+        )
+
+        if consideration > 0:
+            is_buy = order.side == OrderSide.BUY.value
+            await ledger.add_entry(
+                portfolio_id=order.portfolio_id,
+                entry_type=ENTRY_TRADE_DEBIT if is_buy else ENTRY_TRADE_CREDIT,
+                amount=-consideration if is_buy else consideration,
+                entry_at=at,
+                order_id=order.id,
+                note=f"{order.side} {quantity} of {order.trading_symbol}",
+            )
+
+        charges = Decimal(str(incremental_charges or 0)).quantize(
+            MONEY_QUANTUM, rounding=ROUND_HALF_UP
+        )
+        if charges != 0:
+            await ledger.add_entry(
+                portfolio_id=order.portfolio_id,
+                entry_type=ENTRY_CHARGES,
+                amount=-charges,
+                entry_at=at,
+                order_id=order.id,
+                note=f"Charges on {order.client_order_id}",
+            )
 
     async def _recompute_charges(self, order: Order) -> Decimal:
         """Charges on the cumulative executed quantity.
@@ -552,6 +635,11 @@ class OrderService:
         Order entry must show estimated charges and the net debit/credit before
         anything is confirmed, so this runs the same fill simulation against the
         same book and returns the indicative result.
+
+        No portfolio is resolved here: a preview spends nothing, and asking for
+        one would make the cost of a trade unviewable in the very case where
+        the trader most needs to see it -- before choosing which book to put it
+        in. The affordability check against a portfolio is a separate call.
         """
         instrument = await self.instruments.get_by_security_id(str(security_id))
         if instrument is None:

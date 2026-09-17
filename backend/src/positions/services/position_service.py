@@ -37,6 +37,7 @@ class PositionService:
     async def apply_fill(
         self,
         strategy_key: str,
+        portfolio_id: int,
         security_id: str,
         trading_symbol: str,
         side: str,
@@ -57,11 +58,15 @@ class PositionService:
         price = Decimal(str(price))
         signed = quantity if side == OrderSide.BUY.value else -quantity
 
-        position = await self.repository.get_open_for_security(security_id)
+        # Per portfolio: the same contract held in two portfolios is two
+        # positions, and netting them would corrupt both books.
+        position = await self.repository.get_open_for_security(
+            portfolio_id, security_id
+        )
         if position is None:
             position = await self._open_position(
-                strategy_key, security_id, trading_symbol, lot_size, expiry_date,
-                strike_price, option_type,
+                strategy_key, portfolio_id, security_id, trading_symbol, lot_size,
+                expiry_date, strike_price, option_type,
             )
 
         realized = Decimal("0")
@@ -95,8 +100,8 @@ class PositionService:
                 await self._close_position(position)
 
                 position = await self._open_position(
-                    strategy_key, security_id, trading_symbol, lot_size,
-                    expiry_date, strike_price, option_type,
+                    strategy_key, portfolio_id, security_id, trading_symbol,
+                    lot_size, expiry_date, strike_price, option_type,
                 )
                 position.net_quantity = residual if side == OrderSide.BUY.value else -residual
                 position.average_price = _q(price)
@@ -152,11 +157,12 @@ class PositionService:
             )
 
     async def _open_position(
-        self, strategy_key, security_id, trading_symbol, lot_size, expiry_date,
-        strike_price, option_type,
+        self, strategy_key, portfolio_id, security_id, trading_symbol, lot_size,
+        expiry_date, strike_price, option_type,
     ) -> Position:
         position = Position(
             strategy_key=strategy_key,
+            portfolio_id=portfolio_id,
             security_id=security_id,
             trading_symbol=trading_symbol,
             expiry_date=expiry_date,

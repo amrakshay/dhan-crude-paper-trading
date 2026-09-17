@@ -38,11 +38,20 @@ async def get_chart_trading_controller(
 @chart_trading_router.get("/state", response_model=ChartStateResponse)
 async def get_chart_state(
     security_id: str = Query(..., alias="securityId", description="The charted contract"),
+    portfolio_id: Optional[int] = Query(
+        None,
+        alias="portfolioId",
+        description=(
+            "Which portfolio's book to read. Omit only while a single "
+            "portfolio is active; with several, this is what keeps one-click "
+            "trading unambiguous."
+        ),
+    ),
     controller: ChartTradingController = Depends(get_chart_trading_controller),
     _: SessionPrincipal = Depends(require_session),
 ) -> ChartStateResponse:
     """The chart's own open position, its bracket levels and its live P&L."""
-    return await controller.get_state(security_id)
+    return await controller.get_state(security_id, portfolio_id)
 
 
 @chart_trading_router.get("/preview", response_model=ChartPreviewResponse)

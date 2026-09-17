@@ -62,6 +62,58 @@ async def _seed_default_administrator() -> None:
         )
 
 
+async def _ensure_default_portfolio() -> None:
+    """Create the configured default portfolio if there is none at all.
+
+    Idempotent and never destructive: it only ever acts when the table is
+    empty, so an operator who renamed or archived every portfolio does not get
+    a new one materialising behind them on the next boot.
+    """
+    from decimal import Decimal
+
+    from src.database.session import session_scope
+    from src.portfolios.database.db_operations.portfolio_repository import (
+        PortfolioRepository,
+    )
+    from src.portfolios.services.portfolio_service import PortfolioService
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    try:
+        async with session_scope() as session:
+            existing = await PortfolioRepository(session).list_portfolios(
+                include_archived=True
+            )
+            if existing:
+                return
+
+            name = config_utils.get_property_value("portfolios.default_name", "Main")
+            opening = Decimal(
+                str(
+                    config_utils.get_property_value(
+                        "portfolios.default_opening_balance", "0"
+                    )
+                )
+            )
+            await PortfolioService(session).create(
+                name=name,
+                description="Created on first start.",
+                strategy_keys=[
+                    definition.key for definition in get_strategy_registry().all()
+                ],
+                opening_balance=opening,
+            )
+            await session.commit()
+            logger.info(
+                "Created the default portfolio %r with an opening balance of %s",
+                name, opening,
+            )
+    except Exception:
+        logger.exception(
+            "Could not create the default portfolio; the API is still available "
+            "but trading will refuse until a portfolio exists"
+        )
+
+
 def _load_strategy_modules() -> None:
     from src.strategies.services.strategy_registry import get_strategy_registry
 
@@ -134,6 +186,10 @@ async def lifespan(app: FastAPI):
     )
 
     await _seed_default_administrator()
+    # A fresh database has no portfolio and therefore nothing to trade into.
+    # The migration creates one for an existing database; this is the same
+    # thing for an installation that starts from create_tables().
+    await _ensure_default_portfolio()
 
     # BEFORE anything reads a strategy: the registry parses conf/strategies/*.yaml
     # and a malformed one is fatal here rather than at the first request. What
@@ -324,6 +380,7 @@ from src.health import health_main_router  # noqa: E402
 from src.chart_trading import chart_trading_main_router  # noqa: E402
 from src.orders import orders_main_router  # noqa: E402
 from src.notes import notes_main_router  # noqa: E402
+from src.portfolios import portfolios_main_router  # noqa: E402
 from src.positions import positions_main_router  # noqa: E402
 from src.reports import reports_main_router  # noqa: E402
 from src.settings import settings_main_router  # noqa: E402
@@ -338,6 +395,7 @@ app.include_router(health_main_router, prefix="/api")
 app.include_router(orders_main_router, prefix="/api")
 app.include_router(chart_trading_main_router, prefix="/api")
 app.include_router(positions_main_router, prefix="/api")
+app.include_router(portfolios_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")

@@ -40,12 +40,18 @@ class ChartTradingController:
             positions=PositionRepository(session),
         )
 
-    async def _state(self, underlying_security_id: str) -> ChartStateResponse:
-        return ChartStateResponse(**await self.service.get_state(underlying_security_id))
+    async def _state(
+        self, underlying_security_id: str, portfolio_id: Optional[int] = None
+    ) -> ChartStateResponse:
+        return ChartStateResponse(
+            **await self.service.get_state(underlying_security_id, portfolio_id)
+        )
 
-    async def get_state(self, security_id: str) -> ChartStateResponse:
+    async def get_state(
+        self, security_id: str, portfolio_id: Optional[int] = None
+    ) -> ChartStateResponse:
         try:
-            return await self._state(security_id)
+            return await self._state(security_id, portfolio_id)
         except ChartTradingError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -66,6 +72,7 @@ class ChartTradingController:
                 side=request.side,
                 expiry=request.expiry,
                 lots=request.lots,
+                portfolio_id=request.portfolio_id,
             )
             # The order service writes through this session; the background
             # matcher and bracket monitor open their own, so nothing they do
@@ -79,7 +86,8 @@ class ChartTradingController:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
         return ChartClickResponse(
-            action=result["action"], state=await self._state(request.security_id)
+            action=result["action"],
+            state=await self._state(request.security_id, request.portfolio_id),
         )
 
     async def set_levels(
@@ -94,16 +102,18 @@ class ChartTradingController:
                 clear_take_profit=request.clear_take_profit,
             )
             underlying_security_id = trade.underlying_security_id
+            portfolio_id = trade.portfolio_id
             await self.session.commit()
             self.session.expire_all()
         except ChartTradingError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return await self._state(underlying_security_id)
+        return await self._state(underlying_security_id, portfolio_id)
 
     async def close(self, trade_id: int) -> ChartStateResponse:
         try:
             trade = await self.service.close(trade_id)
             underlying_security_id = trade.underlying_security_id
+            portfolio_id = trade.portfolio_id
             await self.session.commit()
             self.session.expire_all()
         except (ChartTradingError, OrderValidationError) as error:

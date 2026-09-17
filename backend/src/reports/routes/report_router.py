@@ -33,6 +33,14 @@ async def get_pnl_report(
             "a toggle does."
         ),
     ),
+    portfolio_id: Optional[int] = Query(
+        None,
+        alias="portfolioId",
+        description=(
+            "Filter by portfolio. OMIT for the all-portfolios view: the header "
+            "scope is a convenience, not a filter you can be trapped in."
+        ),
+    ),
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
@@ -45,7 +53,7 @@ async def get_pnl_report(
     disagree.
     """
     return await controller.build_report(
-        security_id, placed_from, placed_to, strategy_key
+        security_id, placed_from, placed_to, strategy_key, portfolio_id
     )
 
 
@@ -61,6 +69,14 @@ async def export_pnl_csv(
             "a toggle does."
         ),
     ),
+    portfolio_id: Optional[int] = Query(
+        None,
+        alias="portfolioId",
+        description=(
+            "Filter by portfolio. OMIT for the all-portfolios view: the header "
+            "scope is a convenience, not a filter you can be trapped in."
+        ),
+    ),
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
@@ -68,7 +84,7 @@ async def export_pnl_csv(
 ) -> Response:
     """Every realisation event as CSV."""
     content = await controller.export_realisations_csv(
-        security_id, placed_from, placed_to, strategy_key
+        security_id, placed_from, placed_to, strategy_key, portfolio_id
     )
     filename = f"pnl-{ist_now().strftime('%Y%m%d-%H%M')}.csv"
     return Response(
@@ -90,6 +106,14 @@ async def export_orders_csv(
             "a toggle does."
         ),
     ),
+    portfolio_id: Optional[int] = Query(
+        None,
+        alias="portfolioId",
+        description=(
+            "Filter by portfolio. OMIT for the all-portfolios view: the header "
+            "scope is a convenience, not a filter you can be trapped in."
+        ),
+    ),
     placed_from: Optional[datetime] = Query(None, alias="from"),
     placed_to: Optional[datetime] = Query(None, alias="to"),
     controller: ReportController = Depends(get_report_controller),
@@ -97,7 +121,7 @@ async def export_orders_csv(
 ) -> Response:
     """Every order with its full charges breakdown as CSV."""
     content = await controller.export_orders_csv(
-        security_id, placed_from, placed_to, strategy_key
+        security_id, placed_from, placed_to, strategy_key, portfolio_id
     )
     filename = f"orders-{ist_now().strftime('%Y%m%d-%H%M')}.csv"
     return Response(

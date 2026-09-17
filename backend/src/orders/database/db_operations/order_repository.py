@@ -43,6 +43,7 @@ class OrderRepository(BaseRepository[Order]):
         self,
         statuses: Optional[Sequence[str]] = None,
         strategy_key: Optional[str] = None,
+        portfolio_id: Optional[int] = None,
         security_id: Optional[str] = None,
         expiry_date: Optional[date] = None,
         placed_from: Optional[datetime] = None,
@@ -57,6 +58,8 @@ class OrderRepository(BaseRepository[Order]):
             conditions.append(Order.status.in_(list(statuses)))
         if strategy_key:
             conditions.append(Order.strategy_key == strategy_key)
+        if portfolio_id is not None:
+            conditions.append(Order.portfolio_id == int(portfolio_id))
         if security_id:
             conditions.append(Order.security_id == security_id)
         if expiry_date:
@@ -147,12 +150,17 @@ class OrderRepository(BaseRepository[Order]):
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
         strategy_key: Optional[str] = None,
+        portfolio_id: Optional[int] = None,
     ) -> List[tuple]:
         """(fill, order) pairs, oldest first. Drives the P&L reports."""
         query = select(OrderFill, Order).join(Order, OrderFill.order_id == Order.id)
         conditions = []
         if strategy_key:
             conditions.append(Order.strategy_key == strategy_key)
+        if portfolio_id is not None:
+            conditions.append(Order.portfolio_id == int(portfolio_id))
+        if portfolio_id is not None:
+            conditions.append(Order.portfolio_id == int(portfolio_id))
         if security_id:
             conditions.append(Order.security_id == security_id)
         if placed_from:

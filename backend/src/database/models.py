@@ -11,6 +11,11 @@ from src.orders.database.db_models.order_model import (  # noqa: F401
     OrderEvent,
     OrderFill,
 )
+from src.portfolios.database.db_models.portfolio_model import (  # noqa: F401
+    CashLedgerEntry,
+    Portfolio,
+    PortfolioStrategy,
+)
 from src.positions.database.db_models.position_model import Position  # noqa: F401
 from src.settings.database.db_models.app_setting_model import AppSetting  # noqa: F401
 from src.users.database.db_models.user_model import User  # noqa: F401
@@ -22,6 +27,9 @@ __all__ = [
     "OrderEvent",
     "OrderFill",
     "OrderCharge",
+    "Portfolio",
+    "PortfolioStrategy",
+    "CashLedgerEntry",
     "Position",
     "TradeNote",
     "AppSetting",

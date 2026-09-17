@@ -21,6 +21,14 @@ class PlaceOrderRequest(BaseModel):
     lots: int = Field(1, gt=0)
     limit_price: Optional[Decimal] = Field(None, alias="limitPrice")
     is_close_order: bool = Field(False, alias="isCloseOrder")
+    portfolio_id: Optional[int] = Field(
+        None,
+        alias="portfolioId",
+        description=(
+            "Whose money is at stake. Required once more than one portfolio is "
+            "active; with one, it is unambiguous and may be omitted."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -100,6 +108,7 @@ class OrderResponse(BaseModel):
     id: int
     client_order_id: str = Field(alias="clientOrderId")
     strategy_key: str = Field(alias="strategyKey")
+    portfolio_id: int = Field(alias="portfolioId")
     security_id: str = Field(alias="securityId")
     trading_symbol: str = Field(alias="tradingSymbol")
     expiry_date: Optional[date] = Field(None, alias="expiryDate")

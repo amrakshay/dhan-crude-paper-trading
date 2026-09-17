@@ -252,8 +252,14 @@ class ChartTradingService:
         side: str,
         expiry: Optional[date] = None,
         lots: Optional[int] = None,
+        portfolio_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """One click on the chart. Nets against an open trade before opening."""
+        """One click on the chart. Nets against an open trade before opening.
+
+        Netting is PER PORTFOLIO. The same strategy running in two portfolios
+        has two independent chart trades on the same future, and a click in one
+        must not close the other.
+        """
         if not self._enabled():
             raise ChartTradingError("Chart trading is disabled (chart_trading.enabled=false).")
 
@@ -261,8 +267,11 @@ class ChartTradingService:
         if side not in (SIDE_BUY, SIDE_SELL):
             raise ChartTradingError(f"side must be BUY or SELL, got {side!r}")
 
+        portfolio = await self._resolve_portfolio(portfolio_id)
         underlying_security_id = str(underlying_security_id)
-        open_trade = await self.chart_trades.get_open_for_underlying(underlying_security_id)
+        open_trade = await self.chart_trades.get_open_for_underlying(
+            portfolio.id, underlying_security_id
+        )
 
         # Netting: the opposite click closes what is open rather than stacking
         # a put on top of a call.
@@ -277,8 +286,24 @@ class ChartTradingService:
 
         return {
             "action": "OPENED",
-            "trade": await self._open(underlying_security_id, side, expiry, lots),
+            "trade": await self._open(
+                underlying_security_id, side, expiry, lots, portfolio.id
+            ),
         }
+
+    async def _resolve_portfolio(self, portfolio_id: Optional[int]):
+        """Whose money this click spends."""
+        from src.portfolios.services.portfolio_service import (
+            PortfolioError,
+            PortfolioService,
+        )
+
+        try:
+            return await PortfolioService(
+                self.chart_trades.session
+            ).resolve_for_trading(portfolio_id)
+        except PortfolioError as error:
+            raise ChartTradingError(str(error)) from error
 
     async def _open(
         self,
@@ -286,6 +311,7 @@ class ChartTradingService:
         side: str,
         expiry: Optional[date],
         lots: Optional[int],
+        portfolio_id: int,
     ) -> ChartTrade:
         lots = lots or self._default_lots()
         contract, strike, resolved_expiry, spot = await self.resolve_atm_option(
@@ -304,6 +330,7 @@ class ChartTradingService:
                 side=OrderSide.BUY.value,
                 order_type=OrderType.MARKET.value,
                 lots=lots,
+                portfolio_id=portfolio_id,
             )
         except OrderValidationError as error:
             raise ChartTradingError(str(error)) from error
@@ -313,6 +340,7 @@ class ChartTradingService:
             # The option's own strategy, taken from the order that bought it,
             # so the chart trade and its order can never disagree.
             strategy_key=order.strategy_key,
+            portfolio_id=portfolio_id,
             underlying_security_id=underlying_security_id,
             underlying_symbol=underlying.trading_symbol,
             option_security_id=contract.security_id,
@@ -349,7 +377,9 @@ class ChartTradingService:
         if trade.status != STATUS_OPEN:
             raise ChartTradingError(f"Chart trade {trade_id} is already {trade.status}")
 
-        position = await self.positions.get_open_for_security(trade.option_security_id)
+        position = await self.positions.get_open_for_security(
+            trade.portfolio_id, trade.option_security_id
+        )
         quantity = int(position.net_quantity) if position else 0
         if quantity <= 0:
             # The entry never filled, or the position was closed from the
@@ -367,6 +397,10 @@ class ChartTradingService:
                     lots=trade.lots,
                     is_close_order=True,
                     quantity_override=quantity,
+                    # The trade's OWN portfolio, never the caller's active one:
+                    # the bracket monitor closes trades with no caller at all,
+                    # and a manual close must credit the book that paid.
+                    portfolio_id=trade.portfolio_id,
                 )
                 trade.exit_order_id = exit_order.id
             except OrderValidationError as error:
@@ -483,10 +517,19 @@ class ChartTradingService:
         return None
 
     # --- live state --------------------------------------------------------
-    async def get_state(self, underlying_security_id: str) -> Dict[str, Any]:
-        """The chart's own position, levels and live P&L net of charges."""
+    async def get_state(
+        self, underlying_security_id: str, portfolio_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """The chart's own position, levels and live P&L net of charges.
+
+        Scoped to one portfolio: the HUD shows the trade in the portfolio the
+        header is pointing at, not whichever one happens to be open.
+        """
         underlying_security_id = str(underlying_security_id)
-        trade = await self.chart_trades.get_open_for_underlying(underlying_security_id)
+        portfolio = await self._resolve_portfolio(portfolio_id)
+        trade = await self.chart_trades.get_open_for_underlying(
+            portfolio.id, underlying_security_id
+        )
         state: Dict[str, Any] = {
             "underlyingSecurityId": underlying_security_id,
             "underlyingPrice": self.underlying_price(underlying_security_id),
@@ -495,7 +538,9 @@ class ChartTradingService:
         if trade is None:
             return state
 
-        position = await self.positions.get_open_for_security(trade.option_security_id)
+        position = await self.positions.get_open_for_security(
+            trade.portfolio_id, trade.option_security_id
+        )
         mark = self._option_mark(trade.option_security_id)
         unrealized = (
             PositionService.unrealized_pnl(position, mark) if position is not None else None

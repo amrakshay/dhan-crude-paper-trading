@@ -68,6 +68,10 @@ class RealisationEvent:
 class _RunningPosition:
     net_quantity: int = 0
     average_price: Decimal = ZERO
+    # The contract this is a position in. Carried because the replay is keyed
+    # by (portfolio, contract) -- two portfolios holding the same strike are
+    # two running positions -- while the MARK is per contract.
+    security_id: str = ""
 
 
 @dataclass
@@ -109,19 +113,27 @@ class PnlService:
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
         strategy_key: Optional[str] = None,
+        portfolio_id: Optional[int] = None,
     ) -> tuple[List[RealisationEvent], Dict[str, _RunningPosition]]:
-        """Walk every fill oldest-first, emitting a realisation on each reduce."""
+        """Walk every fill oldest-first, emitting a realisation on each reduce.
+
+        Positions are keyed by (portfolio, contract) rather than by contract,
+        so replaying a report across two portfolios holding the same strike
+        does not net them against each other -- exactly the rule the live
+        position book follows.
+        """
         rows = await self.orders.list_fills(
             security_id=security_id, placed_from=placed_from, placed_to=placed_to,
-            strategy_key=strategy_key,
+            strategy_key=strategy_key, portfolio_id=portfolio_id,
         )
 
         positions: Dict[str, _RunningPosition] = defaultdict(_RunningPosition)
         events: List[RealisationEvent] = []
 
         for fill, order in rows:
-            key = order.security_id
+            key = f"{order.portfolio_id}:{order.security_id}"
             position = positions[key]
+            position.security_id = order.security_id
             quantity = int(fill.quantity)
             price = Decimal(str(fill.price))
             signed = quantity if order.side == OrderSide.BUY.value else -quantity
@@ -175,11 +187,13 @@ class PnlService:
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
         strategy_key: Optional[str] = None,
+        portfolio_id: Optional[int] = None,
     ) -> tuple[Dict[str, Decimal], Dict[date, Decimal], Decimal]:
         """Charge totals overall, and per IST calendar day."""
         orders, _total = await self.orders.list_orders(
             security_id=security_id,
             strategy_key=strategy_key,
+            portfolio_id=portfolio_id,
             placed_from=placed_from,
             placed_to=placed_to,
             page=0,
@@ -237,10 +251,12 @@ class PnlService:
         total = ZERO
         marked = 0
         unmarked = 0
-        for security_id, position in positions.items():
+        for key, position in positions.items():
             if position.net_quantity == 0:
                 continue
-            mark = self._mark(security_id)
+            # The mark is per contract; the position is per (portfolio,
+            # contract), so the key cannot be used as a security id.
+            mark = self._mark(position.security_id or key)
             if mark is None:
                 unmarked += 1
                 continue
@@ -321,15 +337,16 @@ class PnlService:
         placed_from: Optional[datetime] = None,
         placed_to: Optional[datetime] = None,
         strategy_key: Optional[str] = None,
+        portfolio_id: Optional[int] = None,
     ) -> PnlReport:
         # A DISABLED strategy's history is still reported. Its totals must not
         # move when a toggle does (decision 3), so nothing here filters on
         # whether a strategy is running -- only on which one is asked for.
         events, positions = await self.replay_fills(
-            security_id, placed_from, placed_to, strategy_key
+            security_id, placed_from, placed_to, strategy_key, portfolio_id
         )
         components, charges_by_day, total_charges = await self.collect_charges(
-            security_id, placed_from, placed_to, strategy_key
+            security_id, placed_from, placed_to, strategy_key, portfolio_id
         )
         unrealised, unmarked = self.compute_unrealised(positions)
 

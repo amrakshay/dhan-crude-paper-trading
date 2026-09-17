@@ -8,6 +8,9 @@ from src.positions.database.db_operations.position_repository import PositionRep
 from src.positions.services.position_service import PositionService
 
 STRATEGY = "mcx-crude-options"
+# These tests exercise the position maths, not portfolio separation; one
+# portfolio id is enough, and tests/test_portfolios.py covers two.
+PORTFOLIO = 1
 SECURITY = "576375"
 SYMBOL = "CRUDEOIL 17 SEP 6800 CALL"
 LOT = 100
@@ -21,6 +24,7 @@ async def service(db_session):
 async def _fill(service, side, quantity, price, charges="0"):
     return await service.apply_fill(
         strategy_key=STRATEGY,
+        portfolio_id=PORTFOLIO,
         security_id=SECURITY,
         trading_symbol=SYMBOL,
         side=side,

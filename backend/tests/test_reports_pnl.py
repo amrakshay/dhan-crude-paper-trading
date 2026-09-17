@@ -8,6 +8,7 @@ from src.core.time_utils import utc_now
 from src.orders.database.db_models.order_model import Order, OrderCharge, OrderFill
 from src.orders.database.db_operations.order_repository import OrderRepository
 from src.reports.services.pnl_service import PnlService
+from tests.conftest import default_portfolio_id
 
 # Every row in this suite belongs to the one configured strategy module.
 STRATEGY = "mcx-crude-options"
@@ -48,6 +49,7 @@ async def _order(session, side, quantity, price, when=None, security_id=SECURITY
     when = when or utc_now()
     order = Order(
         strategy_key=STRATEGY,
+        portfolio_id=await default_portfolio_id(),
         client_order_id=f"{side}-{quantity}-{when.timestamp()}-{security_id}",
         security_id=security_id,
         trading_symbol=symbol,
@@ -339,10 +341,12 @@ async def test_report_agrees_with_the_position_book_on_realised_pnl(db_session):
     prices = [Decimal("48.10"), Decimal("48.17"), Decimal("48.25")]
     quantities = [30, 40, 30]
 
+    portfolio_id = await default_portfolio_id()
     position_service = PositionService(PositionRepository(db_session))
     for price, quantity in zip(prices, quantities):
         await position_service.apply_fill(
             strategy_key=STRATEGY,
+            portfolio_id=portfolio_id,
             security_id=SECURITY, trading_symbol=SYMBOL, side="BUY",
             quantity=quantity, price=price, lot_size=100,
             expiry_date=date(2026, 9, 17), strike_price=Decimal("6800"),
@@ -353,6 +357,7 @@ async def test_report_agrees_with_the_position_book_on_realised_pnl(db_session):
     exit_price = Decimal("46.5840")
     position, position_realised = await position_service.apply_fill(
         strategy_key=STRATEGY,
+        portfolio_id=portfolio_id,
         security_id=SECURITY, trading_symbol=SYMBOL, side="SELL",
         quantity=100, price=exit_price, lot_size=100,
         expiry_date=date(2026, 9, 17), strike_price=Decimal("6800"),

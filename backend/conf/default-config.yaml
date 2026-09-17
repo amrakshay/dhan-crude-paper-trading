@@ -199,6 +199,22 @@ chart_trading:
   # database session -- never on the tick path.
   bracket_interval_ms: 250
 
+portfolios:
+  # A portfolio behaves like one demat account: it holds money, it is attached
+  # to strategies, and every order, position and chart trade belongs to exactly
+  # one. Its balance is NEVER stored -- it is the sum of its cash ledger, the
+  # same way realised P&L is replayed from fills rather than kept as a total.
+  #
+  # These two values are used ONCE, by the migration that introduces
+  # portfolios: it creates this portfolio and assigns every pre-existing trade
+  # to it. Changing them afterwards has no effect -- deposit on the Portfolios
+  # page instead.
+  default_name: "Main"
+  # A deliberate number, not something derived from existing P&L. One CRUDEOIL
+  # lot is 100 barrels, so an ATM option at a Rs 150 premium costs Rs 15,000;
+  # ten lakh leaves room for several positions plus the short-margin estimate.
+  default_opening_balance: 1000000
+
 trading:
   # Fill simulation. See src/orders/services/fill_simulator.py.
   default_lots: 1

@@ -1,5 +1,5 @@
 """Open and closed paper positions."""
-from sqlalchemy import Boolean, Column, Date, Index, Integer, String
+from sqlalchemy import Boolean, Column, Date, ForeignKey, Index, Integer, String
 
 from src.database.base import Money, PreciseDateTime, TimestampedModel
 
@@ -20,6 +20,14 @@ class Position(TimestampedModel):
     # across expiries, so a historical trade would lose the join the moment its
     # contract expired, and its P&L would silently leave every filtered view.
     strategy_key = Column(String(64), nullable=False, index=True)
+
+    # Which portfolio's money this used. Every trade belongs to exactly one,
+    # and two portfolios holding the same contract are two separate books --
+    # which is enforced by the LOOKUPS being keyed on (portfolio_id,
+    # security_id), not just by this column existing.
+    portfolio_id = Column(
+        Integer, ForeignKey("portfolios.id"), nullable=False, index=True
+    )
 
     security_id = Column(String(32), nullable=False, index=True)
     trading_symbol = Column(String(128), nullable=False)
@@ -45,5 +53,10 @@ class Position(TimestampedModel):
     closed_at = Column(PreciseDateTime, nullable=True)
 
     __table_args__ = (
-        Index("ix_positions_security_open", "security_id", "is_open"),
+        # PER PORTFOLIO. The index used to be (security_id, is_open), matching a
+        # lookup that found "the" open position for a contract. With portfolios
+        # that lookup would net two books into one row: a buy in portfolio B
+        # would average into portfolio A's position and a close in one would
+        # close the other.
+        Index("ix_positions_portfolio_security_open", "portfolio_id", "security_id", "is_open"),
     )

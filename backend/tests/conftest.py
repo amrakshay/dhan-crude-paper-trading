@@ -45,6 +45,12 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB_PATH}"
 # option expires a few days BEFORE the future it is written on, so an option
 # expiry may never be mapped to a future by month name.
 # ---------------------------------------------------------------------------
+# The portfolio every test trades into. The opening balance is deliberately
+# large: most tests are not about funds, and one that is deposits or withdraws
+# to set up the case it cares about.
+TEST_PORTFOLIO_NAME = "Test"
+TEST_PORTFOLIO_OPENING_BALANCE = "10000000"
+
 NEAR_OPTION_EXPIRY = date.today() + timedelta(days=7)
 NEAR_FUTURE_EXPIRY = NEAR_OPTION_EXPIRY + timedelta(days=4)
 FAR_OPTION_EXPIRY = NEAR_OPTION_EXPIRY + timedelta(days=28)
@@ -68,6 +74,7 @@ async def db_session():
     await DatabaseManager.drop_tables()
     await DatabaseManager.create_tables()
     await seed_admin()
+    await seed_portfolio()
 
     session = get_session_factory()()
     try:
@@ -90,6 +97,7 @@ async def api_client():
     await DatabaseManager.drop_tables()
     await DatabaseManager.create_tables()
     await seed_admin()
+    await seed_portfolio()
 
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -116,6 +124,45 @@ async def seed_admin():
             SEED_ADMIN_PASSWORD
         )
         await session.commit()
+
+
+async def seed_portfolio():
+    """The default portfolio every test trades into.
+
+    The app creates one in its lifespan and the migration creates one for an
+    existing database; these tests build the schema with `create_tables()` and
+    drive the ASGI app without running it, so they seed it explicitly. Trading
+    with no portfolio is refused, which is correct behaviour and not what most
+    of these tests are about.
+    """
+    from decimal import Decimal
+
+    from src.database.session import session_scope
+    from src.portfolios.services.portfolio_service import PortfolioService
+
+    async with session_scope() as session:
+        await PortfolioService(session).create(
+            name=TEST_PORTFOLIO_NAME,
+            strategy_keys=["mcx-crude-options"],
+            opening_balance=Decimal(TEST_PORTFOLIO_OPENING_BALANCE),
+        )
+        await session.commit()
+
+
+async def default_portfolio_id() -> int:
+    """The id of the portfolio seeded for this test.
+
+    Looked up rather than assumed to be 1: a test that creates portfolios of
+    its own should not have to care what order the ids came out in.
+    """
+    from src.database.session import session_scope
+    from src.portfolios.database.db_operations.portfolio_repository import (
+        PortfolioRepository,
+    )
+
+    async with session_scope() as session:
+        portfolio = await PortfolioRepository(session).get_by_name(TEST_PORTFOLIO_NAME)
+        return portfolio.id
 
 
 async def login_as(client, email: str, password: str):

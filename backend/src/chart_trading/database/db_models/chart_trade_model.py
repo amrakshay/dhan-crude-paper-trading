@@ -12,7 +12,7 @@ bracket_monitor watches the future and closes the option position at market
 when one is crossed. Both are nullable: a chart trade opens with no levels at
 all and stays that way until lines are dragged onto the chart.
 """
-from sqlalchemy import Column, Date, Index, Integer, String
+from sqlalchemy import Column, Date, ForeignKey, Index, Integer, String
 
 from src.database.base import Money, PreciseDateTime, TimestampedModel
 
@@ -25,6 +25,14 @@ class ChartTrade(TimestampedModel):
     # across expiries, so a historical trade would lose the join the moment its
     # contract expired, and its P&L would silently leave every filtered view.
     strategy_key = Column(String(64), nullable=False, index=True)
+
+    # Which portfolio's money this used. Every trade belongs to exactly one,
+    # and two portfolios holding the same contract are two separate books --
+    # which is enforced by the LOOKUPS being keyed on (portfolio_id,
+    # security_id), not just by this column existing.
+    portfolio_id = Column(
+        Integer, ForeignKey("portfolios.id"), nullable=False, index=True
+    )
 
     # The contract whose chart was traded (the near-month future).
     underlying_security_id = Column(String(32), nullable=False, index=True)
@@ -59,5 +67,12 @@ class ChartTrade(TimestampedModel):
     closed_at = Column(PreciseDateTime, nullable=True)
 
     __table_args__ = (
-        Index("ix_chart_trades_underlying_status", "underlying_security_id", "status"),
+        # PER PORTFOLIO, for the same reason as positions: the "at most one
+        # open chart trade per underlying" rule is per portfolio, and without
+        # the portfolio in the key a Sell click in one portfolio would close
+        # the open call in another.
+        Index(
+            "ix_chart_trades_portfolio_underlying_status",
+            "portfolio_id", "underlying_security_id", "status",
+        ),
     )

@@ -35,12 +35,19 @@ async def list_positions(
             "simply stops being marked."
         ),
     ),
+    portfolio_id: Optional[int] = Query(
+        None,
+        alias="portfolioId",
+        description="Filter by portfolio. Omit for every portfolio.",
+    ),
     controller: PositionController = Depends(get_position_controller),
     _: SessionPrincipal = Depends(require_session),
 ) -> PositionListResponse:
     """Open positions with live MTM, plus aggregate realised/unrealised P&L."""
     return await controller.list_positions(
-        include_closed=include_closed, strategy_key=strategy_key
+        include_closed=include_closed,
+        strategy_key=strategy_key,
+        portfolio_id=portfolio_id,
     )
 
 

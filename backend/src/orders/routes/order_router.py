@@ -67,6 +67,14 @@ async def list_orders(
             "strategy off must not hide trades that already happened."
         ),
     ),
+    portfolio_id: Optional[int] = Query(
+        None,
+        alias="portfolioId",
+        description=(
+            "Filter by portfolio. Omit for every portfolio -- history is never "
+            "hidden by a scope."
+        ),
+    ),
     security_id: Optional[str] = Query(None, alias="securityId"),
     expiry: Optional[date] = Query(None),
     placed_from: Optional[datetime] = Query(None, alias="placedFrom"),
@@ -81,6 +89,7 @@ async def list_orders(
     return await controller.list_orders(
         statuses=status,
         strategy_key=strategy_key,
+        portfolio_id=portfolio_id,
         security_id=security_id,
         expiry_date=expiry,
         placed_from=placed_from,

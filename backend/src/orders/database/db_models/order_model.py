@@ -30,6 +30,14 @@ class Order(TimestampedModel):
     # contract expired, and its P&L would silently leave every filtered view.
     strategy_key = Column(String(64), nullable=False, index=True)
 
+    # Which portfolio's money this used. Every trade belongs to exactly one,
+    # and two portfolios holding the same contract are two separate books --
+    # which is enforced by the LOOKUPS being keyed on (portfolio_id,
+    # security_id), not just by this column existing.
+    portfolio_id = Column(
+        Integer, ForeignKey("portfolios.id"), nullable=False, index=True
+    )
+
     # Contract snapshot, denormalised so history survives an instrument-master
     # refresh that drops the expired security_id.
     security_id = Column(String(32), nullable=False, index=True)
@@ -83,6 +91,7 @@ class Order(TimestampedModel):
         Index("ix_orders_status_placed", "status", "placed_at"),
         Index("ix_orders_security_placed", "security_id", "placed_at"),
         Index("ix_orders_strategy_placed", "strategy_key", "placed_at"),
+        Index("ix_orders_portfolio_placed", "portfolio_id", "placed_at"),
     )
 
 

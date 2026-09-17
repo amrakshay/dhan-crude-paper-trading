@@ -19,7 +19,7 @@ from src.instruments.database.db_operations.instrument_repository import (
 from src.orders.database.db_models.order_model import Order, OrderCharge, OrderFill
 from src.market.services.feed_manager import get_feed_manager
 from src.strategies.services.strategy_registry import get_strategy_registry
-from tests.conftest import NEAR_OPTION_EXPIRY
+from tests.conftest import NEAR_OPTION_EXPIRY, default_portfolio_id
 
 CRUDE = "mcx-crude-options"
 OTHER = "some-other-strategy"
@@ -86,6 +86,7 @@ async def _seed_order(strategy_key: str, security_id="576375", price="50"):
         when = utc_now()
         order = Order(
             strategy_key=strategy_key,
+            portfolio_id=await default_portfolio_id(),
             client_order_id=f"{strategy_key}-{security_id}-{when.timestamp()}",
             security_id=security_id,
             trading_symbol=f"{strategy_key} CONTRACT",

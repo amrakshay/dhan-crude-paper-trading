@@ -85,9 +85,12 @@ class PositionController:
         self,
         include_closed: bool = False,
         strategy_key: Optional[str] = None,
+        portfolio_id: Optional[int] = None,
     ) -> PositionListResponse:
         positions = await self.repository.list_all(
-            include_closed=include_closed, strategy_key=strategy_key
+            include_closed=include_closed,
+            strategy_key=strategy_key,
+            portfolio_id=portfolio_id,
         )
         responses = [self._to_response(position) for position in positions]
 
@@ -191,6 +194,10 @@ class PositionController:
                 limit_price=request.limit_price,
                 is_close_order=True,
                 quantity_override=quantity_override,
+                # The closing order belongs to the SAME portfolio as the
+                # position it closes -- never the caller's active one, which
+                # could be a different book entirely.
+                portfolio_id=position.portfolio_id,
             )
         except OrderValidationError as exc:
             logger.warning(

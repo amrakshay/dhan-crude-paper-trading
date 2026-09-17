@@ -15,16 +15,24 @@ class ChartTradeRepository(BaseRepository[ChartTrade]):
     def __init__(self, session: AsyncSession):
         super().__init__(session, ChartTrade)
 
-    async def get_open_for_underlying(self, underlying_security_id: str) -> Optional[ChartTrade]:
-        """The one open chart trade on a contract.
+    async def get_open_for_underlying(
+        self, portfolio_id: int, underlying_security_id: str
+    ) -> Optional[ChartTrade]:
+        """The one open chart trade on a contract, IN ONE PORTFOLIO.
 
-        At most one exists because a Sell click closes an open call before it
-        opens anything, and a Buy click closes an open put -- the service
-        enforces that netting, this is just the read.
+        At most one exists per portfolio because a Sell click closes an open
+        call before it opens anything, and a Buy click closes an open put --
+        the service enforces that netting, this is just the read.
+
+        The "at most one" is per portfolio, not global. The same strategy
+        running in two portfolios has two independent chart trades on the same
+        future, and without the portfolio in this query a click in one would
+        close the other's position.
         """
         result = await self.session.execute(
             select(ChartTrade)
             .where(
+                ChartTrade.portfolio_id == int(portfolio_id),
                 ChartTrade.underlying_security_id == str(underlying_security_id),
                 ChartTrade.status == STATUS_OPEN,
             )

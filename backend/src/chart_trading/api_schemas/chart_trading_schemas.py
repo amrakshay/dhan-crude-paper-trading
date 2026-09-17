@@ -13,6 +13,14 @@ class ChartClickRequest(BaseModel):
     side: str = Field(description="BUY buys the ATM call, SELL buys the ATM put")
     expiry: Optional[date] = Field(None, description="Defaults to the nearest expiry")
     lots: Optional[int] = Field(None, ge=1)
+    portfolio_id: Optional[int] = Field(
+        None,
+        alias="portfolioId",
+        description=(
+            "Whose money this click spends. Required once more than one "
+            "portfolio is active -- the server refuses rather than guessing."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 

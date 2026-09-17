@@ -11,6 +11,7 @@ from src.core.time_utils import as_utc_aware
 class PositionResponse(BaseModel):
     id: int
     strategy_key: str = Field(alias="strategyKey")
+    portfolio_id: int = Field(alias="portfolioId")
     # Whether that strategy is currently RUNNING. A position held under a
     # disabled strategy is still real and still counts, but nothing is marking
     # it any more, so the UI has to say so rather than show a stale price.

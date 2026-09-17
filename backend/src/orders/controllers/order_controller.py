@@ -44,6 +44,7 @@ class OrderController:
                 lots=request.lots,
                 limit_price=request.limit_price,
                 is_close_order=request.is_close_order,
+                portfolio_id=request.portfolio_id,
             )
         except OrderValidationError as exc:
             logger.warning(
@@ -132,6 +133,7 @@ class OrderController:
         self,
         statuses: Optional[List[str]] = None,
         strategy_key: Optional[str] = None,
+        portfolio_id: Optional[int] = None,
         security_id: Optional[str] = None,
         expiry_date: Optional[date] = None,
         placed_from: Optional[datetime] = None,
@@ -143,6 +145,7 @@ class OrderController:
         orders, total = await self.repository.list_orders(
             statuses=statuses,
             strategy_key=strategy_key,
+            portfolio_id=portfolio_id,
             security_id=security_id,
             expiry_date=expiry_date,
             placed_from=placed_from,
