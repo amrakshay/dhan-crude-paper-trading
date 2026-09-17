@@ -161,19 +161,19 @@ access log the page reports on. Do not add timing or sampling inside
 **Money is `Decimal`, never `float`.** Timestamps are stored naive-UTC.
 
 **Settings from the UI beat `.env`.** `SettingsService.apply_to_config()` overlays
-stored settings onto the in-memory config. Do not read `DHAN_*` from
+stored settings onto the in-memory config at startup (`main.py`'s
+`_apply_stored_settings()`, called from the lifespan **before**
+`get_feed_manager().start()`) and after every save. Do not read `DHAN_*` from
 `os.environ` directly — go through `config_utils`, or you will see the `.env`
 fallback instead of what the operator actually configured.
 
-> **This paragraph used to say the overlay also runs "at startup (before the
-> feed starts)". It does not.** `apply_to_config()` is called from
-> `SettingsService.save()` and from nowhere else — verified 2026-09-17 while
-> building the system health page, which is what caught it. A process that
-> restarts after a save therefore runs on `.env`, and a Dhan token configured
-> in the UI is silently not the one the feed uses. The health page detects and
-> reports the divergence; nothing fixes it yet. See README's "Known gaps". If
-> you fix it, call `apply_to_config()` in `main.py`'s lifespan **before**
-> `get_feed_manager().start()`, and delete this note.
+The startup call is load-bearing and its absence is silent: without it the app
+boots perfectly well on `.env` while the Settings page shows something else, so
+a Dhan token configured in the UI is not the one the feed uses. That was a real
+bug until 2026-09-17, found by the system health page. `tests/
+test_startup_applies_stored_settings.py` asserts both that the overlay happens
+and that it happens before the feed starts — moving the call after the feed
+would reintroduce the bug in a form the behavioural test alone would miss.
 
 **The Dhan access token is encrypted at rest and never leaves the server.**
 Responses carry a mask and decoded JWT metadata only. If you add a settings

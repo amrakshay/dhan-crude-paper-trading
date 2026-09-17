@@ -62,6 +62,46 @@ async def _seed_default_administrator() -> None:
         )
 
 
+async def _apply_stored_settings() -> None:
+    """Overlay settings saved in the UI onto the in-memory config.
+
+    **This must run before the feed starts.** `SettingsService.apply_to_config()`
+    mutates the config dict every `config_utils` caller reads, which is what
+    makes the database beat `.env`. It was previously called only from
+    `SettingsService.save()`, so a process that restarted after a save ran on
+    its `.env` values: a Dhan token configured on the Settings page was
+    silently not the one the feed used, while the Settings page went on showing
+    the stored one. The system health page is what caught it.
+
+    Not fatal. If the settings cannot be read the application still starts --
+    on `.env`, saying so -- because refusing to boot over a settings row would
+    be a worse failure than running with the fallback.
+
+    Reading the settings also registers the decrypted token with
+    `log_redaction` (see `SettingsService.load_stored`), so a token that only
+    ever existed in the database is scrubbed from the log from the first line.
+    """
+    from src.database.session import session_scope
+    from src.settings.database.db_operations.app_setting_repository import (
+        AppSettingRepository,
+    )
+    from src.settings.services.settings_service import SettingsService
+
+    try:
+        async with session_scope() as session:
+            applied = await SettingsService(AppSettingRepository(session)).apply_to_config()
+        if not applied:
+            logger.info(
+                "No settings are stored in the database; the .env values stand"
+            )
+    except Exception:
+        logger.exception(
+            "Could not apply stored settings. This process will run on its .env "
+            "values, which may not be what the Settings page shows. Re-save on "
+            "the Settings page once the cause is fixed."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Nothing recorded when this process started, so the health page had no
@@ -79,6 +119,12 @@ async def lifespan(app: FastAPI):
     )
 
     await _seed_default_administrator()
+
+    # BEFORE the feed starts: settings saved in the UI beat .env, and the feed
+    # reads its credentials and its synthetic flag out of the config this
+    # overlays. Starting the feed first would connect with the .env values and
+    # only pick up the stored ones at the next save.
+    await _apply_stored_settings()
 
     # One upstream Dhan connection per process, started here and fanned out to
     # every browser tab. See src/market/services/feed_manager.py.

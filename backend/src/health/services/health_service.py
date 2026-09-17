@@ -232,15 +232,21 @@ def _dhan_api_health(manager: Any) -> Dict[str, Any]:
 def _stored_settings_health(stored: Optional[Dict[str, Optional[str]]]) -> Dict[str, Any]:
     """Whether what is saved in the database is what this process is using.
 
-    Settings saved in the UI are supposed to beat `.env`: `apply_to_config()`
-    overlays them onto the in-memory config. It runs after every save -- but
-    a process that has only just started has not run it, so a restart can
-    leave the app using `.env` while the Settings page shows something else.
+    Settings saved in the UI beat `.env`: `apply_to_config()` overlays them onto
+    the in-memory config, in the lifespan before the feed starts and again after
+    every save. When that holds, this reports nothing.
 
-    That divergence is invisible everywhere except here, and it is exactly the
-    kind of thing a health page exists to catch: the operator configured a
-    token, the feed is using a different one (or none), and nothing says so.
-    Values are compared but never reported -- only the key names differ.
+    It is checked anyway because the failure is silent. Until 2026-09-17 the
+    startup call did not exist, and every restart quietly reverted the running
+    configuration to `.env` while the Settings page went on showing the stored
+    values -- the feed used the wrong credentials and nothing said so. This
+    check is what found it. It still earns its place: a token that cannot be
+    decrypted (a rotated `APP_ENCRYPTION_KEY`) falls back to `.env` by design,
+    and a future refactor that drops the startup call would otherwise be
+    invisible again.
+
+    Values are compared but never reported -- only key names leave this
+    function, because the decrypted access token is among them.
     """
     if stored is None:
         return {
@@ -267,10 +273,12 @@ def _stored_settings_health(stored: Optional[Dict[str, Optional[str]]]) -> Dict[
             None
             if not differing
             else (
-                "Saved settings are NOT in effect in this process. "
-                "apply_to_config() runs when settings are saved; a restart since "
-                "then has left the running configuration on its .env values. "
-                "Re-save on the Settings page to apply them."
+                "Saved settings are NOT in effect in this process, which should "
+                "not happen -- they are applied at startup and on every save. "
+                "The usual cause is a stored value that could not be read, such "
+                "as a token encrypted under a rotated APP_ENCRYPTION_KEY, which "
+                "falls back to .env by design. Re-save on the Settings page, and "
+                "check app.log for a decryption warning."
             )
         ),
     }

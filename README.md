@@ -703,18 +703,6 @@ not carried over.
 
 ## Known gaps
 
-* **Settings saved in the UI do not survive a restart into the running
-  configuration.** `SettingsService.apply_to_config()` overlays stored settings
-  onto the in-memory config, and it is called from `save()` **only** — nothing
-  calls it during startup. So a process that restarts after a save runs on its
-  `.env` values while the Settings page still shows what was saved: a Dhan
-  token configured in the UI is silently not the one the feed uses. Found while
-  verifying the system health page, which now detects and reports the
-  divergence (Credentials card, and a line in the headline summary) — but
-  detecting it is not fixing it. **Workaround: re-save on the Settings page
-  after every restart.** Note this contradicts what `CLAUDE.md` §4 and
-  `backend/CLAUDE.md` §7 claim; the documentation describes the intent, the
-  code does not implement it.
 * **The system health page's process metrics need `psutil`.** Memory, CPU, open
   file descriptors and the OS thread count come from it; if it is ever missing
   the card says the figures are unavailable rather than guessing. The CPU

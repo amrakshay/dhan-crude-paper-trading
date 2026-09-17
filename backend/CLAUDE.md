@@ -161,16 +161,19 @@ by-expiry / by-strike slices and the equity curve possible at all.
 
 - `SettingsService.apply_to_config()` mutates the in-memory config dict from
   `config_utils`. That is deliberate: it means every existing caller picks up the
-  UI value without touching a single call site. It runs after each save.
+  UI value without touching a single call site. It runs in the lifespan
+  **before the feed starts** (`main.py::_apply_stored_settings`), and again
+  after each save.
 
-  > **It does NOT run at startup**, although this file previously said it ran
-  > "in the lifespan before the feed starts". `apply_to_config()` is called
-  > from `save()` and nowhere else -- verified 2026-09-17 by the system health
-  > page, which now reports the divergence between what is stored and what the
-  > process is actually using. Consequence: after a restart the app runs on
-  > `.env`, so a token saved in the UI is not the one the feed uses. Fix by
-  > calling it in `main.py`'s lifespan before `get_feed_manager().start()`,
-  > then delete this note and the matching one in the root `CLAUDE.md`.
+  **Do not move or drop the startup call.** It was missing until 2026-09-17 --
+  `apply_to_config()` was reached only from `save()` -- so every restart
+  silently reverted the running configuration to `.env` while the Settings page
+  went on showing the stored values. Nothing failed; the feed just used the
+  wrong credentials. The system health page is what caught it, and
+  `tests/test_startup_applies_stored_settings.py` now pins both the call and
+  its position relative to `get_feed_manager().start()`. The startup call is
+  also what registers a database-only token with `log_redaction`, via
+  `load_stored()`.
 - Only keys in `MANAGED_KEYS` are ever read back out, so a stray row cannot start
   influencing configuration.
 - **Secrets go in `encrypted_value`, never `value`** — the repository enforces
