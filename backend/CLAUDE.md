@@ -513,6 +513,15 @@ tick accumulation that rule forbids; read that before touching this.
   `daily_bars.request_delay_seconds` is the real limiter, and 0.6 s is the
   interval the research project measured as safe. Lowering it chooses a ban
   over a slow overnight job.
+- **The refresh reports progress, and a watcher cannot kill it.**
+  `refresh_strategy(on_progress=...)` is called before each symbol, so the name
+  on screen is the one being fetched rather than the one just finished -- which
+  is what makes a stalled run point at the symbol that stalled it. The callback
+  is wrapped in a try/except that swallows everything: a stalled progress bar
+  is a nuisance, a refresh that died because something watching it raised would
+  leave the rotation deciding on stale bars. The scheduler holds the result in
+  `self.progress` and clears it on `_begin` and `_idle`, so a finished job never
+  leaves a bar on the screen and a new job never inherits the last one's.
 - **One symbol failing does not end the run.** 499 refreshed and one error is a
   reportable state; an exception that abandons the other 498 is not.
 - **No credentials means no bars.** There is no synthetic fallback on this path

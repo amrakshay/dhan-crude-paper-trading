@@ -31,6 +31,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { swingApi } from '../api/swing';
 import SwingConfiguration from '../components/SwingConfiguration';
 import SwingHealth from '../components/SwingHealth';
+import JobProgress from '../components/JobProgress';
 import SwingExplainer from '../components/SwingExplainer';
 import { useAuth } from '../auth/AuthContext';
 import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
@@ -407,12 +408,19 @@ function ActivityStrip({ status }) {
         </Stack>
 
         <Stack direction="row" spacing={1} alignItems="center">
-          {scheduler.activity ? <CircularProgress size={14} /> : null}
+          {scheduler.activity && !scheduler.progress ? (
+            <CircularProgress size={14} />
+          ) : null}
           <Typography variant="body2" sx={{ fontWeight: 500 }}>
             {activity}
           </Typography>
         </Stack>
       </Stack>
+
+      {/* A long job's progress, where somebody watching the strategy is
+          already looking. The spinner above gives way to it: a spinner beside
+          a bar is two claims about the same thing. */}
+      <JobProgress progress={scheduler.progress} compact />
 
       {/* An enabled strategy that is not armed decides and places nothing.
           Said here, in the strip, because this is the panel somebody looks at

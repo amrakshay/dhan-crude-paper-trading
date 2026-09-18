@@ -977,6 +977,13 @@ same plain words as the rest of the page, in six panels:
   and says nothing; that is the failure this tab exists to make visible. Plus
   how many instruments it holds on the shared feed and when the subscription was
   last rebuilt.
+* **A progress bar for whatever long job is running.** The nightly bar refresh
+  is ~500 symbols at the rate limiter's 0.6 s — twelve minutes, during which
+  "it is working" and "it has hung" look identical if the screen says only
+  *refreshing daily bars*. It shows the percentage, the symbol being fetched,
+  elapsed time and an estimated finish extrapolated from the run's own pace.
+  It appears on the Live tab's status strip too, and it is absent — not an
+  empty bar — whenever no long job is running.
 * **What it will do next, and what it last did** — the schedule in full, both
   times shown as *what it ships with* beside *what is in force*, and the last
   run of each kind **from the journal** rather than from the in-memory run list,

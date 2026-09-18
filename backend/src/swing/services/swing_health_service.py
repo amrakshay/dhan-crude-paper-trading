@@ -317,6 +317,11 @@ class SwingHealthService:
             "enabled": status.get("enabled"),
             "activity": status.get("activity"),
             "activitySinceIst": status.get("activitySinceIst"),
+            # How far through a long job it is. None when nothing long is
+            # running -- the nightly bar refresh is twelve minutes at Dhan's
+            # rate limits, which is long enough that "working" and "hung" look
+            # identical without this.
+            "progress": status.get("progress"),
             "intervalSeconds": status.get("intervalSeconds"),
             "warmupMinutes": status.get("warmupMinutes"),
             "clockChecks": status.get("runs"),

@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src import config_utils
 from src.core.time_utils import IST, ist_today
@@ -176,6 +176,27 @@ def candle_to_row(
     }
 
 
+def _report(
+    on_progress: Optional[Callable[[int, int, str], None]],
+    done: int,
+    total: int,
+    symbol: str,
+) -> None:
+    """Call a progress callback without ever letting it end the run.
+
+    A refresh that died because something watching it raised would be a far
+    worse bug than a progress bar that stopped moving, so this swallows
+    everything and logs at DEBUG. Nothing here is on the tick path; this loop
+    already sleeps 0.6 s per symbol.
+    """
+    if on_progress is None:
+        return
+    try:
+        on_progress(done, total, symbol)
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.debug("A daily-bar progress callback raised; ignoring it", exc_info=True)
+
+
 class DailyBarRefreshService:
     """Tops up `daily_bars` for everything a strategy reads."""
 
@@ -275,6 +296,7 @@ class DailyBarRefreshService:
         only_symbols: Optional[List[str]] = None,
         force_full: bool = False,
         commit_each_symbol: bool = True,
+        on_progress: Optional[Callable[[int, int, str], None]] = None,
     ) -> RefreshResult:
         """Top every symbol up to `as_of` (default: today in IST).
 
@@ -293,6 +315,15 @@ class DailyBarRefreshService:
 
         Pass False only when the caller owns the transaction and knows the
         batch is small.
+
+        `on_progress(done, total, symbol)` is called after each symbol, for
+        anything that wants to SHOW the run rather than wait for it. Five
+        hundred symbols at the rate limiter's 0.6 s is twelve minutes, which is
+        long enough that "it is doing something" and "it has hung" look
+        identical without it. It is synchronous, must be cheap, and cannot
+        break the run: it is called inside a try/except that swallows
+        everything, because a reporting callback that killed a refresh would be
+        a far worse bug than a stalled progress bar.
         """
         started = time.perf_counter()
         as_of = as_of or ist_today()
@@ -330,7 +361,12 @@ class DailyBarRefreshService:
         delay = self._request_delay()
         bootstrap = timedelta(days=self._bootstrap_days())
 
+        total = len(targets)
         for index, (symbol, segment, security_id, instrument) in enumerate(targets):
+            # Reported BEFORE the work, so the name on screen is the one being
+            # fetched rather than the one just finished -- which is what makes
+            # a stalled run point at the symbol that stalled it.
+            _report(on_progress, index, total, symbol)
             entry = SymbolRefresh(
                 symbol=symbol, exchange_segment=segment, security_id=security_id
             )
@@ -393,6 +429,7 @@ class DailyBarRefreshService:
                 await self.repository.session.commit()
                 self.repository.session.expunge_all()
 
+        _report(on_progress, total, total, "")
         result.duration_seconds = time.perf_counter() - started
         logger.info(
             "Daily bar refresh for %s as of %s: %s refreshed, %s failed, "

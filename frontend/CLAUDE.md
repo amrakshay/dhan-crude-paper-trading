@@ -418,6 +418,16 @@ than anywhere except the health page.
     list, and stop-watcher counters kept once per process across every
     strategy. The server sends each note; the tab renders it rather than
     composing its own.
+- **`JobProgress.jsx` is rendered by BOTH tabs from the same field.** A long
+  job -- the twelve-minute bar refresh -- needs to be watchable from the strip
+  somebody is already looking at AND from the Health tab. One component, so the
+  two cannot drift into describing the same run differently. §3 applies: no
+  progress renders NOTHING rather than an empty bar (a job that has not started
+  and one stuck at 0% are different states), a total of zero says "nothing to
+  do" rather than dividing by it, the estimated finish is withheld until there
+  is enough of the run to extrapolate from and is labelled an estimate, and the
+  elapsed clock ticks locally off the server's `startedAtIst` so a job whose
+  updates stopped shows a clock running past a bar that is not moving.
 - **Four things MOVED off Live when Health was added**, because they are health
   rather than activity: the missed-runs date list (a one-line summary stays,
   pointing at Health), the twenty-row "Recent scheduled runs" table, the

@@ -659,3 +659,126 @@ def test_the_live_path_drops_a_phantom_candle_too():
         Candle(time=stamp, open=100.0, high=100.0, low=100.0, close=100.0, volume=25.0),
         "WELCORP", SEGMENT, "1",
     ) is not None
+
+
+# --- progress reporting -----------------------------------------------------
+async def test_the_refresh_reports_progress_for_every_symbol(
+    db_session, monkeypatch
+):
+    """Twelve minutes of work has to be watchable while it happens.
+
+    ~500 symbols at the rate limiter's 0.6 s is long enough that "working" and
+    "hung" are indistinguishable from the name of the job alone, which is what
+    the callback is for.
+    """
+    from src.daily_bars.database.db_operations.daily_bar_repository import (
+        DailyBarRepository,
+    )
+    from src.daily_bars.services import daily_bar_service as module
+    from src.instruments.database.db_operations.instrument_repository import (
+        InstrumentRepository,
+    )
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    definition = get_strategy_registry().get("nse-swing-momentum")
+    service = module.DailyBarRefreshService(
+        DailyBarRepository(db_session), InstrumentRepository(db_session)
+    )
+    monkeypatch.setattr(service, "_request_delay", lambda: 0.0)
+    monkeypatch.setattr(service.client, "has_credentials", lambda: True)
+
+    # Two symbols resolve; nothing is fetched, which is irrelevant here -- the
+    # subject is that the run is observable, not what it returns.
+    async def no_candles(**_kwargs):
+        return []
+
+    monkeypatch.setattr(service.client, "fetch_daily", no_candles)
+
+    seen = []
+    await service.refresh_strategy(
+        definition, on_progress=lambda done, total, symbol: seen.append(
+            (done, total, symbol)
+        )
+    )
+
+    assert seen, "a refresh that reports nothing is the bug this prevents"
+    # It counts UP and never past the total.
+    dones = [one[0] for one in seen]
+    assert dones == sorted(dones)
+    totals = {one[1] for one in seen}
+    assert len(totals) == 1, "the total must not move mid-run"
+    total = totals.pop()
+    assert dones[-1] == total, "the last report is the completed one"
+    # The last report carries no symbol: nothing is in flight any more.
+    assert seen[-1][2] == ""
+
+
+async def test_a_progress_callback_that_raises_cannot_kill_the_refresh(
+    db_session, monkeypatch
+):
+    """A reporting callback is not allowed to end a twelve-minute job.
+
+    A stalled progress bar is a nuisance; a refresh that died because something
+    watching it raised would leave the rotation deciding on stale bars. The
+    callback is swallowed deliberately.
+    """
+    from src.daily_bars.database.db_operations.daily_bar_repository import (
+        DailyBarRepository,
+    )
+    from src.daily_bars.services import daily_bar_service as module
+    from src.instruments.database.db_operations.instrument_repository import (
+        InstrumentRepository,
+    )
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    definition = get_strategy_registry().get("nse-swing-momentum")
+    service = module.DailyBarRefreshService(
+        DailyBarRepository(db_session), InstrumentRepository(db_session)
+    )
+    monkeypatch.setattr(service, "_request_delay", lambda: 0.0)
+    monkeypatch.setattr(service.client, "has_credentials", lambda: True)
+
+    async def no_candles(**_kwargs):
+        return []
+
+    monkeypatch.setattr(service.client, "fetch_daily", no_candles)
+
+    def explode(*_args):
+        raise RuntimeError("the thing watching the run fell over")
+
+    result = await service.refresh_strategy(definition, on_progress=explode)
+
+    assert result is not None, "the refresh completed despite the callback"
+
+
+def test_the_scheduler_clears_progress_when_it_goes_idle():
+    """None, not 0%. A finished job must not leave a bar on the screen.
+
+    "Not running" and "running, 0% done" are different states and only one of
+    them should draw a progress bar at all.
+    """
+    from src.swing.services.scheduler import SwingScheduler
+
+    scheduler = SwingScheduler()
+    scheduler._begin("refreshing daily bars for Test")  # noqa: SLF001
+    scheduler._set_progress(7, 500, "INFY")  # noqa: SLF001
+
+    assert scheduler.status()["progress"]["done"] == 7
+    assert scheduler.status()["progress"]["total"] == 500
+    assert scheduler.status()["progress"]["item"] == "INFY"
+
+    scheduler._idle()  # noqa: SLF001
+    assert scheduler.status()["progress"] is None
+
+
+def test_a_new_job_does_not_inherit_the_last_one_s_progress():
+    """Otherwise the next job starts life showing a finished bar."""
+    from src.swing.services.scheduler import SwingScheduler
+
+    scheduler = SwingScheduler()
+    scheduler._begin("refreshing daily bars for Test")  # noqa: SLF001
+    scheduler._set_progress(500, 500, "")  # noqa: SLF001
+    assert scheduler.status()["progress"]["done"] == 500
+
+    scheduler._begin("running the nightly decision for Test")  # noqa: SLF001
+    assert scheduler.status()["progress"] is None

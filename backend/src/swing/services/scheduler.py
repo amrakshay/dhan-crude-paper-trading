@@ -112,6 +112,11 @@ class SwingScheduler:
         # None means idle -- which is a real answer, not a missing one.
         self.activity: Optional[str] = None
         self.activity_since: Optional[datetime] = None
+        # How far through a long job it is, or None when nothing long is
+        # running. None is NOT zero percent: a job that has not started and
+        # a job that has done none of its work look identical as a number
+        # and are different states, so the pages render only the first.
+        self.progress: Optional[Dict[str, Any]] = None
 
     # --- configuration -----------------------------------------------------
     @staticmethod
@@ -327,11 +332,39 @@ class SwingScheduler:
     def _begin(self, activity: str) -> None:
         self.activity = activity
         self.activity_since = ist_now()
+        # A new activity owns its own progress. Leaving the previous job's
+        # behind would show a finished bar against a job that has not started
+        # counting.
+        self.progress = None
         logger.debug("Swing scheduler: %s", activity)
 
     def _idle(self) -> None:
         self.activity = None
         self.activity_since = None
+        self.progress = None
+
+    def _set_progress(self, done: int, total: int, item: str) -> None:
+        """How far through the current job it is.
+
+        Called from a worker's own loop, so it does nothing but assign a small
+        dict -- no I/O, no logging, no computation. The percentage and the
+        estimated finish are worked out by whoever RENDERS this, because they
+        are presentation and because the page already ticks once a second and
+        can move them between polls.
+
+        `total` of zero is reported as a total of zero rather than suppressed:
+        "nothing to do" is a real outcome of a refresh and reads differently
+        from "not running".
+        """
+        self.progress = {
+            "done": int(done),
+            "total": int(total),
+            "item": item or None,
+            "startedAtIst": (
+                self.activity_since.isoformat() if self.activity_since else None
+            ),
+            "atIst": ist_now().isoformat(),
+        }
 
     # --- the jobs -----------------------------------------------------------
     async def _warm(self, definition: StrategyDefinition) -> None:
@@ -465,7 +498,7 @@ class SwingScheduler:
             async with session_scope() as session:
                 result = await DailyBarRefreshService(
                     DailyBarRepository(session), InstrumentRepository(session)
-                ).refresh_strategy(definition)
+                ).refresh_strategy(definition, on_progress=self._set_progress)
                 await session.commit()
             return (
                 f"Bars: {len(result.refreshed)} refreshed, {len(result.failed)} "
@@ -707,6 +740,9 @@ class SwingScheduler:
             # answers and the page renders them differently.
             "running": self._task is not None and not self._task.done(),
             "activity": self.activity,
+            # None whenever nothing long is running, which the pages render
+            # as "no bar" rather than as an empty one.
+            "progress": self.progress,
             "activitySinceIst": (
                 self.activity_since.isoformat() if self.activity_since else None
             ),

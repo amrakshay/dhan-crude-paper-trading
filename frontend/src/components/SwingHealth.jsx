@@ -24,6 +24,7 @@ import { useTheme } from '@mui/material/styles';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { Link as RouterLink } from 'react-router-dom';
+import JobProgress from './JobProgress';
 import { formatCompact, formatQty, formatTime } from '../utils/format';
 
 /**
@@ -423,6 +424,12 @@ function ScheduleHealth({ health }) {
             />
           </Grid>
         </Grid>
+
+        {/* A long job, while it is running. The nightly bar refresh is twelve
+            minutes at Dhan's rate limits; without this the panel says only
+            that it is "refreshing daily bars" for twelve minutes, and a hung
+            run looks exactly the same as a working one. */}
+        <JobProgress progress={block.progress} activity={block.activity} />
 
         <Divider sx={{ my: 2 }} />
 
