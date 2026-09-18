@@ -37,6 +37,58 @@ labels:
   stamp_duty: "Stamp duty"
   gst: "GST"
 
+# ---------------------------------------------------------------------------
+# LEVIES -- what is charged, in what order, on which side.
+#
+# The engine knows four SHAPES (brokerage, flat_per_order, percent_of_turnover,
+# percent_of_components); the card says which line items exist. That is what
+# lets an NSE delivery card charge STT on both legs and a flat depository fee
+# per sell without either concept being written into Python.
+#
+# Order matters: a levy of kind percent_of_components may only reference line
+# items listed ABOVE it, and it reads their amounts AFTER any intermediate
+# rounding. This list reproduces exactly the six components this card has
+# charged since 2026-09-16 -- the rates themselves are unchanged and live in
+# the sections below, referenced by `rate_key`.
+# ---------------------------------------------------------------------------
+levies:
+  - name: "brokerage"
+    kind: "brokerage"
+
+  - name: "ctt"
+    kind: "percent_of_turnover"
+    rate_key: "ctt.sell_option_premium_rate"
+    sides: ["SELL"]
+    note: "Finance Act 2013 s.117 Sl.3: sale of option on commodity derivative"
+
+  - name: "exchange_transaction_charge"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.option_premium_rate"
+    note: "MCX circular MCX/F&A/631/2024: Rs 41.80 per lakh of premium turnover"
+
+  - name: "sebi_turnover_fee"
+    kind: "percent_of_turnover"
+    rate_key: "sebi_turnover_fee.rate"
+    intermediate_rounding: "paise_half_even"
+    note: "Rs 10 per crore, non-agri commodity derivatives"
+
+  - name: "stamp_duty"
+    kind: "percent_of_turnover"
+    rate_key: "stamp_duty.option_premium_rate"
+    sides: ["BUY"]
+    intermediate_rounding: "rupee_half_up"
+    note: "Indian Stamp Act rules 2019, buy side only"
+
+  - name: "gst"
+    kind: "percent_of_components"
+    rate_key: "gst.rate"
+    applies_to:
+      - "brokerage"
+      - "exchange_transaction_charge"
+      - "sebi_turnover_fee"
+    intermediate_rounding: "paise_half_up"
+    note: "Not applied to trade value, CTT or stamp duty"
+
 brokerage:
   # Discount-broker flat rate. Not a statutory charge -- set it to whatever
   # your broker actually charges.

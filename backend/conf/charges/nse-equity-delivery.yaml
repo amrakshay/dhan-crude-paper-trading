@@ -1,0 +1,263 @@
+# ===========================================================================
+# NSE EQUITY DELIVERY (CNC) CHARGE RATES
+#
+# One rate card. A strategy module names the card it is charged under
+# (`charges.rate_card` in conf/strategies/*.yaml); the ENGINE that applies a
+# card is generic, only the rates are not.
+#
+# Scope: delivery (CNC) trades in NSE cash-segment equity shares. This is a
+# different set of taxes from the commodity card, not the same taxes at
+# different rates:
+#
+#   * STT, not CTT, and on BOTH legs rather than the sell side only.
+#   * A flat depository (DP) charge on every delivery SELL -- a per-leg fee
+#     that is not brokerage and has no equivalent on the commodity card.
+#   * An NSE IPFT contribution alongside the transaction charge.
+#
+# Every rate carries a PRIMARY source URL and an as-of date. Update rates here
+# and nowhere else -- no rate is hardcoded in Python.
+#
+# Researched 2026-09-18.
+#
+# Confidence markers used below:
+#   CONFIRMED   - read verbatim from a primary source (NSE / SEBI /
+#                 incometaxindia.gov.in) or from the broker's own published
+#                 rate card
+#   UNCONFIRMED - no primary source obtained; value corroborated by brokers only
+#
+# BROKER: Dhan. The commercial (non-statutory) numbers here -- brokerage and
+# the DP charge -- are Dhan's published rates, chosen because Dhan is the
+# broker whose market data this application consumes. The statutory rates are
+# the same whoever the broker is.
+#
+# NOTE ON THE BACKTEST. The strategy specification's cost model
+# (SWING_MOMENTUM_HANDOFF.md section 5) uses an exchange transaction charge of
+# 0.00297% and a flat DP charge of Rs 16.00. Both are superseded here:
+#   * 0.00297% was NSE's rate from 1 Oct 2024 (circular NSE/FA/64232). It was
+#     revised to 0.0030699% + Rs 0.01/crore IPFT with effect from 1 March 2026
+#     (circular NSE/FA/73061). The backtest predates the change.
+#   * Rs 16.00 is not a rate this card can source; Dhan publishes Rs 12.50 plus
+#     GST. The specification's own comment marks its brokerage assumption as
+#     commercial rather than statutory, and the same caveat applies to its DP
+#     figure.
+# Live charges will therefore differ slightly from the backtest's. That is
+# expected and is reported, not tuned away.
+# ===========================================================================
+
+version: "2026-09-18"
+currency: "INR"
+
+labels:
+  # How each line item is printed. The UI takes the label from the CARD rather
+  # than keeping its own list, so a card that introduces a tax names it once,
+  # here, and every surface prints it correctly.
+  brokerage: "Brokerage"
+  stt: "STT"
+  exchange_transaction_charge: "Exchange transaction charge"
+  ipft: "NSE IPFT contribution"
+  sebi_turnover_fee: "SEBI turnover fee"
+  stamp_duty: "Stamp duty"
+  dp_charge: "Depository (DP) charge"
+  gst: "GST"
+
+# ---------------------------------------------------------------------------
+# LEVIES -- what is charged, in what order, on which side.
+#
+# Order matters: a levy of kind percent_of_components may only reference line
+# items listed ABOVE it, and it reads their amounts AFTER any intermediate
+# rounding.
+# ---------------------------------------------------------------------------
+levies:
+  - name: "brokerage"
+    kind: "brokerage"
+
+  - name: "stt"
+    kind: "percent_of_turnover"
+    rate_key: "stt.delivery_rate"
+    # BOTH legs. This is the substantive difference from the commodity card,
+    # where CTT is charged on the sell side only.
+    sides: ["BUY", "SELL"]
+    intermediate_rounding: "rupee_half_up"
+    note: >-
+      Finance (No. 2) Act 2004 Chapter VII: delivery-based purchase and sale of
+      an equity share, 0.1% of the transaction value, each side.
+
+  - name: "exchange_transaction_charge"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.cash_market_rate"
+    note: "NSE circular NSE/FA/73061: Rs 306.99 per crore of traded value, each side"
+
+  - name: "ipft"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.ipft_rate"
+    note: "NSE Investor Protection Fund Trust contribution, Rs 0.01 per crore each side"
+
+  - name: "sebi_turnover_fee"
+    kind: "percent_of_turnover"
+    rate_key: "sebi_turnover_fee.rate"
+    intermediate_rounding: "paise_half_even"
+    note: "Rs 10 per crore of turnover, cash market"
+
+  - name: "stamp_duty"
+    kind: "percent_of_turnover"
+    rate_key: "stamp_duty.delivery_rate"
+    sides: ["BUY"]
+    intermediate_rounding: "rupee_half_up"
+    note: "Indian Stamp Act Schedule I Article 56A(b), delivery basis, buy side only"
+
+  - name: "dp_charge"
+    kind: "flat_per_order"
+    amount: 12.50
+    sides: ["SELL"]
+    note: >-
+      Depository charge, levied per ISIN per day on a delivery sell regardless
+      of quantity. Charged here PER ORDER, which overstates the cost if the
+      same scrip is sold in more than one order on one day -- an error in the
+      pessimistic direction. This strategy sells a whole position in a single
+      order, and a partially-filled order is charged once.
+
+  - name: "gst"
+    kind: "percent_of_components"
+    rate_key: "gst.rate"
+    applies_to:
+      - "brokerage"
+      - "exchange_transaction_charge"
+      - "ipft"
+      - "sebi_turnover_fee"
+      - "dp_charge"
+    intermediate_rounding: "paise_half_up"
+    note: >-
+      Not applied to trade value, STT or stamp duty. The depository charge IS
+      in the base: Dhan publishes "Rs 12.50 / instruction / ISIN + GST", and
+      Zerodha's published DP total of Rs 15.34 is itemised as Rs 3.50 + Rs 9.50
+      + Rs 2.34 GST, which is 18% of Rs 13.00.
+
+brokerage:
+  # Zero-brokerage delivery. COMMERCIAL, not statutory -- set it to whatever
+  # your broker actually charges.
+  mode: "flat"
+  flat_per_order: 0.00
+  percentage_of_turnover: 0.0
+  include_strike_in_base: false
+  # source (primary): https://dhan.co/pricing/ -- "Rs 0 (Zero Brokerage)" on
+  #   equity delivery, buy and sell.
+  # source (secondary): https://zerodha.com/charges/ -- "Zero Brokerage" on
+  #   equity delivery, i.e. the figure is not specific to one broker.
+  # as-of: 2026-09-18
+  # confidence: CONFIRMED (broker's own published rate; commercial, not statutory)
+
+stt:
+  # Securities Transaction Tax -- NOT CTT. Equity shares attract STT; commodity
+  # derivatives attract CTT (see conf/charges/mcx-commodity-options.yaml). They
+  # are different taxes on different transactions under different statutes.
+  #
+  # Legal basis: Chapter VII of the Finance (No. 2) Act 2004, section 98, as
+  # amended. "Purchase of an equity share in a company ... where the
+  # transaction of such purchase is entered into in a recognised stock exchange
+  # and the contract for the purchase is settled by the actual delivery or
+  # transfer" -- 0.1%, payable by the purchaser. The corresponding sale entry
+  # is 0.1%, payable by the seller.
+  #
+  # TRAP: the 0.025% entry in the same table is the INTRADAY (non-delivery)
+  # sale rate, and applies to the sell side only. It must NOT be used here:
+  # this strategy holds for about a month and every leg is a delivery trade.
+  delivery_rate: 0.001                 # 0.10% of transaction value, EACH side
+  # source (primary): https://incometaxindia.gov.in/pages/acts/securities-transaction-tax.aspx
+  # source (secondary): https://dhan.co/pricing/  ("0.1% on buy & sell")
+  # source (secondary): https://zerodha.com/charges/  ("0.1% on buy & sell")
+  # as-of: 2026-09-18   confidence: CONFIRMED
+
+exchange_transaction_charge:
+  # -------------------------------------------------------------------------
+  # NSE cash market, charged per side on traded value.
+  #
+  # Current structure, effective 1 March 2026 (circular NSE/FA/73061, dated
+  # 27 February 2026), which split the unchanged Rs 307 per crore total
+  # differently between the two lines:
+  #
+  #   Transaction charges        Rs 306.99 per crore each side
+  #   Contribution to NSE IPFT   Rs   0.01 per crore each side
+  #   Total                      Rs 307.00 per crore each side
+  #
+  # Before that date (circular NSE/FA/64232, effective 1 October 2024) it was
+  # Rs 2.97 per lakh = Rs 297 per crore of transaction charges plus Rs 10 per
+  # crore of IPFT, for the same Rs 307 total. The strategy specification's cost
+  # model uses the old Rs 297 figure.
+  # -------------------------------------------------------------------------
+  cash_market_rate: 0.0000306990       # Rs 306.99 per crore of traded value
+  ipft_rate: 0.000000001               # Rs 0.01 per crore of traded value
+  # source (primary): NSE circular NSE/FA/73061 dated 27 Feb 2026, effective
+  #   01 Mar 2026 -- https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+  # source (primary, superseded): NSE circular NSE/FA/64232 dated 27 Sep 2024,
+  #   effective 01 Oct 2024 (Rs 2.97 per lakh) --
+  #   https://nsearchives.nseindia.com/content/circulars/FA64232.pdf
+  # source (secondary): https://dhan.co/pricing/  ("NSE: 0.0030699%")
+  # source (secondary): https://zerodha.com/charges/  ("0.00307%", the total)
+  # as-of: 2026-09-18   confidence: CONFIRMED
+
+sebi_turnover_fee:
+  # Rs 10 per crore of turnover in the cash market.
+  rate: 0.000001                       # Rs 10 per crore
+  # source (primary, rate cut to Rs 10/cr): SEBI board memorandum Mar 2019 --
+  #   https://www.sebi.gov.in/sebi_data/meetingfiles/mar-2019/1553244864312_1.pdf
+  # source (secondary): https://zerodha.com/charges/  ("Rs 10 / crore")
+  # source (secondary): https://dhan.co/pricing/  ("0.0001% of the turnover")
+  # as-of: 2026-09-18
+  # confidence: CONFIRMED for the rate. The operative schedule wording in the
+  #   SEBI (Payment of Fees) (Amendment) Regulations 2019 did not render when
+  #   fetched, so the REGULATION TEXT ITSELF IS UNVERIFIED -- the value is
+  #   corroborated by two brokers. Same caveat as the commodity card.
+
+stamp_duty:
+  # Uniform nationwide rate under the Indian Stamp (Collection of Stamp Duty
+  # through Stock Exchanges...) Rules 2019, implemented 1 July 2020.
+  # BUY SIDE ONLY, on traded value.
+  #
+  # Schedule I Article 56A(b): transfer of a security other than a debenture,
+  # on a DELIVERY basis -- 0.015%, i.e. Rs 1,500 per crore. The 0.003% entry in
+  # the same article is the non-delivery (intraday) rate and is not this.
+  delivery_rate: 0.00015               # 0.015% = Rs 1,500 per crore, buy side
+  # source (secondary): https://zerodha.com/charges/
+  #   ("0.015% or Rs 1500 / crore on buy side")
+  # source (secondary): https://dhan.co/pricing/
+  #   ("0.015% on turnover of buy orders")
+  # as-of: 2026-09-18
+  # confidence: UNCONFIRMED against the gazette text of the amended Schedule I.
+  #   The rate is consistent across every broker checked and matches the
+  #   strategy specification's own 0.015%, but no primary citation was
+  #   obtained. TODO if a formal audit needs one.
+
+gst:
+  # 18% on (brokerage + exchange transaction charge + IPFT + SEBI turnover fee
+  # + DP charge). NOT on the trade value, NOT on STT, NOT on stamp duty.
+  rate: 0.18
+  applies_to:
+    - "brokerage"
+    - "exchange_transaction_charge"
+    - "ipft"
+    - "sebi_turnover_fee"
+    - "dp_charge"
+  # source (secondary): https://dhan.co/pricing/ -- "18% on brokerage +
+  #   transaction charges + SEBI Turnover + IPFT/Other Tax"
+  # source (secondary): https://zerodha.com/charges/ -- "18% on (brokerage +
+  #   SEBI charges + transaction charges)", and its DP total of Rs 15.34
+  #   itemised as Rs 3.50 + Rs 9.50 + Rs 2.34 GST
+  # as-of: 2026-09-18
+  # confidence: UNCONFIRMED against a primary CBIC/GST notification. The rate
+  #   and its base are consistent across every broker checked, but no statutory
+  #   citation was obtained. Same caveat as the commodity card.
+
+rounding:
+  #   exact             - no intermediate rounding; only the final total is
+  #                       quantised to 2dp. Most defensible, and the default.
+  #   broker_compatible - reproduces the broker's displayed contract note. Dhan
+  #                       states that "all charges except STT and stamp duty
+  #                       are rounded off to the nearest 2 decimals" while
+  #                       "STT and stamp duty are rounded off to the nearest
+  #                       rupee", which is what the per-levy
+  #                       intermediate_rounding entries above encode.
+  #
+  # source (broker rounding policy): https://dhan.co/pricing/
+  # as-of: 2026-09-18
+  mode: "exact"
+  final_total_decimal_places: 2

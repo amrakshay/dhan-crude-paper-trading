@@ -551,6 +551,156 @@ class ChargesEngine:
         turnover = self.compute_turnover(premium, lot_size, lots)
         return self._compute(side, turnover, strike_price, lot_size, lots)
 
+    # --- levies: what the card says to charge, in the order it says --------
+    #
+    # A levy is one line item. The ENGINE knows three shapes; the CARD says
+    # which line items exist, in what order, on which side, and at what rate.
+    # That is what lets an NSE delivery card charge STT on BOTH legs and a
+    # flat depository fee per sell without either concept existing in Python.
+    INTERMEDIATE_ROUNDINGS = {
+        "paise_half_even": (PAISE, ROUND_HALF_EVEN),
+        "paise_half_up": (PAISE, ROUND_HALF_UP),
+        "rupee_half_up": (RUPEE, ROUND_HALF_UP),
+    }
+
+    def levies(self) -> List[Dict[str, Any]]:
+        declared = self.rates.get("levies")
+        if not declared:
+            raise ChargesConfigError(
+                f"Rate card {self._rate_card!r} declares no 'levies'. The engine "
+                f"charges what the card lists; it has no default set of taxes."
+            )
+        if not isinstance(declared, list):
+            raise ChargesConfigError(
+                f"Rate card {self._rate_card!r}: 'levies' must be a list."
+            )
+        return [dict(one) for one in declared]
+
+    def _rate_from_key(self, key: str) -> Decimal:
+        node: Any = self.rates
+        for part in str(key).split("."):
+            if not isinstance(node, dict) or part not in node:
+                raise ChargesConfigError(
+                    f"Rate card {self._rate_card!r}: missing rate '{key}'"
+                )
+            node = node[part]
+        return _decimal(node, key)
+
+    @staticmethod
+    def _levy_applies(levy: Dict[str, Any], side: str) -> bool:
+        sides = levy.get("sides")
+        if not sides:
+            return True
+        return str(side).upper() in {str(one).upper() for one in sides}
+
+    def _intermediate(self, levy: Dict[str, Any], amount: Decimal) -> Decimal:
+        """Round a component before it feeds the total, per the card's mode.
+
+        Only in `broker_compatible` mode. In `exact` mode nothing is rounded
+        until the final total, which is the more defensible arithmetic and the
+        default.
+        """
+        rounding = levy.get("intermediate_rounding")
+        if not rounding or self.rounding_mode != "broker_compatible":
+            return amount
+        try:
+            exponent, mode = self.INTERMEDIATE_ROUNDINGS[str(rounding)]
+        except KeyError as exc:
+            raise ChargesConfigError(
+                f"Rate card {self._rate_card!r}: levy {levy.get('name')!r} asks for "
+                f"intermediate_rounding {rounding!r}; known: "
+                f"{sorted(self.INTERMEDIATE_ROUNDINGS)}"
+            ) from exc
+        return amount.quantize(exponent, rounding=mode)
+
+    def _compute_levy(
+        self,
+        levy: Dict[str, Any],
+        side: str,
+        turnover: Decimal,
+        strike_price: Optional[Decimal],
+        lot_size: int,
+        lots,
+        computed: Dict[str, Decimal],
+    ) -> ChargeComponent:
+        name = str(levy.get("name") or "")
+        if not name:
+            raise ChargesConfigError(
+                f"Rate card {self._rate_card!r}: every levy needs a 'name'."
+            )
+        kind = str(levy.get("kind") or "percent_of_turnover")
+        note = str(levy.get("note") or "")
+
+        if kind == "brokerage":
+            component = self.compute_brokerage(turnover, strike_price, lot_size, lots)
+            if not self._levy_applies(levy, side):
+                return ChargeComponent(
+                    name=name, amount=ZERO, rate=component.rate, base=ZERO,
+                    formula=f"not charged on the {side.lower()} side",
+                    note=note or component.note,
+                )
+            return component
+
+        if kind == "flat_per_order":
+            amount = _decimal(levy.get("amount"), f"levies.{name}.amount")
+            if not self._levy_applies(levy, side):
+                return ChargeComponent(
+                    name=name, amount=ZERO, base=ZERO,
+                    formula=f"not charged on the {side.lower()} side", note=note,
+                )
+            return ChargeComponent(
+                name=name, amount=amount, base=None,
+                formula=f"flat Rs {amount} per executed order", note=note,
+            )
+
+        if kind == "percent_of_turnover":
+            rate = (
+                self._rate_from_key(levy["rate_key"])
+                if levy.get("rate_key")
+                else _decimal(levy.get("rate"), f"levies.{name}.rate")
+            )
+            if not self._levy_applies(levy, side):
+                return ChargeComponent(
+                    name=name, amount=ZERO, rate=rate, base=ZERO,
+                    formula=f"not charged on the {side.lower()} side", note=note,
+                )
+            return ChargeComponent(
+                name=name, amount=rate * turnover, rate=rate, base=turnover,
+                formula=f"{rate} x {turnover}", note=note,
+            )
+
+        if kind == "percent_of_components":
+            rate = (
+                self._rate_from_key(levy["rate_key"])
+                if levy.get("rate_key")
+                else _decimal(levy.get("rate"), f"levies.{name}.rate")
+            )
+            applies_to = [str(one) for one in (levy.get("applies_to") or [])]
+            unknown = [one for one in applies_to if one not in computed]
+            if unknown:
+                raise ChargesConfigError(
+                    f"Rate card {self._rate_card!r}: levy {name!r} applies to "
+                    f"{unknown}, which is not computed before it. A levy may only "
+                    f"reference line items listed earlier."
+                )
+            base = sum((computed[one] for one in applies_to), ZERO)
+            if not self._levy_applies(levy, side):
+                return ChargeComponent(
+                    name=name, amount=ZERO, rate=rate, base=ZERO,
+                    formula=f"not charged on the {side.lower()} side", note=note,
+                )
+            return ChargeComponent(
+                name=name, amount=rate * base, rate=rate, base=base,
+                formula=f"{rate} x ({' + '.join(applies_to)}) = {rate} x {base}",
+                note=note,
+            )
+
+        raise ChargesConfigError(
+            f"Rate card {self._rate_card!r}: levy {name!r} has unknown kind "
+            f"{kind!r}. Known kinds: brokerage, flat_per_order, "
+            f"percent_of_turnover, percent_of_components."
+        )
+
     def _compute(
         self,
         side: str,
@@ -559,63 +709,44 @@ class ChargesEngine:
         lot_size: int,
         lots,
     ) -> ChargeBreakdown:
-        """Shared charge computation over a turnover figure."""
-        brokerage = self.compute_brokerage(turnover, strike_price, lot_size, lots)
-        ctt = self.compute_ctt(side, turnover)
-        exchange_charge = self.compute_exchange_transaction_charge(turnover)
-        sebi_fee = self.compute_sebi_turnover_fee(turnover)
-        stamp_duty = self.compute_stamp_duty(side, turnover)
+        """Shared charge computation over a turnover figure.
 
-        sebi_amount, stamp_amount = self._apply_intermediate_rounding(
-            sebi_fee.amount, stamp_duty.amount
-        )
-        gst = self.compute_gst(brokerage.amount, exchange_charge.amount, sebi_amount)
-        gst_amount = gst.amount
-        if self.rounding_mode == "broker_compatible":
-            gst_amount = gst_amount.quantize(PAISE, rounding=ROUND_HALF_UP)
+        One pass over the card's levies, in the card's order. A levy that
+        depends on other line items (GST) reads their EFFECTIVE amounts -- the
+        ones after any intermediate rounding -- which is why the order is the
+        card's business and not a fixed list here.
+        """
+        computed: Dict[str, Decimal] = {}
+        components: List[ChargeComponent] = []
+        total = ZERO
 
-        total = (
-            brokerage.amount
-            + ctt.amount
-            + exchange_charge.amount
-            + sebi_amount
-            + stamp_amount
-            + gst_amount
-        )
+        for levy in self.levies():
+            component = self._compute_levy(
+                levy, side, turnover, strike_price, lot_size, lots, computed
+            )
+            effective = self._intermediate(levy, component.amount)
+            computed[component.name] = effective
+            total += effective
+            components.append(
+                component.rounded(self._round_money(effective)).with_label(
+                    self.label_for(component.name)
+                )
+            )
 
-        # Unrounded component values, so a disputed total can be traced back to
-        # the exact arithmetic that produced it rather than to the 2dp figures
-        # the API returns.
         logger.debug(
             "Charges (%s, turnover=%s, rates=%s, rounding=%s) before rounding: "
-            "brokerage=%s ctt=%s exchange=%s sebi=%s (raw %s) stamp=%s (raw %s) "
-            "gst=%s total=%s",
+            "%s total=%s",
             side, turnover, self.version, self.rounding_mode,
-            brokerage.amount, ctt.amount, exchange_charge.amount,
-            sebi_amount, sebi_fee.amount, stamp_amount, stamp_duty.amount,
-            gst_amount, total,
+            {name: str(value) for name, value in computed.items()}, total,
         )
 
         # Each component carries its FINAL rounded amount and the raw figure it
-        # came from. The total is still the rounded sum of the raw components,
-        # not the sum of the rounded ones -- rounding each line first would
-        # change totals that have been verified against a broker calculator.
-        # The two can therefore differ by a paisa, which is a property of
-        # rounding rather than an error, and is why the raw amount is kept.
-        components = [
-            component.rounded(self._round_money(amount)).with_label(
-                self.label_for(component.name)
-            )
-            for component, amount in (
-                (brokerage, brokerage.amount),
-                (ctt, ctt.amount),
-                (exchange_charge, exchange_charge.amount),
-                (sebi_fee, sebi_amount),
-                (stamp_duty, stamp_amount),
-                (gst, gst_amount),
-            )
-        ]
-
+        # came from. The total is still the rounded sum of the EFFECTIVE
+        # components, not the sum of the rounded ones -- rounding each line
+        # first would change totals that have been verified against a broker
+        # calculator. The two can therefore differ by a paisa, which is a
+        # property of rounding rather than an error, and is why the raw amount
+        # is kept.
         return ChargeBreakdown(
             turnover=self._round_money(turnover),
             total=self._round_money(total),
