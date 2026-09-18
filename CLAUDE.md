@@ -243,6 +243,20 @@ The distinction to keep is **provenance, not durability**: fetched bars may be
 stored; ticks may not be accumulated into bars. If you find yourself writing
 `daily_bars` rows from `MarketBook`, you are on the wrong side of it.
 
+**A job that has done its work is DONE, not due for a retry.** `RETRY_AFTER`
+bounds how often a FAILED job is tried again; it must never be what decides
+whether a successful one runs again. The nightly is deliberately unbounded at
+the top end -- recording what the stored data says is valid at any hour -- and
+until 2026-09-18 that combination made it re-run every fifteen minutes from
+18:15 until midnight, each time pulling five hundred symbols from Dhan and each
+time correctly deciding nothing because the journal already held the session.
+Roughly 3,500 wasted requests in two hours. Two guards now: `_succeeded`
+in memory for a running process, and `SwingSessionRepository.ran_on_day` --
+keyed on when the job RAN, not on the session it decided -- for a restart,
+because a restart clears the memory and is how the same pull got repeated all
+evening. A run whose REFRESH FAILED is not marked done, so credentials fixed at
+18:30 still get bars at 18:45.
+
 **The rotation decides on a clock, and a missed run is reported.** The nightly
 job (18:15 IST) refreshes the bars, decides, ratchets every trailing stop and
 journals; the rebalance (09:16) trades. Idempotence comes from the JOURNAL

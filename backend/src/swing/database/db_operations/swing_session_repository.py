@@ -134,6 +134,37 @@ class SwingSessionRepository(_AppendOnly, BaseRepository[SwingSession]):
         )
         return sorted({value for value in result.scalars().all() if value})
 
+    async def ran_on_day(
+        self, strategy_key: str, run_kind: str, day: date
+    ) -> bool:
+        """Did this job already RUN on that IST day? Keyed on `started_at`.
+
+        Deliberately not `session_date`: that is the regime index's newest bar
+        date, which does not move on a day the vendor has published nothing, so
+        it cannot answer "have I already done tonight's work". `started_at` is
+        when the job ran, which is exactly the question.
+
+        This is the durable half of the once-a-day guard. The in-memory half
+        (`SwingScheduler._succeeded`) is what stops a running process
+        re-attempting; this is what stops a RESTART doing it, and a restart is
+        how a twelve-minute five-hundred-symbol refresh got run eight times in
+        one evening before it was caught.
+        """
+        from src.core.time_utils import ist_day_bounds_utc
+
+        start, end = ist_day_bounds_utc(day)
+        result = await self.session.execute(
+            select(func.count(SwingSession.id)).where(
+                and_(
+                    SwingSession.strategy_key == strategy_key,
+                    SwingSession.run_kind == run_kind,
+                    SwingSession.started_at >= start,
+                    SwingSession.started_at < end,
+                )
+            )
+        )
+        return int(result.scalar_one() or 0) > 0
+
     async def count_for(self, strategy_key: str) -> int:
         result = await self.session.execute(
             select(func.count(SwingSession.id)).where(

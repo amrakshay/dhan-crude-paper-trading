@@ -52,6 +52,13 @@ TASK_NAME = "swing-scheduler"
 # How long to wait before retrying a job that FAILED. Without it a failing
 # nightly would retry every thirty seconds until midnight and fill the log with
 # one problem repeated two thousand times.
+# HOW LONG BEFORE A FAILED JOB IS TRIED AGAIN. Failure only: a job that has
+# SUCCEEDED today is not retried at all (see `_succeeded`). That distinction is
+# the whole point and was missing until 2026-09-18, when the nightly -- which
+# has no upper time bound on purpose -- re-ran every fifteen minutes from 18:15
+# onwards, each time pulling five hundred symbols from Dhan and each time
+# correctly deciding nothing, because the journal had already recorded the
+# session. Roughly 3,500 wasted requests in two hours before it was noticed.
 RETRY_AFTER = timedelta(minutes=15)
 
 
@@ -105,6 +112,9 @@ class SwingScheduler:
         self.checked_for_missed_at: Optional[datetime] = None
         # (strategy_key, kind, IST date) -> when it was last attempted.
         self._attempted: Dict[tuple, datetime] = {}
+        # (strategy_key, kind, IST date) for jobs that have SUCCEEDED. A
+        # success is final for the day; only a failure is retried.
+        self._succeeded: set = set()
         self._warmed: Dict[tuple, bool] = {}
         # WHAT IT IS DOING RIGHT NOW, as a state rather than a log line. The
         # scheduler is the only thing that knows, and a page that says nothing
@@ -321,6 +331,11 @@ class SwingScheduler:
         Dhan outage -- retrying every thirty seconds and reporting the same
         problem two thousand times before midnight.
         """
+        # A job that has already done its work today is DONE, not due for a
+        # retry. Without this the nightly -- which is deliberately unbounded at
+        # the top end -- comes round again every RETRY_AFTER until midnight.
+        if (strategy_key, kind, today) in self._succeeded:
+            return False
         last = self._attempted.get((strategy_key, kind, today))
         if last is None:
             return True
@@ -328,6 +343,10 @@ class SwingScheduler:
 
     def _mark_attempted(self, strategy_key: str, kind: str, now: datetime) -> None:
         self._attempted[(strategy_key, kind, now.date())] = now
+
+    def _mark_succeeded(self, strategy_key: str, kind: str, now: datetime) -> None:
+        """Done for today. Only a FAILED job comes round again."""
+        self._succeeded.add((strategy_key, kind, now.date()))
 
     def _begin(self, activity: str) -> None:
         self.activity = activity
@@ -434,9 +453,31 @@ class SwingScheduler:
         """
         run = JobRun(strategy_key=definition.key, kind=RUN_NIGHTLY, at=now)
         self._mark_attempted(definition.key, RUN_NIGHTLY, now)
+
+        # ALREADY RUN TODAY? Then there is nothing to do, and asking BEFORE the
+        # refresh is the point: the refresh is the twelve-minute part. The
+        # in-memory guard in `_may_attempt` covers a running process; this
+        # covers a RESTART, which clears that memory and is how a five-hundred
+        # symbol pull got repeated all evening.
+        #
+        # Keyed on when the job RAN, not on the session it decided: the session
+        # date is the index's newest bar date and does not move on a day the
+        # vendor has published nothing, so it cannot answer this question.
+        if await self._already_ran_today(definition.key, RUN_NIGHTLY, now):
+            self._mark_succeeded(definition.key, RUN_NIGHTLY, now)
+            run.detail = (
+                "Already run today, so the bars were not pulled again. The "
+                "nightly is a once-a-day job and re-running it after a restart "
+                "has nothing to add -- it re-fetches five hundred symbols and "
+                "the journal then declines to re-decide the session. Use \"Run "
+                "analysis now\" if you genuinely want it re-run; that forces."
+            )
+            logger.info("Swing nightly for %s: %s", definition.key, run.detail)
+            return self._record(run)
+
         self._begin(f"running the nightly decision for {definition.label}")
         try:
-            refreshed = await self._refresh_bars(definition)
+            refreshed, refresh_ok = await self._refresh_bars(definition)
             if refreshed is not None:
                 run.detail = refreshed
 
@@ -464,6 +505,16 @@ class SwingScheduler:
                 f"{run.detail} {decided} decision(s) recorded across "
                 f"{len(portfolios)} portfolio(s)."
             ).strip()
+            # Done for today -- but ONLY if the bars actually came down.
+            #
+            # A run whose refresh failed still journals a session, on the bars
+            # already stored, so "it recorded something" is not the same as "it
+            # did its job". Credentials fixed at 18:30 should still get fresh
+            # bars at 18:45, which is what RETRY_AFTER was always for. A run
+            # that DID refresh has nothing left to retry, and retrying it is
+            # what pulled five hundred symbols every fifteen minutes.
+            if refresh_ok:
+                self._mark_succeeded(definition.key, RUN_NIGHTLY, now)
         except Exception as exc:  # noqa: BLE001
             run.ok = False
             run.detail = f"{type(exc).__name__}: {exc}"
@@ -473,7 +524,35 @@ class SwingScheduler:
             self._idle()
         return self._record(run)
 
-    async def _refresh_bars(self, definition: StrategyDefinition) -> Optional[str]:
+    async def _already_ran_today(
+        self, strategy_key: str, run_kind: str, now: datetime
+    ) -> bool:
+        """Has this job written a session today? Never fatal.
+
+        A database that cannot be read must not stop the nightly running --
+        that would turn a transient read error into a missed session, which is
+        the more expensive failure. It returns False and the run proceeds.
+        """
+        from src.swing.database.db_operations.swing_session_repository import (
+            SwingSessionRepository,
+        )
+
+        try:
+            async with session_scope() as session:
+                return await SwingSessionRepository(session).ran_on_day(
+                    strategy_key, run_kind, now.date()
+                )
+        except Exception:  # noqa: BLE001 - see the docstring
+            logger.warning(
+                "Could not check whether the %s job already ran today; running "
+                "it rather than risking a missed session.",
+                run_kind, exc_info=True,
+            )
+            return False
+
+    async def _refresh_bars(
+        self, definition: StrategyDefinition
+    ) -> tuple[Optional[str], bool]:
         """Top up `daily_bars`. Never fatal: stale bars decide a stale session.
 
         A failure here does NOT produce a wrong decision, because the session
@@ -503,7 +582,8 @@ class SwingScheduler:
             return (
                 f"Bars: {len(result.refreshed)} refreshed, {len(result.failed)} "
                 f"failed, {sum(one.inserted for one in result.symbols)} inserted "
-                f"in {result.duration_seconds:.0f}s."
+                f"in {result.duration_seconds:.0f}s.",
+                True,
             )
         except DailyBarRefreshError as error:
             logger.error(
@@ -512,7 +592,7 @@ class SwingScheduler:
                 "session already recorded -- nothing new is decided.",
                 definition.key, error,
             )
-            return f"Bars: NOT refreshed ({error})."
+            return f"Bars: NOT refreshed ({error}).", False
         except Exception as exc:  # noqa: BLE001
             logger.exception("Nightly bar refresh for %s failed", definition.key)
             return f"Bars: refresh failed ({type(exc).__name__}: {exc})."

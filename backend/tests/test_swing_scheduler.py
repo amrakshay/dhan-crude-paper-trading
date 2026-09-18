@@ -388,3 +388,124 @@ def test_mcx_declares_no_closing_auction():
     assert market_clock.continuous_close(crude, fno_eligible=True) == (
         crude.market_hours.close
     )
+
+
+# --- once a day, not every fifteen minutes ---------------------------------
+def test_a_job_that_succeeded_is_not_retried_today():
+    """RETRY_AFTER is for FAILURES. This is the loop it used to cause.
+
+    The nightly has no upper time bound on purpose -- recording what the stored
+    data says is valid at any hour. That made `_may_attempt` come round again
+    every RETRY_AFTER until midnight, and on 2026-09-18 it did: a full
+    five-hundred-symbol Dhan refresh every fifteen minutes from 18:15, each one
+    correctly deciding nothing because the journal already had the session.
+    """
+    from datetime import timedelta
+
+    from src.core.time_utils import ist_now
+    from src.swing.services.scheduler import RETRY_AFTER, SwingScheduler
+    from src.swing.database.db_models.swing_session_model import RUN_NIGHTLY
+
+    scheduler = SwingScheduler()
+    now = ist_now()
+    today = now.date()
+    key = "nse-swing-momentum"
+
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, today, now) is True
+
+    scheduler._mark_attempted(key, RUN_NIGHTLY, now)
+    scheduler._mark_succeeded(key, RUN_NIGHTLY, now)
+
+    # Not now, and not after the retry window either -- it is DONE.
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, today, now) is False
+    later = now + RETRY_AFTER + timedelta(minutes=1)
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, today, later) is False
+    much_later = now + timedelta(hours=5)
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, today, much_later) is False
+
+
+def test_a_job_that_FAILED_is_still_retried_after_the_window():
+    """The retry must survive the fix, or a transient failure loses the day."""
+    from datetime import timedelta
+
+    from src.core.time_utils import ist_now
+    from src.swing.services.scheduler import RETRY_AFTER, SwingScheduler
+    from src.swing.database.db_models.swing_session_model import RUN_NIGHTLY
+
+    scheduler = SwingScheduler()
+    now = ist_now()
+    today = now.date()
+    key = "nse-swing-momentum"
+
+    # Attempted and NOT marked successful -- that is what a failure looks like.
+    scheduler._mark_attempted(key, RUN_NIGHTLY, now)
+
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, today, now) is False
+    too_soon = now + RETRY_AFTER - timedelta(minutes=1)
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, today, too_soon) is False
+    due = now + RETRY_AFTER + timedelta(seconds=1)
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, today, due) is True
+
+
+def test_success_on_one_day_does_not_block_the_next():
+    """The guard is per DAY. A strategy that ran last night runs tonight."""
+    from datetime import timedelta
+
+    from src.core.time_utils import ist_now
+    from src.swing.services.scheduler import SwingScheduler
+    from src.swing.database.db_models.swing_session_model import RUN_NIGHTLY
+
+    scheduler = SwingScheduler()
+    now = ist_now()
+    key = "nse-swing-momentum"
+
+    scheduler._mark_succeeded(key, RUN_NIGHTLY, now)
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, now.date(), now) is False
+
+    tomorrow = now + timedelta(days=1)
+    assert scheduler._may_attempt(key, RUN_NIGHTLY, tomorrow.date(), tomorrow) is True
+
+
+async def test_ran_on_day_is_keyed_on_when_the_job_RAN(db_session):
+    """Not on the session it decided.
+
+    `session_date` is the index's newest bar date and does not move on a day
+    the vendor published nothing -- which is precisely the day the scheduler
+    needs to know it has already done its work.
+    """
+    from datetime import timedelta
+
+    from src.core.time_utils import ist_today, utc_now
+    from src.swing.database.db_models.swing_session_model import (
+        RUN_NIGHTLY,
+        STATUS_COMPLETED,
+    )
+    from src.swing.database.db_operations.swing_session_repository import (
+        SwingSessionRepository,
+    )
+
+    repository = SwingSessionRepository(db_session)
+    today = ist_today()
+
+    assert await repository.ran_on_day("nse-swing-momentum", RUN_NIGHTLY, today) is False
+
+    # A session decided TODAY about a bar date from days ago -- exactly the
+    # shape that fooled the old guard.
+    await repository.create(
+        strategy_key="nse-swing-momentum",
+        portfolio_id=1,
+        session_date=today - timedelta(days=4),
+        run_kind=RUN_NIGHTLY,
+        status=STATUS_COMPLETED,
+        started_at=utc_now(),
+    )
+    await db_session.commit()
+
+    assert await repository.ran_on_day("nse-swing-momentum", RUN_NIGHTLY, today) is True
+    # And it does not leak across days.
+    assert (
+        await repository.ran_on_day(
+            "nse-swing-momentum", RUN_NIGHTLY, today - timedelta(days=1)
+        )
+        is False
+    )
