@@ -170,6 +170,12 @@ function WorkingNow({ health }) {
   const working = health.working;
   const jobs = working.jobs.rows;
   const market = working.market;
+  // Null when no portfolio is selected, which is a third answer: without a
+  // book this panel cannot say whether an empty subscription is expected, and
+  // it says that rather than picking one.
+  const positions = health.holdings?.positions;
+  const holdsNothing = positions === 0;
+  const holdsSomething = typeof positions === 'number' && positions > 0;
 
   return (
     <Panel
@@ -228,11 +234,17 @@ function WorkingNow({ health }) {
           </Grid>
         ))}
         <Grid item xs={6} sm={4} md={2}>
-          {/* Three states, not two. A subscription that was BUILT and holds
-              nothing is not the same as one that was never built, and neither
-              is healthy — a green "0 instruments" would be the page telling an
-              operator that no prices are arriving in the colour it uses for
-              everything being fine. */}
+          {/* Three states, not two: a subscription that was BUILT and holds
+              nothing is not the same as one that was never built.
+              
+              But "holds nothing" is only a PROBLEM when there is something to
+              hold. This rotation subscribes the handful of names it is about
+              to trade, not the whole universe, so an empty subscription beside
+              an empty book is the normal resting state and must not be
+              coloured as a fault — and the panel must not guess a cause it
+              cannot see. It names the one that is actually true, which is why
+              it reads the position count rather than asserting that the
+              instrument master is empty. */}
           <Verdict
             label="Prices arriving"
             state={
@@ -243,19 +255,23 @@ function WorkingNow({ health }) {
                   : 'nothing subscribed'
             }
             tone={
-              working.feed.subscribed && working.feed.instrumentCount
+              working.feed.instrumentCount
                 ? 'good'
-                : working.enabled
-                  ? 'warn'
-                  : 'neutral'
+                : !working.enabled || holdsNothing
+                  ? 'neutral'
+                  : 'warn'
             }
             detail={
-              working.feed.subscribed && !working.feed.instrumentCount
-                ? 'The subscription was built and matched no instrument — the instrument master is probably empty. Refresh it from Settings.'
-                : working.feed.lastResyncMs === null ||
-                    working.feed.lastResyncMs === undefined
+              working.feed.instrumentCount
+                ? working.feed.lastResyncMs === null ||
+                  working.feed.lastResyncMs === undefined
                   ? 'The subscription has not been rebuilt in this process.'
                   : `Subscription last rebuilt in ${working.feed.lastResyncMs} ms.`
+                : holdsNothing
+                  ? 'Expected: it holds nothing, and it subscribes only the names it is about to trade rather than the whole universe.'
+                  : holdsSomething
+                    ? 'It holds positions but has nothing on the feed, so their marks are not updating. Check the instrument master.'
+                    : 'Nothing is on the feed. Whether that is expected depends on the book — pick a portfolio to see it.'
             }
           />
         </Grid>
