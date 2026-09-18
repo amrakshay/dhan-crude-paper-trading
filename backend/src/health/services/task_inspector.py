@@ -31,6 +31,13 @@ TASK_DESCRIPTIONS = {
     "feed-resync": "Re-centres the subscribed strike window as the underlying moves",
     "order-matcher": "Fills resting limit orders against the book",
     "bracket-monitor": "Watches chart stop-loss and take-profit levels server-side",
+    "swing-stop-monitor": (
+        "Watches the rotation's chandelier trailing stops and exits the ones "
+        "that are hit"
+    ),
+    "swing-scheduler": (
+        "Runs the rotation's nightly decision and its rebalance on an IST clock"
+    ),
 }
 
 
@@ -90,6 +97,24 @@ def _chart_trading_expected() -> bool:
     return get_strategy_registry().capability_active_anywhere(CAPABILITY_CHART_TRADING)
 
 
+def _automation_expected() -> bool:
+    """Is any AUTOMATED strategy running?
+
+    Both swing tasks are started once and keep running; what makes them
+    expected is a strategy that decides on a schedule being enabled. Switching
+    the last one off stops them, and the page must not then report two missing
+    tasks -- a false problem on the page whose whole job is to surface real
+    ones.
+    """
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    return any(
+        registry.is_enabled(definition.key)
+        for definition in registry.automated()
+    )
+
+
 def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
     """Which named tasks should be alive, given the current configuration."""
     expected: Set[str] = set()
@@ -119,6 +144,15 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
         expected.add("order-matcher")
     if _chart_trading_expected():
         expected.add("bracket-monitor")
+
+    if _automation_expected():
+        # The rotation's two background tasks. Each has its own config switch
+        # as well, so an operator can stop one without switching the strategy
+        # off (which would also stop the marks).
+        if config_utils.get_property_value_boolean("swing.stops_enabled", True):
+            expected.add("swing-stop-monitor")
+        if config_utils.get_property_value_boolean("swing.scheduler_enabled", True):
+            expected.add("swing-scheduler")
 
     return expected
 

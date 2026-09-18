@@ -35,6 +35,7 @@ from src.market.services.feed_protocol import (
     parse_frame,
 )
 from src.market.services.market_book import MarketBook, now_ms
+from src.strategies.services.market_clock import enabled_market_open
 
 logger = get_logger("market.feed")
 
@@ -282,13 +283,18 @@ class DhanFeedClient:
         The churn burns one of Dhan's five connection slots on a loop and
         turns the dead-feed signal into constant noise.
 
-        **Still open, deferred to the scheduler phase:** the same false
-        positive fires on a SUBSCRIBED but idle market. MCX closes at 23:30 and
-        NSE at 15:30, so a book held across the close reconnects every 45
-        seconds until the next open. Fixing it means asking each strategy
-        whether its market is currently open -- `market_hours` is on the
-        definition already -- which is the knowledge the scheduler introduces,
-        so it lands with it rather than as a second half-measure here.
+        **The same is true of a CLOSED market**, and that was the second half
+        of the bug. A book held across the close is subscribed and silent for
+        every one of the sixteen hours NSE is shut, so the check above passes
+        and the watchdog reconnected every 45 seconds until the next open --
+        same wasted connection slot, same noise. Whether a market is open is a
+        property of each strategy's `market_hours`, which is why the fix lands
+        with the scheduler that made those hours a first-class thing.
+
+        Both suppressions are deliberately conservative in the same direction:
+        they can only stop a reconnect that silence alone would have caused.
+        A feed that dies DURING a session is still caught, which is the case
+        this watchdog exists for.
         """
         while not self._stopping:
             await asyncio.sleep(5)
@@ -296,6 +302,11 @@ class DhanFeedClient:
                 continue
             if not self._subscribed:
                 # Nothing was asked for, so nothing arriving proves nothing.
+                continue
+            if not enabled_market_open():
+                # Every enabled strategy's market is shut. Silence is what a
+                # closed exchange sounds like, not what a dead socket sounds
+                # like, and the two are only distinguishable by the clock.
                 continue
             silence_seconds = (now_ms() - self.last_message_ms) / 1000
             if silence_seconds > self._inactivity_timeout():

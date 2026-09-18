@@ -19,6 +19,106 @@ backtested results:
 | `services/indicators.py` | SMA, Wilder ATR, ADV20, momentum, score — pure Python, no pandas |
 | `services/swing_parameters.py` | P1–P19 read from the strategy YAML; the only place that reads them |
 | `services/ranking_service.py` | Regime (P8/P9), breadth (P10), slots (P11) and the full ranking |
+| `services/rebalance_planner.py` | The sell list and the buy list, worked out as plain values. Decides; places nothing |
+| `services/execution_service.py` | The rebalance: sells, then buys, through `submit_paper_order`. The only module here that places an order |
+| `services/stop_service.py` | The chandelier stop (P14/P15): set at entry, ratcheted on the close, never down |
+| `services/stop_monitor.py` | The `swing-stop-monitor` task: watches the stops, exits the ones that are hit |
+| `services/scheduler.py` | The `swing-scheduler` task: the nightly job, the rebalance, and missed-run detection |
+| `services/swing_runner.py` | One nightly decision, journalled. Places no orders |
+| `services/swing_service.py` | Read models for the page. Decides nothing |
+
+## The two switches
+
+**Enabled** makes the strategy compute, decide and write a decision record
+every session. **Armed** is what lets it submit an order. They are separate
+because this is the first thing in the application that trades with nobody
+watching, and watching it decide for a while before it can spend anything is
+the cheapest possible safeguard.
+
+Both are runtime state in `feature_toggles` — `STRATEGY` scope and `AUTOMATION`
+scope — overlaid on the YAML's `enabled_by_default` and
+`automation.armed_by_default` at startup. `automation` is a FRAMEWORK key, not
+a `module_config` block: whether a module trades unattended is something the
+Strategies page, the health page and the scheduler all have to know without
+understanding momentum. A module that declares no `automation` block at all is
+discretionary, offers no arming control, and a stored arming row for it is
+ignored.
+
+An **unarmed run journals the identical decision** and places nothing. The
+decision rows are the same down to the reason sentence; `order_id` being null
+is the only difference, so an armed and an unarmed run can be diffed and only
+the orders differ.
+
+## The rebalance
+
+Sells are planned AND EXECUTED before the buys are planned. The backtest
+processes pending exits before pending entries (specification §6, mechanic 4)
+and sizing is cash-constrained, so a buy funded out of that morning's sale must
+see the money. That is why there is no single `plan()`: `plan_sells` and
+`plan_buys` are separate calls with the execution of the sells in between, and
+getting it wrong looks like a bug in the funds code rather than in the
+ordering.
+
+Three refusals the planner makes rather than guessing:
+
+- **Equity that could not be computed blocks sizing entirely.** P13 sizes from
+  total equity; `BalanceService` withholds equity when any open position has no
+  mark; the honest response is to buy nothing and say why.
+- **A buy that does not fit is skipped, not shrunk.** The backtest resizes
+  (`size = min(equity / 10, cash)`), which is a different trade from the one
+  the rule asked for. This is a deliberate divergence and is in the README's
+  known gaps.
+- **A candidate with no live price is skipped.** The rule buys at the next
+  session's open, and what that costs is a live price or nothing at all — never
+  yesterday's close.
+
+Before placing anything the rebalance PINS the names it might trade
+(`FeedManager.pin_instruments`) and resyncs, because the fill simulator needs a
+depth book for a name before the order rather than after it. About thirty
+instruments, never five hundred; the scheduler warms them
+`swing.warmup_minutes` ahead of the open and the pins are given back afterwards.
+
+## The chandelier stop
+
+`swing_stops` holds what specification §14.4 says has to survive a restart: the
+position, the ATR at entry, the highest close since entry and the current stop.
+None of it is recomputable after the fact — the highest close depends on the
+entry date and the stop is a running maximum, so a bar restated after a
+corporate action would silently move a stop that has already been acted on.
+
+- **The ratchet is one-directional**, and that is the whole point: ATR widens
+  after a violent day, so `highest_close − 3.5 × ATR_today` can be LOWER than
+  yesterday's stop. `max()` is what stops the exit sliding away from a position
+  that has just become more dangerous.
+- **Do not tighten it.** Specification §10 measures every tighter variant as
+  worse — an 8% initial cap takes CAGR from 19.9% to 15.7%, a breakeven ratchet
+  to 14.4%, a 2.5× trail to 15.3%, all three to 10.6%.
+- **The Closing Auction Session**, live since 3 August 2026: for F&O-eligible
+  names continuous cash trading ends at 15:15 and a call auction runs to 15:35.
+  A stop that fires in that window is RECORDED as triggered and its exit waits
+  for the next session's open, because this simulator has no model of a call
+  auction and filling against the last continuous book would flatter it. The
+  F&O set is `instruments.fno_eligible`, derived from the master's own FUTSTK
+  rows on every refresh — 210 of the 499 universe names on 2026-09-18.
+- **A position with no stop is a real state, not a missing field.** No ATR at
+  entry means no stop and a loud log line; the next nightly ratchet sets one.
+
+## The scheduler
+
+Two IST jobs, both restart-safe. The nightly (18:15) refreshes the bars,
+decides, ratchets every stop and journals; the rebalance (09:16) trades. Times
+come from the strategy YAML because a different strategy would want different
+ones; how often the clock is checked is `swing.scheduler_interval_seconds`.
+
+**Idempotence is the journal's, not a flag's.** `sessions_completed_on` is what
+stops a restart at 18:20 re-deciding what was decided at 18:15. The in-memory
+attempt clock only stops a FAILING job retrying every thirty seconds.
+
+**A missed run is detected and reported, never silently re-decided.** The
+trading calendar is the regime index's own bar dates compared against
+`decided_session_dates` — no holiday list, no second source to go stale. A
+decision recorded days late, on bars that may since have been restated, would
+be a record of a decision nobody took.
 
 ## Rules that are not negotiable
 

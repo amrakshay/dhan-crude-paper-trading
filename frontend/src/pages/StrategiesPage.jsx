@@ -55,6 +55,43 @@ function CostLine({ label, value, hint }) {
   );
 }
 
+/**
+ * Arming is the one control in this application that lets software spend money
+ * without anyone clicking, so it gets its own confirmation with the server's
+ * own warnings on it — the same treatment switching a strategy off gets, and
+ * for the opposite reason.
+ */
+function ArmDialog({ strategy, warnings, onCancel, onConfirm }) {
+  return (
+    <Dialog open onClose={onCancel} maxWidth="sm" fullWidth>
+      <DialogTitle>Arm {strategy.label}?</DialogTitle>
+      <DialogContent>
+        <DialogContentText component="div">
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Enabled means it computes, decides and writes a decision record
+            every session. ARMED means it may also submit orders on its own
+            schedule. Paper money only — nothing reaches a broker — but the
+            decisions, the sizes and the stops will be its own.
+          </Typography>
+          <Stack spacing={1}>
+            {warnings.map((warning) => (
+              <Alert key={warning} severity="warning" icon={<WarningAmberIcon />}>
+                {warning}
+              </Alert>
+            ))}
+          </Stack>
+        </DialogContentText>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button color="warning" variant="contained" onClick={onConfirm}>
+          Arm it
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function DisableDialog({ strategy, warnings, onCancel, onConfirm }) {
   return (
     <Dialog open onClose={onCancel} maxWidth="sm" fullWidth>
@@ -95,6 +132,7 @@ export default function StrategiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [pending, setPending] = useState(null);
+  const [arming, setArming] = useState(null);
   const [notice, setNotice] = useState(null);
 
   const load = useCallback(async () => {
@@ -143,6 +181,33 @@ export default function StrategiesPage() {
       setPending({ strategy, warnings: response.warnings ?? [] });
     } catch (warningError) {
       setPending({ strategy, warnings: [] });
+    }
+  };
+
+  const applyArmed = async (key, armed) => {
+    try {
+      await strategiesApi.setStrategyArmed(key, armed);
+      setNotice(
+        armed
+          ? `${key} is ARMED. It may now submit orders on its own schedule.`
+          : `${key} is disarmed. It keeps deciding and recording; it places nothing. Open positions and their stops are untouched.`,
+      );
+      await load();
+    } catch (armError) {
+      setError(armError.message);
+    }
+  };
+
+  const requestArm = async (strategy, armed) => {
+    if (!armed) {
+      await applyArmed(strategy.key, false);
+      return;
+    }
+    try {
+      const response = await strategiesApi.armWarnings(strategy.key);
+      setArming({ strategy, warnings: response.warnings ?? [] });
+    } catch (warningError) {
+      setArming({ strategy, warnings: [] });
     }
   };
 
@@ -199,23 +264,62 @@ export default function StrategiesPage() {
                       {strategy.marketOpen}–{strategy.marketClose}
                     </Typography>
                   </Box>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Typography
-                      variant="body2"
-                      color={strategy.enabled ? 'success.main' : 'text.disabled'}
-                      sx={{ fontWeight: 600 }}
-                    >
-                      {strategy.enabled ? 'ON' : 'OFF'}
-                    </Typography>
-                    <Switch
-                      checked={strategy.enabled}
-                      disabled={!isAdmin}
-                      onChange={(event) => requestToggle(strategy, event.target.checked)}
-                    />
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    {/* Two switches, shown as two. A module with no automation
+                        block has nothing to arm and gets no control at all. */}
+                    {strategy.automated ? (
+                      <Stack alignItems="center">
+                        <Typography
+                          variant="caption"
+                          color={strategy.armed ? 'warning.main' : 'text.secondary'}
+                          sx={{ fontWeight: 600 }}
+                        >
+                          {strategy.armed ? 'ARMED' : 'NOT ARMED'}
+                        </Typography>
+                        <Switch
+                          color="warning"
+                          checked={strategy.armed}
+                          disabled={!isAdmin}
+                          onChange={(event) => requestArm(strategy, event.target.checked)}
+                        />
+                        <Typography variant="caption" color="text.disabled">
+                          may place orders
+                        </Typography>
+                      </Stack>
+                    ) : null}
+                    <Stack alignItems="center">
+                      <Typography
+                        variant="caption"
+                        color={strategy.enabled ? 'success.main' : 'text.disabled'}
+                        sx={{ fontWeight: 600 }}
+                      >
+                        {strategy.enabled ? 'ON' : 'OFF'}
+                      </Typography>
+                      <Switch
+                        checked={strategy.enabled}
+                        disabled={!isAdmin}
+                        onChange={(event) => requestToggle(strategy, event.target.checked)}
+                      />
+                      <Typography variant="caption" color="text.disabled">
+                        {strategy.automated ? 'decides and records' : 'running'}
+                      </Typography>
+                    </Stack>
                   </Stack>
                 </Stack>
 
                 <Divider sx={{ my: 2 }} />
+
+                {strategy.automated ? (
+                  <Alert
+                    severity={strategy.armed ? 'warning' : 'info'}
+                    icon={strategy.armed ? <WarningAmberIcon /> : <InfoOutlinedIcon />}
+                    sx={{ mb: 2 }}
+                  >
+                    {strategy.armed
+                      ? 'Armed: this module places its own orders on its own schedule. Every one of them is paper money in this database.'
+                      : 'Not armed: it computes, decides and writes a decision record every session, and places nothing. Watching it decide before arming it is the cheapest possible safeguard.'}
+                  </Alert>
+                ) : null}
 
                 {strategy.enabled ? (
                   <Grid container spacing={2}>
@@ -349,6 +453,19 @@ export default function StrategiesPage() {
           </Stack>
         </Paper>
       </Box>
+
+      {arming ? (
+        <ArmDialog
+          strategy={arming.strategy}
+          warnings={arming.warnings}
+          onCancel={() => setArming(null)}
+          onConfirm={async () => {
+            const key = arming.strategy.key;
+            setArming(null);
+            await applyArmed(key, true);
+          }}
+        />
+      ) : null}
 
       {pending ? (
         <DisableDialog

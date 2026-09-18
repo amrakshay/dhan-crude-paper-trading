@@ -26,6 +26,7 @@ from src.swing.database.db_models.swing_session_model import (  # noqa: F401
     SwingDecision,
     SwingSession,
 )
+from src.swing.database.db_models.swing_stop_model import SwingStop  # noqa: F401
 from src.users.database.db_models.user_model import User  # noqa: F401
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     "FeatureToggle",
     "SwingSession",
     "SwingDecision",
+    "SwingStop",
     "User",
 ]

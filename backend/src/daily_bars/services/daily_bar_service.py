@@ -90,7 +90,25 @@ class RefreshResult:
 
     @property
     def unresolved(self) -> List[SymbolRefresh]:
-        return [one for one in self.symbols if one.skipped_reason]
+        """Symbols with no active row in the instrument master.
+
+        Keyed on the MISSING SECURITY ID, not on `skipped_reason`: a symbol
+        that was skipped as "already current" also carries a reason, and
+        lumping the two together made a full refresh report "WELCORP has no
+        active row in the instrument master" about a symbol that has one and
+        was simply up to date. A report that names the wrong problem is worse
+        than one that names none.
+        """
+        return [one for one in self.symbols if one.security_id is None]
+
+    @property
+    def already_current(self) -> List[SymbolRefresh]:
+        """Skipped because the stored series already reaches `as_of`."""
+        return [
+            one
+            for one in self.symbols
+            if one.security_id is not None and one.skipped_reason
+        ]
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -100,6 +118,7 @@ class RefreshResult:
             "symbolsRefreshed": len(self.refreshed),
             "symbolsFailed": len(self.failed),
             "symbolsUnresolved": len(self.unresolved),
+            "symbolsAlreadyCurrent": len(self.already_current),
             "barsInserted": sum(one.inserted for one in self.symbols),
             "barsUpdated": sum(one.updated for one in self.symbols),
             "failures": [
@@ -255,8 +274,26 @@ class DailyBarRefreshService:
         as_of: Optional[date] = None,
         only_symbols: Optional[List[str]] = None,
         force_full: bool = False,
+        commit_each_symbol: bool = True,
     ) -> RefreshResult:
-        """Top every symbol up to `as_of` (default: today in IST)."""
+        """Top every symbol up to `as_of` (default: today in IST).
+
+        `commit_each_symbol` for the same two reasons the importer does it
+        (`bar_import_service.import_symbols`), and a third that is specific to
+        this path:
+
+          * a failure part-way through leaves the symbols already done;
+          * the session's identity map stays flat across five hundred symbols;
+          * and **it does not hold the write lock for twelve minutes.** On
+            SQLite one long transaction blocks every other writer: the swing
+            stop monitor polls every second, and during the first observed
+            full refresh it logged "database is locked" once a second for the
+            whole run. Committing per symbol turns that into five hundred
+            short locks that nothing notices.
+
+        Pass False only when the caller owns the transaction and knows the
+        batch is small.
+        """
         started = time.perf_counter()
         as_of = as_of or ist_today()
         result = RefreshResult(strategy_key=strategy.key, as_of=as_of)
@@ -351,6 +388,10 @@ class DailyBarRefreshService:
                 entry.latest_after = max(row["bar_date"] for row in rows)
             else:
                 entry.latest_after = latest
+
+            if commit_each_symbol:
+                await self.repository.session.commit()
+                self.repository.session.expunge_all()
 
         result.duration_seconds = time.perf_counter() - started
         logger.info(

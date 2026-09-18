@@ -267,3 +267,53 @@ daily_bars:
   # added mid-life is not permanently short of history and therefore
   # permanently unrankable.
   bootstrap_days: 3650
+
+swing:
+  # The NSE Swing Momentum rotation's own background work. What it TRADES is
+  # configured in conf/strategies/nse-swing-momentum.yaml -- P1 to P19, the
+  # regime gate, the breadth ramp and the trail multiple all live there,
+  # because they are properties of the rule rather than of this process. These
+  # are properties of this process.
+
+  # The chandelier trailing stop (P14/P15), watched server-side on its own
+  # asyncio task with its own database session -- never on the tick path.
+  #
+  # Setting this false stops every stop firing, which is a real and dangerous
+  # thing to do to an open book. It exists so an operator can stop the monitor
+  # without switching the whole strategy off (which would also stop the marks).
+  stops_enabled: true
+
+  # 1000 ms, four times slower than the chart's bracket monitor. A chandelier
+  # stop sits 9-14% below the highest close; nothing about it needs sub-second
+  # resolution, and a book of ten cash names is not worth four database
+  # sessions a second.
+  stop_interval_ms: 1000
+
+  # The scheduler: two IST-aware jobs, both restart-safe. WHEN they run is in
+  # the strategy YAML (`schedule.nightly_at` / `schedule.rebalance_at`),
+  # because a different strategy would want different times. How often the
+  # scheduler wakes up to check the clock is this.
+  scheduler_enabled: true
+  scheduler_interval_seconds: 30
+
+  # How long before `rebalance_at` to subscribe the names the rebalance might
+  # trade. The fill simulator needs a depth book for a name BEFORE the order,
+  # not after it, and a subscription does not produce one instantly.
+  warmup_minutes: 3
+
+  # How stale the stored daily bars may be before the REBALANCE refuses to
+  # trade on them, in calendar days. The rebalance executes at the open of the
+  # session after the one it decided; a session date days old means the bar
+  # refresh has not run, and placing orders on a ranking computed from prices
+  # that old would be acting on a market that no longer exists.
+  #
+  # Five covers a Thursday close followed by a long weekend. A longer exchange
+  # holiday refuses and says so, which is the safe direction: the nightly run
+  # still records what the stored data says, because recording is its job.
+  max_bar_staleness_days: 5
+
+  # How many sessions back the missed-run detector looks. A run that did not
+  # happen must be REPORTED, not silently skipped -- if the process was down at
+  # 18:15 the next start has to notice and say so rather than carrying
+  # yesterday's stops forward as though nothing happened.
+  missed_run_lookback_sessions: 10

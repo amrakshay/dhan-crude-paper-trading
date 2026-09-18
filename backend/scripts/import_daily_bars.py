@@ -30,9 +30,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src import config_utils  # noqa: E402
+# `load_config_properties`, NOT `config_utils.load_config`: only the former
+# reads `.env`, and without it APP_ENCRYPTION_KEY is absent -- so the Dhan
+# token stored on the Settings page cannot be decrypted and this reports "no
+# credentials" on a machine that has perfectly good ones. It also configures
+# logging before anything builds a logger at module scope (backend/CLAUDE.md
+# section 8), which is why it comes above the other `src.*` imports.
+from src.app_utils import load_config_properties  # noqa: E402
 
-config_utils.load_config()
+load_config_properties()
 
 from src.daily_bars.database.db_operations.daily_bar_repository import (  # noqa: E402
     DailyBarRepository,

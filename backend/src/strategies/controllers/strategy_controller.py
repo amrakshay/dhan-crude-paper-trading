@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.logging_config import get_logger
 from src.strategies.api_schemas.strategy_schemas import (
+    ArmResponse,
     CapabilityResponse,
     StrategyCostResponse,
     StrategyListResponse,
@@ -64,6 +65,9 @@ class StrategyController:
                     label=definition.label,
                     description=definition.description,
                     enabled=registry.is_enabled(definition.key),
+                    automated=definition.automation.automated,
+                    armed=registry.is_armed(definition.key),
+                    armedByDefault=definition.automation.armed_by_default,
                     symbol=definition.symbol,
                     exchangeSegment=definition.exchange_segment,
                     exchangeId=definition.exchange_id,
@@ -231,6 +235,35 @@ class StrategyController:
             effect=result["effect"],
             warnings=result["warnings"],
         )
+
+    async def set_strategy_armed(
+        self, strategy_key: str, armed: bool, user_id: Optional[int] = None
+    ) -> ArmResponse:
+        try:
+            result = await self.service.set_strategy_armed(
+                strategy_key, armed, user_id
+            )
+        except StrategyConfigError as error:
+            # "Unknown strategy" is a 404; "this module is discretionary and
+            # has nothing to arm" is a 400 -- the strategy exists, the request
+            # does not apply to it.
+            status = 404 if "Unknown strategy" in str(error) else 400
+            raise HTTPException(status_code=status, detail=str(error)) from error
+
+        return ArmResponse(
+            key=strategy_key,
+            armed=get_strategy_registry().is_armed(strategy_key),
+            effect=result["effect"],
+            warnings=result["warnings"],
+        )
+
+    async def arm_warnings(self, strategy_key: str) -> Dict[str, List[str]]:
+        """What arming would let loose, BEFORE it is armed."""
+        if get_strategy_registry().get(strategy_key) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown strategy module {strategy_key!r}"
+            )
+        return {"warnings": await self.service.warnings_for_arming(strategy_key)}
 
     async def disable_warnings(self, strategy_key: str) -> Dict[str, List[str]]:
         """What switching this off would cost, BEFORE it is switched off."""

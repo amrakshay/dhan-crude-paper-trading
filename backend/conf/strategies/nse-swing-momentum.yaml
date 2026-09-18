@@ -128,14 +128,39 @@ contract_specs:
   tick_size_divisor: 100
 
 market_hours:
-  # NSE cash equity. Note the Closing Auction Session, live since 3 Aug 2026:
-  # for F&O-eligible names continuous trading now ends at 15:15, with an
-  # auction to 15:35. That affects when a stop can fill and is handled by the
-  # stop monitor, not by this window.
+  # NSE cash equity.
   timezone: "Asia/Kolkata"
   open: "09:15"
   close: "15:30"
   trading_days: [0, 1, 2, 3, 4]     # Mon-Fri (Python weekday numbering)
+
+  # ---------------------------------------------------------------------------
+  # The Closing Auction Session, live since 3 August 2026.
+  #
+  # For F&O-eligible names, continuous cash trading ends at 15:15 and a call
+  # auction runs to 15:35. The rest of the market trades continuously to 15:30.
+  # Two consequences this application has to model, both about the trailing
+  # stop (P14/P15):
+  #
+  #   * an order sent for one of those names between 15:15 and the close cannot
+  #     execute in continuous trading -- it lands in the auction; and
+  #   * this simulator has NO model of a call auction. Filling such an order
+  #     against the last continuous depth book would flatter the fill.
+  #
+  # So a stop that triggers in that window on an F&O name is RECORDED as
+  # triggered and its exit waits for the next session's open. The backtest
+  # predates the CAS entirely and assumes a continuous market to the close;
+  # that divergence is in the README's known gaps.
+  #
+  # `applies_to: fno_eligible` reads the column of that name on `instruments`,
+  # derived from the master's own FUTSTK rows on every refresh -- 228 distinct
+  # NSE underlyings as of 2026-09-18. It is not a list to maintain here.
+  # source: NSE circular, CAS live 3 Aug 2026
+  # ---------------------------------------------------------------------------
+  closing_auction:
+    applies_to: "fno_eligible"
+    continuous_close: "15:15"
+    auction_close: "15:35"
 
 subscription:
   # This strategy has no option chain to centre and no strikes to window. Its
@@ -300,9 +325,32 @@ off_gate:
   require_entry_return: false
 
 automation:
+  # DECLARING THIS BLOCK IS WHAT MAKES A STRATEGY AUTOMATED. A module without
+  # it -- mcx-crude-options -- is discretionary: nothing schedules it, no
+  # arming control is offered for it, and a stored arming row for it is
+  # ignored. Every order in it comes from a person.
+  #
   # The separate arming switch. Enabling the strategy makes it compute, decide
   # and record; ARMING is what lets it submit an order. Two switches, because
   # this is the first thing in the application that trades with nobody
   # watching, and watching it decide for a while before it can spend anything
   # is the cheapest possible safeguard.
   armed_by_default: false
+
+  # ---------------------------------------------------------------------------
+  # Overrides the global `trading.max_lots_per_order` (100) for this strategy.
+  #
+  # "Lots" means two different things. One MCX CRUDEOIL lot is 100 barrels, so
+  # 100 lots is 10,000 barrels and a plausible fat finger. An NSE delivery
+  # "lot" is ONE SHARE (the master's LOT_SIZE=1.0 is correct here -- see
+  # instrument_sets above), so 100 of them is a Rs 5,000 position at the Rs 50
+  # price floor. One cap cannot be right for both, and routing the share count
+  # through `quantity_override` to dodge the check would leave `order.lots`
+  # disagreeing with `order.quantity / order.lot_size` on every equity order.
+  #
+  # The value: a position is equity / 10 (P13), so the share count is bounded
+  # by equity / 10 / price_floor -- 2,000 shares on a Rs 10,00,000 book. 50,000
+  # leaves room for the book to grow 25x and is still a rail rather than a
+  # ceiling anyone reaches.
+  # ---------------------------------------------------------------------------
+  max_lots_per_order: 50000

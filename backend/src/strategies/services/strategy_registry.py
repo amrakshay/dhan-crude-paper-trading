@@ -62,6 +62,11 @@ class StrategyRegistry:
     def __init__(self) -> None:
         self._definitions: Dict[str, StrategyDefinition] = {}
         self._strategy_enabled: Dict[str, bool] = {}
+        # Whether a strategy may SUBMIT AN ORDER of its own accord. A separate
+        # switch from enabled, held in memory for the same reason: the
+        # scheduler and the execution service read it from code that cannot
+        # await, and `StrategyStateService` refreshes it.
+        self._strategy_armed: Dict[str, bool] = {}
         self._capability_enabled: Dict[str, bool] = {}
         self._lock = threading.RLock()
         self._loaded = False
@@ -116,6 +121,11 @@ class StrategyRegistry:
             # Defaults until the database says otherwise.
             self._strategy_enabled = {
                 key: definition.enabled_by_default
+                for key, definition in definitions.items()
+            }
+            self._strategy_armed = {
+                key: (definition.automation.automated
+                      and definition.automation.armed_by_default)
                 for key, definition in definitions.items()
             }
             self._capability_enabled = {
@@ -185,6 +195,7 @@ class StrategyRegistry:
         self,
         strategy_states: Dict[str, bool],
         capability_states: Dict[str, bool],
+        automation_states: Optional[Dict[str, bool]] = None,
     ) -> None:
         """Overlay stored state on the defaults. Called at startup and on save.
 
@@ -208,9 +219,26 @@ class StrategyRegistry:
                     logger.warning(
                         "Ignoring stored state for unknown capability %r", capability
                     )
+            for key, armed in (automation_states or {}).items():
+                definition = self._definitions.get(key)
+                if definition is None:
+                    logger.warning(
+                        "Ignoring stored arming state for unknown strategy %r", key
+                    )
+                elif not definition.automation.automated:
+                    # A stored row must not be able to arm a module that has no
+                    # automation at all. The YAML is what decides whether a
+                    # strategy can ever act on its own.
+                    logger.warning(
+                        "Ignoring stored arming state for %r: it declares no "
+                        "automation block, so it never submits an order of its "
+                        "own accord.", key,
+                    )
+                else:
+                    self._strategy_armed[key] = bool(armed)
         logger.info(
-            "Strategy state applied: strategies=%s capabilities=%s",
-            self._strategy_enabled, self._capability_enabled,
+            "Strategy state applied: strategies=%s capabilities=%s armed=%s",
+            self._strategy_enabled, self._capability_enabled, self._strategy_armed,
         )
 
     def is_enabled(self, key: str) -> bool:
@@ -241,6 +269,57 @@ class StrategyRegistry:
     def strategy_states(self) -> Dict[str, bool]:
         self._ensure()
         return dict(self._strategy_enabled)
+
+    # --- arming ------------------------------------------------------------
+    def is_armed(self, key: str) -> bool:
+        """May this strategy submit an order by itself?
+
+        Armed AND enabled, both. A switched-off strategy is refused a new
+        order by `submit_paper_order` anyway; answering "armed" for one would
+        make the Strategies page say it is trading when it is not.
+        """
+        self._ensure()
+        definition = self._definitions.get(str(key))
+        if definition is None or not definition.automation.automated:
+            return False
+        return bool(
+            self._strategy_armed.get(str(key), False)
+            and self._strategy_enabled.get(str(key), False)
+        )
+
+    def set_armed(self, key: str, armed: bool) -> None:
+        self._ensure()
+        definition = self.require(key)
+        if not definition.automation.automated:
+            raise StrategyConfigError(
+                f"Strategy {key!r} declares no automation block, so it never "
+                f"submits an order of its own accord and there is nothing to "
+                f"arm. Every order in it comes from a person."
+            )
+        with self._lock:
+            self._strategy_armed[str(key)] = bool(armed)
+
+    def armed_states(self) -> Dict[str, bool]:
+        """The STORED arming flag per automated strategy, ignoring enabled.
+
+        Deliberately not `is_armed`: this is what gets written back to the
+        database and restored, and collapsing it with the enabled state would
+        silently disarm a strategy that was merely switched off for an evening.
+        """
+        self._ensure()
+        return {
+            key: bool(self._strategy_armed.get(key, False))
+            for key, definition in sorted(self._definitions.items())
+            if definition.automation.automated
+        }
+
+    def automated(self) -> List[StrategyDefinition]:
+        """Every strategy that decides and trades on a schedule."""
+        return [
+            definition
+            for definition in self.all()
+            if definition.automation.automated
+        ]
 
     # --- capabilities ------------------------------------------------------
     def is_capability_enabled(self, capability: str) -> bool:
@@ -336,6 +415,8 @@ class StrategyRegistry:
                 definition.key: {
                     "label": definition.label,
                     "enabled": self.is_enabled(definition.key),
+                    "automated": definition.automation.automated,
+                    "armed": self.is_armed(definition.key),
                     "symbol": definition.symbol,
                     "exchangeSegment": definition.exchange_segment,
                     "capabilities": sorted(definition.capabilities),

@@ -10,6 +10,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import TuneIcon from '@mui/icons-material/Tune';
+import AutoModeIcon from '@mui/icons-material/AutoMode';
 
 /**
  * Every page the app has. Which of them a given role actually sees is decided
@@ -31,6 +32,7 @@ export const navigationItems = [
   { path: '/portfolios', label: 'Portfolios', icon: AccountBalanceIcon },
   { path: '/reports', label: 'P&L Reports', icon: AssessmentIcon },
   { path: '/notes', label: 'Trade Notes', icon: StickyNote2Icon },
+  { path: '/swing', label: 'Swing Momentum', icon: AutoModeIcon },
   { path: '/users', label: 'Users', icon: GroupIcon },
   { path: '/profile', label: 'Profile', icon: PersonIcon },
   { path: '/strategies', label: 'Strategies & Features', icon: TuneIcon },

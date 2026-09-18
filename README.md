@@ -505,8 +505,10 @@ That document is the source of truth for the rules, the parameters (P1–P19),
 the indicator formulas, the cost model and the backtested results. This section
 covers only how it is built *here*.
 
-**It is not finished, and it does not trade yet.** What exists today computes
-what the strategy *would* do. See "What is not built yet" below.
+**It is built end to end and it is NOT ARMED.** It computes, decides, journals,
+ratchets its trailing stops and runs on its own IST clock. Arming — the second,
+separate switch that lets it actually submit an order — ships **off**. See
+"Which strategy is running" below, and read "Known gaps" before arming it.
 
 ### What a strategy module can now do that it could not before
 
@@ -527,6 +529,15 @@ what the strategy *would* do. See "What is not built yet" below.
   interpret travel to the strategy's own module through
   `StrategyDefinition.module_config`. That is how P1–P19 stay configuration
   without the registry learning what a momentum lookback is.
+- **Trade unattended, once armed.** A module that declares an `automation`
+  block decides on a schedule and can be armed; one that does not — MCX crude —
+  is discretionary, is never scheduled, and offers no arming control at all.
+  `automation` is a framework key rather than a `module_config` block precisely
+  because the Strategies page, the health page and the scheduler all need to
+  know it without understanding momentum.
+- **Declare its exchange's auction session.** `market_hours.closing_auction`
+  says when continuous trading ends and for which instruments, which is what
+  lets the trailing stop refuse to send an order it could not honestly fill.
 
 ### Security ids are not globally unique
 
@@ -588,6 +599,21 @@ loop over 500 different ids not at all. A symbol that fails does not fail the
 run. **No credentials means no bars and an error**; there is no synthetic
 fallback on this path, because a fabricated close would go straight into a
 trading decision.
+
+The nightly scheduler does this at 18:15 every session. To close the gap after
+a bootstrap, or to recover after a run the scheduler reported as missed:
+
+```bash
+cd backend
+CONFIG_PATH=conf .venv/bin/python scripts/refresh_daily_bars.py \
+    --strategy nse-swing-momentum
+```
+
+Pass `--as-of YYYY-MM-DD` when running it **during** a session. Without it the
+fetch goes up to today, and Dhan's historical endpoint will hand back today's
+*forming* bar — storing that as a daily bar would have the rotation decide a
+session that has not finished. The scheduler has no such problem: it runs after
+the close by construction.
 
 ### The universe is a file, refreshed by hand
 
@@ -691,6 +717,43 @@ Live Dhan agrees with the research panel exactly on the regime inputs:
 …and every one of the 499 equity closes on 2026-09-17 matches the panel to
 **0.00%**.
 
+#### The whole pipeline, run for real — 2026-09-18
+
+Phases 6–10 were exercised end to end against the live token and the live feed,
+on the running installation rather than a throwaway one:
+
+| Step | Result |
+|---|---|
+| Instrument master refresh | 206,659 rows scanned, 499 NSE equity rows ingested, 6.9 s. Crude's 1,240 rows left active (it is switched off, so it contributes no filter). |
+| F&O eligibility | **210 of the 499** stamped from the master's own `FUTSTK` rows — the specification's own figure for this universe. 0 of 1,240 MCX rows, correctly. |
+| `daily_bars` bootstrap | 501 symbols, **1,088,241 rows, 211 s**, nothing skipped. |
+| Live gap-fill to 2026-09-17 | **499 refreshed, 0 failed**, 22,954 bars inserted, 998 updated, **746 s** — within a second of the figure measured in phase 3. |
+| Nightly run | Session 2026-09-17 recorded `COMPLETED` with the full filter census and the parameters in force. |
+| Rebalance | Run **by the scheduler itself**, unattended: it warmed the book with 10 candidates on the live feed, decided, journalled, and placed nothing because the strategy is not armed. A manual re-run refused: "Already rebalanced for this session". |
+| Missed-run detection | Reported 10 missed `NIGHTLY` and 10 missed `REBALANCE` sessions at startup, against the regime index's own bar dates. Nothing was re-decided. |
+| Staleness guard | Before the gap-fill finished, the scheduler's rebalance refused: "the newest stored session is 2026-07-14, 66 day(s) ago, against a limit of 5" — recorded as `SKIPPED`, nothing placed. |
+| Health page | `swing-scheduler` and `swing-stop-monitor` both `running` and expected; no missing or duplicated tasks. |
+
+The live snapshot reproduces the specification's §13 regime inputs exactly:
+NIFTY 23,270.60 against a 200-SMA of 24,501.66, a 5.29% shortfall, a −3.71%
+63-session return, 215 names above their own SMA200, and a breadth ramp
+allowing 4 slots — of which **0 are usable, because the gate is OFF**.
+
+**What this run did NOT exercise: the armed order path.** The regime gate has
+been off since 2026-02-27, so the correct behaviour is to buy nothing, and
+arming the strategy would not have changed that. Placing an order to prove the
+path works would have meant overriding the rule the whole thing exists to obey.
+The execution path is covered instead by `tests/test_swing_execution.py` and
+`tests/test_swing_stops.py`, which place real paper orders through
+`submit_paper_order` against a real depth book.
+
+One wart worth knowing: after a rebalance unpins its candidates, `resync()`
+leaves them subscribed while the book is otherwise empty. That is the
+deliberate guard in `FeedManager.resync` — an empty target set can mean "the
+instrument master has not been ingested", where unsubscribing everything would
+be wrong — and it costs about ten subscriptions out of five thousand until the
+next resync that resolves something.
+
 ### The research panel has a phantom trading session
 
 The rankings still differ — 14 of the top 15 names but in a different order,
@@ -727,30 +790,169 @@ reproduction test deliberately imports *with the guard disabled*, because a
 like-for-like reproduction has to read the same rows the specification was
 computed from. Fixing the research panel is not this repository's to do.
 
-### What is not built yet
+### Execution — the rebalance
 
-Phases 6–10 of the implementation handoff. In order: execution (the rebalance
-through `submit_paper_order`), the chandelier trailing stop, the scheduler, the
-strategy page, and the performance metrics. Until those exist this module
-computes and records what the strategy *would* do, and nothing acts on it.
+At `schedule.rebalance_at` (09:16 IST) the rotation sells its sell list and then
+buys its buy list, through `submit_paper_order` like every other order in this
+application. There is no privileged fill path: a market order crosses the
+spread, walks the five visible depth levels and partially fills when the depth
+runs out. Fills will therefore differ from the backtest's
+`open x (1 +/- 0.05%)` model, and measuring that difference is the point
+(specification §14.3).
 
-Carried into the **final phase**, because it needs market-hours awareness that
-does not exist yet:
+**Sells are executed before the buys are even planned.** The backtest processes
+pending exits before pending entries and sizing is cash-constrained, so a buy
+funded out of that morning's sale has to see the money. Getting this wrong
+looks like a bug in the funds code rather than in the ordering, which is why
+`plan_sells` and `plan_buys` are separate calls with the execution of the sells
+in between.
 
-> **The feed's inactivity watchdog false-positives on a subscribed but idle
-> market.** It forces a reconnect after 40 s without a data frame, and Dhan's
-> protocol pings never reach the message loop, so the only thing that resets
-> the timer is a trade in something this process subscribed to. That is fine
-> while a liquid instrument is subscribed during its session; it is wrong
-> overnight. Crude's MCX session ends at 23:30 and NSE equities stop at 15:30,
-> so a book subscribed across the close will reconnect every 45 seconds until
-> the next open — burning one of Dhan's five connection slots on a loop and
-> drowning the dead-feed signal in noise.
->
-> The zero-subscription case is already fixed (2026-09-18): silence proves
-> nothing when nothing was asked for. The idle-market case needs the watchdog
-> to know each strategy's `market_hours`, which is exactly the knowledge the
-> scheduler introduces — so it belongs with it, not before.
+Three things the planner refuses to do rather than guess:
+
+| Situation | What happens |
+|---|---|
+| Total equity could not be computed (a position has no mark) | Nothing is sized, and the record names the unmarked positions. P13 divides *total equity* by ten; cash is not a substitute, because it ignores everything already invested. |
+| The cash is short of a full position | The buy is **skipped with a recorded reason**, not shrunk. The backtest resizes (`size = min(equity / 10, cash)`); a smaller position is a different trade from the one the rule asked for. This is a deliberate divergence — see Known gaps. |
+| A candidate has no live price | Skipped. The rule buys at the next session's open and what that costs is a live price or nothing; the daily close is never used to size. |
+
+Before placing anything the rebalance **pins** the names it might trade onto the
+shared feed subscription and resyncs — the fill simulator needs a depth book
+for a name *before* the order, not after it. That is about thirty instruments,
+never five hundred; the scheduler warms them `swing.warmup_minutes` ahead of the
+open and the pins are given back afterwards.
+
+Every order carries its reason on its `PLACED` event ("Rotation exit: rank
+19 > 15"), and the journal ties the decision to the order through
+`swing_decisions.order_id`.
+
+### The chandelier trailing stop
+
+P14 sets a stop at `entry - 3.5 x ATR14` on the session of entry. P15 raises it
+on every daily close to
+`max(stop, highest_close_since_entry - 3.5 x ATR14_today)` and **never lowers
+it**. `swing_stops` holds exactly what specification §14.4 says must survive a
+restart: the position, the ATR at entry, the highest close since entry and the
+current stop. None of that is recomputable afterwards — the high-water mark
+depends on the entry date and the stop is a running maximum, so a bar restated
+after a corporate action would silently move a stop that has already been acted
+on.
+
+**The one-directional ratchet is the whole idea.** ATR widens after a violent
+session, so `highest_close - 3.5 x ATR_today` can come out *lower* than
+yesterday's stop; taking the maximum is what stops the exit sliding away from a
+position that has just become more dangerous.
+
+**Do not tighten it.** Specification §10 measures every tighter variant as
+worse: an initial stop capped at -8% takes CAGR from 19.9% to 15.7%, a
+breakeven ratchet at +5% to 14.4%, a 2.5x trail to 15.3%, all three together to
+10.6%. Momentum names pull back 6–10% inside intact trends, and a tight stop
+converts those shakeouts into realised losses plus re-entry churn while
+ejecting the positions that produce the fat right tail.
+
+`swing-stop-monitor` watches the levels server-side on its own task, at 1 s —
+four times slower than the chart's bracket monitor, because a stop sitting
+9–14% below the highest close needs no sub-second resolution. It never acts on
+a `None` price, and it does not evaluate anything outside the session: between
+the close and the next open the book holds the day's last prices, and a stop
+fired against one of those would sell at a price nobody can trade at.
+
+#### The Closing Auction Session
+
+Live since 3 August 2026. For F&O-eligible names, continuous cash trading now
+ends at **15:15** and a call auction runs to 15:35; everything else trades
+continuously to 15:30. Two consequences, and this application models both:
+
+* an exit sent between 15:15 and the close for one of those names cannot
+  execute in continuous trading — it lands in the auction, at a price the
+  auction sets; and
+* **this simulator has no model of a call auction at all.** Filling such an
+  order against the last continuous depth book would flatter it.
+
+So a stop that fires in that window is recorded as `TRIGGERED` with the reason,
+and its exit is placed at the next session's open. The backtest predates the
+CAS entirely and assumes a continuous market to the close — that difference is
+in Known gaps.
+
+The F&O set is **derived, never configured**: `instruments.fno_eligible` is
+stamped from the master's own `FUTSTK` rows on every refresh. Verified against
+the live master on 2026-09-18: **210 of the 499 ingested universe names**, which
+matches the specification's own figure.
+
+### The scheduler
+
+Two IST-aware jobs on one task (`swing-scheduler`), both restart-safe:
+
+| Job | When | What it does |
+|---|---|---|
+| nightly | `schedule.nightly_at` (18:15) | refresh `daily_bars` from Dhan, recompute the regime, breadth and ranking, ratchet every trailing stop on the session's close, write the decision record |
+| rebalance | `schedule.rebalance_at` (09:16) | sell list, then buy list, through `submit_paper_order` |
+
+The times live in the strategy YAML because a different strategy would want
+different ones; how often the clock is *checked* is `swing.scheduler_interval_seconds`.
+
+**Idempotence is the journal's, not a flag's.** `sessions_completed_on` is what
+stops a restart at 18:20 re-deciding what was decided at 18:15. The in-memory
+attempt clock only stops a *failing* job retrying every thirty seconds and
+reporting one problem two thousand times before midnight.
+
+**A missed run is detected and reported, never silently re-run.** The trading
+calendar is the regime index's own bar dates — a date NSE published a bar for
+is a date NSE traded — compared against `decided_session_dates`. There is no
+holiday list and there should not be one. The gap is surfaced at startup, on
+the Swing Momentum page and on the health page; nothing re-decides it, because
+a decision recorded days late on bars that may since have been restated would
+be a record of a decision nobody took.
+
+**The feed watchdog now knows about market hours.** It forces a reconnect after
+40 s without a data frame, and Dhan's protocol pings never reach the message
+loop, so the only thing that resets the timer is a trade in something this
+process subscribed to. The zero-subscription case was fixed on 2026-09-18;
+the idle-market case is fixed here — a book held across the close used to
+reconnect every 45 seconds until the next open, burning one of Dhan's five
+connection slots and drowning the dead-feed signal in noise. Both suppressions
+only ever prevent a reconnect that *silence alone* would have caused; a feed
+that dies during a session is still caught.
+
+### The Swing Momentum page
+
+`/swing`, in the sidebar for every signed-in user. It shows the regime gate with
+the numbers that produced it, the breadth and the slots they allow, the current
+ranking, the open book with each position's stop and its distance to it, the
+performance figures, and the full decision history — click a session for every
+decision it took, **including the ones that produced no trade**.
+
+Admins get two buttons: *Run nightly now* (which never places an order) and
+*Run rebalance now* (which places one only if the strategy is armed). Both obey
+exactly the same gates as the scheduled runs.
+
+The page is deliberately **not** hidden when the strategy is switched off. A
+journal is history, and history does not go away with a toggle.
+
+### Performance metrics
+
+The statistics the specification reports, computed from this book's own
+realised history rather than copied from the backtest: CAGR, maximum drawdown,
+MAR, win rate, profit factor, average hold (in *sessions*, which is what the
+specification measures), the exit mix and **return concentration** — which the
+specification calls the single most important statistic on its page, because
+the top 10 of its 672 trades were 55% of the summed return.
+
+A **trade** is a closed `positions` row, not a fill: a position row is one round
+trip with its own entry time, exit time and charges, and counting fills would
+turn a three-part exit into three trades.
+
+Three refusals:
+
+* **CAGR, maximum drawdown and MAR are withheld** when money moved into or out
+  of the portfolio after the first trade, with the reason attached. A deposit is
+  not a gain and a withdrawal is not a drawdown.
+* **Profit factor is `null`, not infinity,** when nothing has lost money.
+* **Concentration is `null`** when the summed trade return is not positive — a
+  share of a loss is not a figure anyone can read.
+
+The **exit mix** (trailing stop vs rotation vs regime exit) is counted from
+`swing_stops.exit_kind`, set at the moment the position left, rather than by
+reading English out of a reason string.
 
 ### Which strategy is running
 
@@ -773,8 +975,19 @@ capabilities the swing rotation does not declare — and the greeks poll.
 | enabled | computes, decides and writes a decision record every session |
 | armed | may submit an order |
 
-Turning the strategy on therefore starts the journal, not the trading — and in
-any case the scheduler and the execution path do not exist yet.
+Turning the strategy on therefore starts the journal, not the trading. Arming
+is a deliberate second act with its own switch on Strategies & Features, its
+own confirmation dialog, and its own warnings.
+
+**An unarmed run journals the identical decision.** The decision rows are the
+same down to the reason sentence; `order_id` being null is the only difference,
+so an armed and an unarmed run can be diffed and only the orders differ. That
+is what makes arming a safeguard rather than a mode — you can watch it decide
+for weeks and then arm it knowing precisely what it would have done.
+
+Only a module that declares an `automation` block can be armed at all.
+`mcx-crude-options` declares none: it is discretionary, no arming control is
+offered for it, and a stored arming row for it is ignored on load.
 
 ## Switching SQLite → MySQL
 
@@ -897,7 +1110,8 @@ since every order carries its own auditable charges row.
 cd backend && .venv/bin/python -m pytest tests/ -q
 ```
 
-448 tests. Two files are safety suites rather than feature tests:
+796 tests, plus one that is opt-in (see below). Two files are safety suites
+rather than feature tests:
 
 `tests/test_no_real_orders.py` parses every Python file's AST (comments and
 docstrings exempt, everything else in scope) and fails if any Dhan URL outside
@@ -910,6 +1124,23 @@ order flows with sentinel credentials and fails if one reaches the log, and
 AST-scans every `logger.*()` call for secret-named arguments. It carries the
 same style of self-test — seven known-bad snippets it must catch and seven
 known-good ones it must not flag.
+
+One test is skipped unless you ask for it, because it imports 1.1 M rows and
+adds about four minutes:
+
+```bash
+cd backend
+SWING_SECTION_13=1 .venv/bin/python -m pytest tests/test_swing_ranking.py -k section_13
+```
+
+It reproduces the specification's §13 snapshot — the gate, the breadth, the
+slots and the top-15 — from the research project's extended panel, and is
+skipped anywhere that panel is absent.
+
+**Never run two `pytest` processes at once.** They used to share one temp
+SQLite file; that is fixed (the database and the log directory are named after
+the process id), but the habit produced a fatal SQLAlchemy traceback that read
+exactly like a broken baseline and cost an hour on 2026-09-18.
 
 ---
 
@@ -1066,23 +1297,46 @@ not carried over.
   bar. The live figures are the more correct ones. Whether the §11 gate
   experiments' conclusions survive the same correction has **not been checked**;
   they were all computed on the affected panel.
-* **The live feed has not been exercised.** The token is configured and the
-  REST chart endpoint works, but `market_feed.synthetic_feed` is still true, so
-  prices are generated locally. Nothing that needs a real depth book — which is
-  everything in phase 6 onwards — has been tested against live quotes.
-* **The Closing Auction Session is not modelled.** Since 3 August 2026
-  continuous trading for F&O-eligible names ends at 15:15. A stop triggered
-  between 15:15 and 15:30 on one of those names cannot fill in continuous
-  trading. The backtest predates this entirely and so does this implementation;
-  the trailing stop is not built yet, and this must be handled when it is. The
-  F&O-eligible set is derivable from the instrument master (228 distinct NSE
-  `FUTSTK` underlyings as of 2026-09-18) and needs no new data source.
+* **A buy that the cash cannot cover is SKIPPED, where the backtest shrinks
+  it.** The backtest sizes at `min(equity / 10, cash)`; this refuses and
+  records why. Over a long run that makes this implementation hold slightly
+  more cash than the backtest did, and the two will diverge for that reason
+  alone. The trade-off is deliberate: a recorded "insufficient cash for a full
+  position" is checkable, and quietly buying two thirds of one is not.
+* **The closing auction is modelled by NOT trading in it, which is not the same
+  as modelling it.** A trailing stop that fires between 15:15 and the close on
+  an F&O-eligible name is recorded as triggered and its exit is placed at the
+  next session's open. What actually happens to such an order at a real broker
+  is that it joins the call auction and fills at the auction price — which this
+  simulator cannot compute, because no depth book for an auction is published.
+  Deferring to the next open is the conservative choice and it is **not** what
+  the backtest did: the backtest predates the CAS entirely and assumes a
+  continuous market to 15:30, so its trail-stop fills are slightly better than
+  these will be on the 210 affected names.
+* **The backtest's slippage model is not this simulator's.** The specification
+  assumes `open x (1 ± 0.05%)` per side. Orders here cross the spread, walk the
+  five visible depth levels and pay `trading.slippage_ticks` adversely on top.
+  Comparing the two is specification §14.3's own request and has **not been
+  done** — it needs weeks of parallel fills, not one session.
+* **Average hold is reported in sessions using the regime index's calendar**,
+  which is right, but a trade that opened before the first stored session falls
+  back to the earliest one. That cannot happen with the ten-year panel loaded
+  and is noted because it would silently shorten the figure if it ever did.
 * **The DP charge is levied per ORDER, not per scrip per day.** Selling one
   scrip in two orders on one day is charged twice. This errs pessimistically and
   the strategy sells a whole position in a single order, but it is not what the
   depository does.
 * **Taxes on gains are not modelled at all.** Returns here, like the
   specification's, are pre-tax. STCG applies to holds under twelve months.
+* **The armed order path has never run against the live feed.** The regime gate
+  has been off since 2026-02-27, so every live run correctly buys nothing, and
+  arming the strategy would not change that. Execution is covered by tests that
+  place real paper orders through `submit_paper_order` against a real depth
+  book — but the first time this places an order against live NSE quotes will
+  be the first time.
+* **The trailing stop has never fired against live quotes either**, for the
+  same reason: nothing has been held. The ratchet, the auction deferral and the
+  exit are all tested; none has been exercised on a real position.
 * **The LIQUIDBEES cash sleeve and the gold overlay are not implemented.** The
   specification records the first as arithmetic rather than a simulation and the
   second as an overlay estimate; neither was adopted.

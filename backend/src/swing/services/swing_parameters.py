@@ -130,7 +130,6 @@ class SwingParameters:
         regime = definition.module_section("regime")
         schedule = definition.module_section("schedule")
         off_gate = definition.module_section("off_gate")
-        automation = definition.module_section("automation")
 
         where = f"{source}: parameters"
         breadth_lower = _number(parameters, "breadth_lower", where)
@@ -200,7 +199,13 @@ class SwingParameters:
                 ),
                 require_entry_return=bool(off_gate.get("require_entry_return", False)),
             ),
-            armed_by_default=bool(automation.get("armed_by_default", False)),
+            # Read off the DEFINITION, not out of `module_config`: whether a
+            # strategy trades unattended became a framework concern on
+            # 2026-09-18, because the Strategies page, the health page and the
+            # scheduler all have to know it without understanding momentum.
+            # `automation` is a framework key now, so `module_section` would
+            # return an empty mapping and this would silently read False.
+            armed_by_default=bool(definition.automation.armed_by_default),
         )
 
     def slots_for_breadth(self, breadth: Optional[float]) -> Optional[int]:

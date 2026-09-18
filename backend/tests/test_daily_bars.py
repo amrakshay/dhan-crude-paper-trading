@@ -459,6 +459,17 @@ async def test_the_refresh_asks_only_for_what_is_missing(db_session, monkeypatch
     # Re-requests the last stored session too, so a restatement is picked up.
     assert client.requests[0]["from_date"].date() == date(2026, 9, 9)
 
+    # "Already current" is NOT "unresolved". Both carry a skipped_reason, and
+    # lumping them together made a full live refresh report "WELCORP has no
+    # active row in the instrument master" about a symbol that has one and was
+    # simply up to date (2026-09-18). A report that names the wrong problem is
+    # worse than one that names none.
+    assert result.unresolved == []
+    assert [one.symbol for one in result.already_current] == ["BHEL"]
+    payload = result.as_dict()
+    assert payload["symbolsUnresolved"] == 0
+    assert payload["symbolsAlreadyCurrent"] == 1
+
 
 async def test_one_failing_symbol_does_not_end_the_run(db_session, monkeypatch):
     from src.instruments.database.db_operations.instrument_repository import (

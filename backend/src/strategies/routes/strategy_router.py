@@ -13,6 +13,8 @@ from src.auth.dependencies import SessionPrincipal, require_admin, require_sessi
 from src.core.singleton_utils import SingletonDepends
 from src.database.session import get_async_session
 from src.strategies.api_schemas.strategy_schemas import (
+    ArmRequest,
+    ArmResponse,
     StrategyListResponse,
     ToggleRequest,
     ToggleResponse,
@@ -70,6 +72,39 @@ async def set_strategy_enabled(
     """
     return await controller.set_strategy_enabled(
         strategy_key, request.enabled, user_id=principal.user_id
+    )
+
+
+@strategy_router.get("/{strategy_key}/arm-warnings")
+async def arm_warnings(
+    strategy_key: str,
+    controller: StrategyController = Depends(get_strategy_controller),
+    _: SessionPrincipal = Depends(require_admin),
+) -> Dict[str, Any]:
+    """What arming this strategy would let loose, before it is armed."""
+    return await controller.arm_warnings(strategy_key)
+
+
+@strategy_router.put("/{strategy_key}/armed", response_model=ArmResponse)
+async def set_strategy_armed(
+    strategy_key: str,
+    request: ArmRequest,
+    controller: StrategyController = Depends(get_strategy_controller),
+    principal: SessionPrincipal = Depends(require_admin),
+) -> ArmResponse:
+    """Let an automated strategy submit orders of its own accord, or stop it.
+
+    Separate from the enabled switch, and separate on purpose: an enabled
+    strategy computes, decides and writes a decision record every session; an
+    ARMED one may also spend the portfolio's money without anyone clicking.
+    Disarming never cancels or closes anything -- open positions keep their
+    stops recomputed and recorded, and only the placing of new orders stops.
+
+    A strategy whose module declares no automation block is refused with a 400:
+    there is nothing to arm, because every order in it comes from a person.
+    """
+    return await controller.set_strategy_armed(
+        strategy_key, request.armed, user_id=principal.user_id
     )
 
 

@@ -32,6 +32,21 @@ class Instrument(TimestampedModel):
     lot_size = Column(Integer, nullable=False, default=1)
     tick_size = Column(Money, nullable=True)
 
+    # Whether this underlying has listed single-stock futures on the same
+    # exchange, read off the master's own FUTSTK rows during the same pass.
+    #
+    # It exists for the Closing Auction Session, live since 3 August 2026:
+    # continuous cash trading for F&O-eligible names now ends at 15:15, with an
+    # auction to 15:35. A stop triggered between 15:15 and the close on one of
+    # those names cannot fill in continuous trading, and a simulator that let
+    # it would be flattering the fills. Non-F&O names trade continuously to
+    # 15:30 and are unaffected.
+    #
+    # Derived, never configured: 228 distinct NSE FUTSTK underlyings as of
+    # 2026-09-18, and the list changes as the exchange adds and removes names.
+    # False for every MCX row, which has no cash session and no auction.
+    fno_eligible = Column(Boolean, nullable=False, default=False)
+
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     refreshed_at = Column(PreciseDateTime, nullable=True)
 

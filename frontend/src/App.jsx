@@ -14,6 +14,7 @@ import UsersPage from './pages/UsersPage';
 import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
 import StrategiesPage from './pages/StrategiesPage';
+import SwingMomentumPage from './pages/SwingMomentumPage';
 import SystemHealthPage from './pages/SystemHealthPage';
 
 /**
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/users" element={<RoleRoute path="/users"><UsersPage /></RoleRoute>} />
         <Route path="/profile" element={<RoleRoute path="/profile"><ProfilePage /></RoleRoute>} />
         <Route path="/strategies" element={<RoleRoute path="/strategies"><StrategiesPage /></RoleRoute>} />
+        <Route path="/swing" element={<RoleRoute path="/swing"><SwingMomentumPage /></RoleRoute>} />
         <Route path="/settings" element={<RoleRoute path="/settings"><SettingsPage /></RoleRoute>} />
         <Route path="/health" element={<RoleRoute path="/health"><SystemHealthPage /></RoleRoute>} />
         <Route path="/" element={<Navigate to="/live" replace />} />

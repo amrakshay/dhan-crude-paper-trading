@@ -383,6 +383,8 @@ def build_health(
     from src.charges.services.charges_engine import ChargesEngine
     from src.market.services.feed_manager import get_feed_manager
     from src.orders.services.order_matcher import get_order_matcher
+    from src.swing.services.scheduler import get_swing_scheduler
+    from src.swing.services.stop_monitor import get_swing_stop_monitor
 
     manager = get_feed_manager()
     status = manager.status()
@@ -390,6 +392,8 @@ def build_health(
     greeks_status = status.get("greeks") or {}
     matcher_status = get_order_matcher().status()
     bracket_status = get_bracket_monitor().status()
+    swing_stop_status = get_swing_stop_monitor().status()
+    swing_scheduler_status = get_swing_scheduler().status()
 
     feed_running = feed_status.get("state") not in (
         None,
@@ -442,6 +446,18 @@ def build_health(
             "runsLabel": "passes",
             "lastError": bracket_status.get("error"),
         },
+        "swing-stop-monitor": {
+            "intervalMs": swing_stop_status.get("intervalMs"),
+            "runs": swing_stop_status.get("runs"),
+            "runsLabel": "passes",
+            "lastError": swing_stop_status.get("error"),
+        },
+        "swing-scheduler": {
+            "intervalMs": int(swing_scheduler_status.get("intervalSeconds") or 0) * 1000,
+            "runs": swing_scheduler_status.get("runs"),
+            "runsLabel": "clock checks",
+            "lastError": swing_scheduler_status.get("error"),
+        },
     }
 
     try:
@@ -471,6 +487,10 @@ def build_health(
         "workers": {
             "orderMatcher": matcher_status,
             "bracketMonitor": bracket_status,
+            # The rotation's own two. Both report counters they already keep;
+            # nothing here is measured for this page.
+            "swingStopMonitor": swing_stop_status,
+            "swingScheduler": swing_scheduler_status,
             "greeksPoller": {
                 "enabled": greeks_status.get("enabled"),
                 "synthetic": greeks_status.get("synthetic"),

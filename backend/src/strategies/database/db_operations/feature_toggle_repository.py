@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.strategies.database.db_models.feature_toggle_model import (
+    SCOPE_AUTOMATION,
     SCOPE_CAPABILITY,
     SCOPE_STRATEGY,
     FeatureToggle,
@@ -30,6 +31,7 @@ class FeatureToggleRepository(BaseRepository[FeatureToggle]):
         states: Dict[str, Dict[str, bool]] = {
             SCOPE_STRATEGY: {},
             SCOPE_CAPABILITY: {},
+            SCOPE_AUTOMATION: {},
         }
         for row in rows:
             states.setdefault(row.scope, {})[row.toggle_key] = bool(row.enabled)

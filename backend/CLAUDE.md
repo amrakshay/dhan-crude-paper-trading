@@ -494,10 +494,15 @@ tick accumulation that rule forbids; read that before touching this.
 - **The trading calendar is the regime index's own bar dates.** A date NSE
   published a bar for is a date NSE traded, which is why there is no holiday
   list to maintain and no second source to go stale.
-- **The importer commits per symbol.** The ten-year panel is 1.09 million rows;
-  held in one session's identity map that is enough pending ORM objects to take
-  the process down. It also means a failure half-way through leaves the symbols
-  already done.
+- **The importer AND the refresh commit per symbol.** The ten-year panel is
+  1.09 million rows; held in one session's identity map that is enough pending
+  ORM objects to take the process down. It also means a failure half-way
+  through leaves the symbols already done. The refresh has a third reason,
+  found on 2026-09-18 during the first full live run: on SQLite one
+  twelve-minute transaction blocks every other writer, and the swing stop
+  monitor -- which polls every second -- logged "database is locked" once a
+  second for the whole run. Committing per symbol turns that into five hundred
+  short locks nothing notices.
 - **A flat zero-volume bar is a session that never happened, and is dropped.**
   `is_phantom_bar`: all four prices identical with volume exactly 0. NSE never
   produces that -- a suspended stock has no bar, a circuit-locked one still has
@@ -545,6 +550,98 @@ list; these are the ones that will bite a future change.
   behaviours are load-bearing and asserted first: `max(axis=1)` skips the NaNs
   in the first true range, and `ewm(adjust=False)` seeds on the first
   observation.
+
+- **One decision, one place.** `rebalance_planner.effective_gate()` resolves
+  the baseline-vs-V3b disagreement (does P17 liquidate? how many slots? which
+  momentum floor?) and the nightly runner, the rebalance and the page all read
+  it. `SwingRunner._decide` runs the rebalance's OWN `plan_sells`, so tonight's
+  record and tomorrow's orders cannot disagree about which holdings are due out.
+  The buy half is deliberately not shared: at 18:15 there is no live price to
+  size against.
+
+- **`session_snapshot()`, not `snapshot()`, is what the strategy acts on.** V3b
+  applies its own momentum floor while the gate is off, and a floor is applied
+  during RANKING rather than afterwards -- a name filtered out by P6 never gets
+  a rank, so filtering the finished list would leave every rank wrong.
+
+- **The rebalance COMMITS at defined points**, which is unusual here and
+  deliberate. Sells have to be visible to the balance before the buys are
+  sized, and `FeedManager.resync()` opens its own session -- which on SQLite
+  blocks against an outer transaction still holding uncommitted writes. A
+  rebalance is a sequence of durable steps, not one atomic act: an order that
+  filled has filled.
+
+---
+
+## 10f. The rotation's background work
+
+Three things run on their own tasks, and all three follow `OrderMatcher`'s
+shape: own task, own session, off the tick path, registered in
+`TASK_DESCRIPTIONS` **and** `expected_task_names`, with a `status()` dict the
+health page reads.
+
+- **`swing_stop_monitor`** is a SIBLING of `bracket_monitor`, not a second
+  shape bolted onto it. That one watches a FUTURE and closes an OPTION from a
+  `chart_trades` row; this one watches a stock and closes the same stock from a
+  `swing_stops` row. It only acts while the market is open (`market_clock`),
+  never on a `None` price, and never inside the Closing Auction Session for an
+  F&O-eligible name -- there it records the trigger and the exit waits for the
+  next open.
+- **`swing_scheduler`** is the only clock in this application. Idempotence is
+  the JOURNAL's (`sessions_completed_on`), not a flag's; the in-memory attempt
+  clock exists only so a failing job does not report one problem two thousand
+  times before midnight.
+- **`src/strategies/services/market_clock.py`** answers three different
+  questions from one strategy's `market_hours`: is the market open (the stop
+  monitor), is ANY enabled market open (the feed watchdog), and could an order
+  sent now fill CONTINUOUSLY (the auction rule). There is deliberately no
+  holiday list -- the session calendar is the regime index's own bar dates, and
+  being wrong on a holiday costs one idle poll rather than a wrong decision.
+
+**Arming is framework state, not a swing concept.** `StrategyDefinition.
+automation` is parsed from the YAML's `automation` block (a FRAMEWORK key since
+2026-09-18, so `module_section("automation")` returns nothing), the live flag
+is a `feature_toggles` row under the `AUTOMATION` scope, and
+`registry.is_armed()` is armed AND enabled. A module that declares no
+`automation` block is discretionary: `set_armed` raises for it, a stored row
+for it is ignored on load, and no arming control is offered.
+
+**`automation.max_lots_per_order` exists because a "lot" means two things.**
+One MCX CRUDEOIL lot is 100 barrels; an NSE delivery "lot" is one share. A
+single global `trading.max_lots_per_order` cannot be right for both, and
+routing the share count through `quantity_override` to dodge the check would
+leave `order.lots` disagreeing with `order.quantity / order.lot_size` on every
+equity order.
+
+**`submit_paper_order(reason=...)` writes WHY onto the PLACED event**, not onto
+a column. An order placed by a person has no reason beyond their clicking; one
+placed by a strategy has a specific one, and the journal carries the same
+sentence at full length tied to the order through `SwingDecision.order_id`. A
+`strategy_reason` column on `orders` would be a third copy, null for every
+human order.
+
+---
+
+## 10g. Performance metrics
+
+`src/reports/services/metrics_service.py` is generic and sits beside
+`pnl_service`, which it does not duplicate: realised P&L is still replayed from
+fills by that module, and the two agree by construction (section 6).
+
+- **A trade is a closed `positions` ROW, not a fill.** A position row is one
+  round trip with its own entry time, exit time and charges. Counting fills
+  would turn a three-part exit into three trades and make the win rate, the
+  average hold and the concentration all wrong.
+- **Cash flows are not returns.** CAGR, maximum drawdown and MAR are WITHHELD
+  when money moved into or out of the book after the first trade, with the
+  reason attached -- a deposit is not a gain and a withdrawal is not a
+  drawdown. Same rule `BalanceService` applies to an unmarked position.
+- **Undefined is not zero or infinity.** Profit factor with no losses is
+  `None`, not a very large number; concentration on a negative summed return is
+  `None`, because a share of a loss is not a figure anyone can read.
+- The **exit mix** is the one swing-specific piece and lives in
+  `swing_service.exit_mix`, counted from `swing_stops.exit_kind` rather than by
+  reading English out of a reason string.
 
 ---
 

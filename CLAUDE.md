@@ -73,12 +73,18 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (591 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (796 tests)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
 CONFIG_PATH=conf .venv/bin/alembic upgrade head            # migrate
 CONFIG_PATH=conf .venv/bin/python server.py                # serve on :8000
+
+# daily bars (the swing rotation's inputs)
+CONFIG_PATH=conf .venv/bin/python scripts/import_daily_bars.py \
+    --strategy nse-swing-momentum --directory <the 10-year panel>   # bootstrap, once
+CONFIG_PATH=conf .venv/bin/python scripts/refresh_daily_bars.py \
+    --strategy nse-swing-momentum [--as-of YYYY-MM-DD]              # top up from Dhan
 
 # frontend
 cd frontend
@@ -147,6 +153,13 @@ Rules that are not negotiable:
   withheld -- not zeroed -- when any open position has no mark.
 - **Funds are checked at placement AND at the fill.** A resting order that
   became unaffordable is rejected, never partially filled to fit.
+- **ENABLED and ARMED are two switches.** Enabling a strategy makes it compute,
+  decide and write a decision record; ARMING is what lets it submit an order of
+  its own accord. Only a module that declares an `automation` block in its YAML
+  can be armed at all -- `mcx-crude-options` declares none and never will, so
+  every order in it comes from a person. An unarmed run journals the identical
+  decision and places nothing, which is what makes arming a safeguard rather
+  than a mode.
 
 ---
 
@@ -198,6 +211,28 @@ hundred a scheduler is about to trade.
 The distinction to keep is **provenance, not durability**: fetched bars may be
 stored; ticks may not be accumulated into bars. If you find yourself writing
 `daily_bars` rows from `MarketBook`, you are on the wrong side of it.
+
+**The rotation decides on a clock, and a missed run is reported.** The nightly
+job (18:15 IST) refreshes the bars, decides, ratchets every trailing stop and
+journals; the rebalance (09:16) trades. Idempotence comes from the JOURNAL
+(`sessions_completed_on`), not from a flag, so a restart at 18:20 does not
+re-decide 18:15. A session with no record is detected against the regime
+index's own bar dates and REPORTED -- never silently re-decided days later on
+bars that may since have been restated.
+
+**The chandelier stop ratchets up and never down.** Set at entry to
+`entry - 3.5 x ATR14`, raised on each daily close to
+`max(stop, highest_close_since_entry - 3.5 x ATR14_today)`. ATR widens after a
+violent day, so the naive formula can LOWER the stop on exactly the session the
+position became more dangerous; the `max()` is the rule. Do not tighten the
+multiple -- the specification measures every tighter variant as worse.
+
+**A stop that cannot fill honestly does not fill.** NSE's Closing Auction
+Session (live 3 Aug 2026) ends continuous cash trading at 15:15 for
+F&O-eligible names. A stop triggered after that is recorded as triggered and
+its exit waits for the next session's open, because this simulator has no model
+of a call auction. The F&O set is derived from the instrument master's own
+FUTSTK rows, never configured.
 
 **A chart click never writes an option.** `src/chart_trading/` translates a
 click on the FUTURE's chart into a long ATM option: Buy buys the call, Sell buys
@@ -295,13 +330,21 @@ backend/src/market/services/candle_service.py       timeframes, aggregation, cac
 frontend/src/components/PriceChart.jsx              the chart; see frontend/NOTICE
 backend/src/chart_trading/                         one-click trading from the chart
 backend/src/chart_trading/services/bracket_monitor.py   server-side SL/TP watcher
+backend/src/swing/                 the NSE rotation: ranking, planner, execution,
+                                   stops, scheduler, journal -- see its README
+backend/src/swing/services/scheduler.py            the only clock in this app
+backend/src/swing/services/stop_monitor.py         the chandelier stop watcher
+backend/src/reports/services/metrics_service.py    CAGR, drawdown, MAR, concentration
+backend/src/strategies/services/market_clock.py    is the market open, and may an
+                                                   order fill continuously
 backend/src/strategies/            the registry, the toggles and their page
 backend/src/portfolios/            portfolios, the cash ledger, the balance maths
 backend/src/health/                the system health page's backend (no tables)
 backend/src/log_buffer.py          in-memory ring buffer of recent WARNING+ records
 frontend/src/pages/SystemHealthPage.jsx            the system health page
 frontend/src/pages/PortfoliosPage.jsx             money, per portfolio
-frontend/src/pages/StrategiesPage.jsx             what is on and what it costs
+frontend/src/pages/StrategiesPage.jsx             what is on, what it costs, what is armed
+frontend/src/pages/SwingMomentumPage.jsx          the rotation's decision journal
 frontend/src/portfolios/ActivePortfolioContext.jsx  the header picker's scope
 backend/tests/test_no_real_orders.py   the safety suite
 frontend/src/theme/tokens.js       palette ported from the Privacera portal

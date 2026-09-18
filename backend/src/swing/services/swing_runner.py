@@ -20,8 +20,8 @@ Two properties the scheduler depends on:
   job ran and there was no session" are different facts, and the missed-run
   detector has to tell them apart.
 """
-from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from src.core.time_utils import utc_now
@@ -38,22 +38,25 @@ from src.swing.database.db_models.swing_session_model import (
 )
 from src.swing.services.journal_service import Decision, SessionRecord, SwingJournalService
 from src.swing.services.ranking_service import RankingService, RankingSnapshot
+from src.swing.services.rebalance_planner import (
+    Holding,
+    RebalancePlanner,
+    effective_gate,
+)
+from src.swing.services.stop_service import StopService
 from src.swing.services.swing_parameters import SwingParameters
 
 logger = get_logger("swing.runner")
 
+# The nightly run does not size a position, so it has no equity to pass to the
+# shared "why were there no entries" logic. A sentinel rather than None,
+# because None there means "equity could not be computed", which is a real
+# answer the rebalance records and the nightly run must not claim.
+_NIGHTLY_EQUITY_NOT_NEEDED = Decimal("0")
+
 
 class SwingRunError(Exception):
     pass
-
-
-@dataclass
-class Holding:
-    """A position as the strategy sees it. Money stays `Decimal` elsewhere."""
-
-    symbol: str
-    security_id: str
-    quantity: int
 
 
 class SwingRunner:
@@ -65,11 +68,23 @@ class SwingRunner:
         journal: SwingJournalService,
         definition: StrategyDefinition,
         parameters: Optional[SwingParameters] = None,
+        stops: Optional["StopService"] = None,
     ):
         self.ranking = ranking
         self.journal = journal
         self.definition = definition
         self.parameters = parameters or SwingParameters.from_definition(definition)
+        # P15's nightly ratchet. Optional so the decision half of this runner
+        # can be exercised without a stop table; the scheduler always supplies
+        # one, because a nightly run that decides and does not move the stops
+        # is half a nightly run.
+        self.stops = stops
+
+    def _equity_segment(self) -> str:
+        for instrument_set in self.definition.instrument_sets:
+            if instrument_set.from_universe:
+                return instrument_set.exchange_segment
+        return self.definition.exchange_segment
 
     async def run_nightly(
         self,
@@ -83,7 +98,7 @@ class SwingRunner:
         holdings = list(holdings or [])
         held_symbols = [holding.symbol for holding in holdings]
 
-        snapshot = await self.ranking.snapshot(as_of=as_of)
+        snapshot = await self.ranking.session_snapshot(as_of=as_of)
         regime = snapshot.regime
 
         if regime.bar_date is None:
@@ -121,6 +136,21 @@ class SwingRunner:
 
         decisions = self._decide(snapshot, holdings)
 
+        # P15. Every open position's stop is raised on this session's close,
+        # BEFORE the record is written, so the journal entry for the session
+        # carries the stop moves it caused.
+        if self.stops is not None:
+            ratchet = await self.stops.ratchet_all(
+                session_date, self._equity_segment()
+            )
+            decisions.extend(ratchet.moved)
+            logger.info(
+                "Swing nightly %s: %s stop(s) recomputed on the close of %s, "
+                "%s left where they were.",
+                self.definition.key, ratchet.moved_count,
+                session_date.isoformat(), ratchet.unchanged,
+            )
+
         return await self.journal.record_session(
             strategy_key=self.definition.key,
             portfolio_id=portfolio_id,
@@ -136,78 +166,65 @@ class SwingRunner:
     def _decide(
         self, snapshot: RankingSnapshot, holdings: List[Holding]
     ) -> List[Decision]:
+        """What the strategy would do at the next open, with no money involved.
+
+        The sell half is the REBALANCE'S OWN PLANNER, run against the same
+        snapshot, so the nightly record and the morning's orders cannot
+        disagree about which holdings are due out or why. The buy half is
+        deliberately not the planner: at 18:15 there is no live price to size
+        against, so this records WHICH names would be entered and leaves the
+        quantities to the rebalance, where a price exists.
+        """
         parameters = self.parameters
-        regime = snapshot.regime
+        gate = effective_gate(snapshot, parameters)
+        planner = RebalancePlanner(parameters, self.definition.key)
         held = {holding.symbol: holding for holding in holdings}
         decisions: List[Decision] = []
 
         # 1. Every holding, with the rank that justifies keeping or selling it.
-        for symbol, holding in sorted(held.items()):
-            rank = snapshot.rank_of(symbol)
-            if not regime.gate_on:
-                decisions.append(
-                    Decision(
-                        symbol=symbol,
-                        action=ACTION_HELD,
-                        rank=rank,
-                        quantity=holding.quantity,
-                        reason=(
-                            f"Regime exit due at the next open: {regime.index_symbol} "
-                            f"is below its {parameters.regime.sma_sessions}-session SMA."
-                        ),
-                    )
-                )
-                continue
-            if rank is None:
-                decisions.append(
-                    Decision(
-                        symbol=symbol,
-                        action=ACTION_HELD,
-                        rank=None,
-                        quantity=holding.quantity,
-                        reason=(
-                            "Rotation exit due at the next open: no longer ranked "
-                            f"({snapshot.skipped.get(symbol, 'failed a filter')})."
-                        ),
-                    )
-                )
-                continue
-            if rank > parameters.rotation_exit_rank:
-                decisions.append(
-                    Decision(
-                        symbol=symbol,
-                        action=ACTION_HELD,
-                        rank=rank,
-                        quantity=holding.quantity,
-                        reason=(
-                            f"Rotation exit due at the next open: rank {rank} > "
-                            f"{parameters.rotation_exit_rank}."
-                        ),
-                    )
-                )
-                continue
+        #    Recorded as HELD -- it IS still held tonight -- with a reason that
+        #    says what is due to happen at the next open.
+        sell_plan = planner.plan_sells(snapshot, list(holdings))
+        for intent in sell_plan.sells:
             decisions.append(
                 Decision(
-                    symbol=symbol,
+                    symbol=intent.symbol,
                     action=ACTION_HELD,
-                    rank=rank,
-                    quantity=holding.quantity,
-                    reason=f"Held: rank {rank} is within {parameters.rotation_exit_rank}.",
+                    rank=intent.rank,
+                    quantity=intent.quantity,
+                    reason=f"Due at the next open -- {intent.reason}",
                 )
             )
+        decisions.extend(sell_plan.holds)
+        decisions.sort(key=lambda one: one.symbol)
 
         # 2. Why nothing is being entered, or which names would be.
-        blocked = self._entry_block_reason(snapshot, len(held))
+        blocked = planner._entry_block_reason(  # noqa: SLF001 - one decision, one place
+            snapshot,
+            gate,
+            # The book as it will be AFTER the exits above: a rotation exit
+            # frees its slot for the same session's entry, which is what the
+            # backtest's "exits fill first" ordering means.
+            len(held) - len(sell_plan.sells),
+            # The nightly run does not size, so equity being unknown is not a
+            # reason to record "nothing entered" here -- the rebalance is where
+            # that bites, and it says so there.
+            equity=_NIGHTLY_EQUITY_NOT_NEEDED,
+            unmarked_reason=None,
+        )
         if blocked is not None:
             decisions.append(
                 Decision(symbol="*", action=ACTION_NOT_ENTERED, reason=blocked)
             )
             return decisions
 
-        openings = min(snapshot.slots, parameters.max_positions) - len(held)
+        remaining = {symbol for symbol in held} - {
+            intent.symbol for intent in sell_plan.sells
+        }
+        openings = min(gate.slots, parameters.max_positions) - len(remaining)
         taken = 0
         for candidate in snapshot.candidates:
-            if candidate.symbol in held:
+            if candidate.symbol in remaining:
                 continue
             if taken >= openings:
                 decisions.append(
@@ -216,10 +233,8 @@ class SwingRunner:
                         action=ACTION_SKIPPED,
                         rank=candidate.rank,
                         score=candidate.score,
-                        reason=(
-                            f"Skipped: slots full ({snapshot.slots} allowed by a "
-                            f"breadth of {snapshot.breadth * 100:.1f}%, "
-                            f"{len(held)} already held)."
+                        reason=planner._slots_full_reason(  # noqa: SLF001
+                            snapshot, gate, len(remaining)
                         ),
                     )
                 )
@@ -235,90 +250,14 @@ class SwingRunner:
                     reason=(
                         f"Entry due at the next open: rank {candidate.rank}, "
                         f"score {candidate.score:.1f}, momentum "
-                        f"{candidate.momentum * 100:.1f}%."
+                        f"{candidate.momentum * 100:.1f}%. The quantity is "
+                        f"decided at the open, against a live price."
                     ),
                 )
             )
             taken += 1
 
         return decisions
-
-    def _entry_block_reason(
-        self, snapshot: RankingSnapshot, held_count: int
-    ) -> Optional[str]:
-        """Why no new position is opened, or None if entries are allowed.
-
-        Each branch carries the numbers, because a record that says only "no
-        entries" cannot be checked against anything later.
-        """
-        parameters = self.parameters
-        regime = snapshot.regime
-
-        if not regime.gate_on:
-            shortfall = regime.shortfall_percent
-            gap = f", needs {shortfall:.1f}% to reclaim it" if shortfall is not None else ""
-            if parameters.off_gate.enabled:
-                return (
-                    f"Off-gate variant is ENABLED, which the owner's own research "
-                    f"found ends lower than holding cash. "
-                    f"{regime.index_symbol} {regime.close:,.1f} below SMA "
-                    f"{regime.sma200:,.1f}{gap}. Not yet implemented, so nothing "
-                    f"is entered."
-                )
-            return (
-                f"Not entered: the regime gate is OFF. {regime.index_symbol} "
-                f"{regime.close:,.1f} is below its "
-                f"{parameters.regime.sma_sessions}-session SMA "
-                f"{regime.sma200:,.1f}{gap}. The book holds 100% cash by design."
-            )
-
-        if not regime.entries_allowed:
-            shown = (
-                "undefined"
-                if regime.return_over_window is None
-                else f"{regime.return_over_window * 100:.2f}%"
-            )
-            return (
-                f"Not entered: the {parameters.regime.entry_return_sessions}-session "
-                f"return filter blocks new entries. {regime.index_symbol} return is "
-                f"{shown}, which is not above "
-                f"{parameters.regime.entry_return_minimum:.2%}. Existing positions "
-                f"are unaffected."
-            )
-
-        if snapshot.breadth is None:
-            return (
-                "Not entered: breadth could not be measured -- no name in the "
-                "universe passed the liquidity and price floors with a defined "
-                "SMA200. Refusing to size from a breadth that is unknown rather "
-                "than treating it as zero."
-            )
-
-        if snapshot.slots is None or snapshot.slots <= 0:
-            return (
-                f"Not entered: breadth {snapshot.breadth * 100:.1f}% "
-                f"({snapshot.above_sma_count} of {snapshot.liquid_count} above "
-                f"their own SMA200) allows {snapshot.slots} slots. The graded "
-                f"breadth ramp buys nothing at or below "
-                f"{parameters.breadth_lower * 100:.0f}%."
-            )
-
-        if held_count >= min(snapshot.slots, parameters.max_positions):
-            return (
-                f"Not entered: {held_count} positions held against "
-                f"{snapshot.slots} slots allowed by a breadth of "
-                f"{snapshot.breadth * 100:.1f}%."
-            )
-
-        if not snapshot.candidates:
-            return (
-                f"Not entered: no name passed the filters. "
-                f"{snapshot.liquid_count} liquid, "
-                f"{snapshot.above_sma_count} above their own SMA200, none clearing "
-                f"the {parameters.momentum_floor:.0%} momentum floor."
-            )
-
-        return None
 
     # --- reporting ---------------------------------------------------------
     @staticmethod

@@ -93,7 +93,20 @@ class OrderService:
         )
 
     @staticmethod
-    def _max_lots() -> int:
+    def _max_lots(strategy=None) -> int:
+        """The fat-finger rail, per strategy where one is declared.
+
+        A "lot" is 100 barrels on MCX and one share on NSE cash, so a single
+        global cap cannot be right for both: 100 crude lots is 10,000 barrels,
+        100 equity "lots" is 100 shares. A strategy that needs a different rail
+        declares `automation.max_lots_per_order`; everything else keeps the
+        global value it always had.
+        """
+        configured = (
+            strategy.automation.max_lots_per_order if strategy is not None else None
+        )
+        if configured is not None:
+            return int(configured)
         return config_utils.get_property_value_int("trading.max_lots_per_order", 100)
 
     # --- placement ---------------------------------------------------------
@@ -111,6 +124,7 @@ class OrderService:
         is_close_order: bool = False,
         quantity_override: Optional[int] = None,
         portfolio_id: Optional[int] = None,
+        reason: Optional[str] = None,
     ) -> Order:
         """Submit a paper order into one portfolio.
 
@@ -123,6 +137,16 @@ class OrderService:
         unambiguous while exactly one portfolio is active; with several, the
         resolver refuses rather than guessing, because a trade landing in the
         wrong book is the failure the portfolio selector exists to prevent.
+
+        `reason` is WHY, and it is written onto the PLACED event rather than
+        onto a column of its own. An order placed by a person has no reason
+        beyond their clicking; one placed by a strategy has a specific one
+        ("Rotation exit: rank 19 > 15") and the operator who finds the trade
+        must be able to read it from the order. The strategy's own journal
+        carries the same sentence at full length and ties the decision to this
+        order through `SwingDecision.order_id`; `order_events.message` is where
+        it surfaces on the order itself. A `strategy_reason` column on `orders`
+        would be a third copy of one sentence, null for every human order.
         """
         side = str(side).upper()
         order_type = str(order_type).upper()
@@ -188,9 +212,9 @@ class OrderService:
             )
         if lots <= 0:
             raise OrderValidationError("lots must be positive")
-        if lots > self._max_lots():
+        if lots > self._max_lots(strategy):
             raise OrderValidationError(
-                f"lots exceeds the configured maximum of {self._max_lots()}"
+                f"lots exceeds the configured maximum of {self._max_lots(strategy)}"
             )
         if order_type == OrderType.LIMIT.value:
             if limit_price is None or Decimal(str(limit_price)) <= 0:
@@ -262,10 +286,15 @@ class OrderService:
         )
         self.orders.session.add(order)
         await self.orders.session.flush()
+        placed_message = f"{side} {lots} lot(s) {order_type}"
+        if reason:
+            placed_message = f"{placed_message} -- {reason}"
         await self.orders.add_event(
             order, "PLACED", OrderStatus.PENDING.value, now,
             price=limit_price, quantity=quantity,
-            message=f"{side} {lots} lot(s) {order_type}",
+            # OrderEvent.message is VARCHAR(255). The journal keeps the full
+            # 500-character sentence; this is the readable head of it.
+            message=placed_message[:255],
         )
 
         logger.info(

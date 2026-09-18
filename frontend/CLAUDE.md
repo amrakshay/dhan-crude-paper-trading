@@ -263,6 +263,44 @@ sidebar is presentation, section 5).
 
 ---
 
+## 5d. The Swing Momentum page
+
+`src/pages/SwingMomentumPage.jsx`, and the arming control on
+`StrategiesPage.jsx`. This is the decision journal of the only strategy that
+trades with nobody watching, so section 3's honesty rules apply harder here
+than anywhere except the health page.
+
+- **It polls at 10 s and opens no socket.** The ranking changes once a session
+  and the stops are recomputed once a night; nothing on this page moves at tick
+  speed, and a page that is a RECORD must not depend on the feed being healthy
+  to show what was decided. Marks come from the server's own
+  `BalanceService.mark_for`, not from `MarketFeedContext`.
+- **Null is rendered as "not measured", never as 0.** A breadth the server
+  could not measure, a slot count of null, a position with no mark, an equity
+  figure `BalanceService` withheld -- each says so. `breadth: null` and
+  `breadth: 0` are different answers and only one of them is a reason to hold
+  cash.
+- **ENABLED and ARMED are two chips, not one.** A module with no `automation`
+  block gets NO arming control at all -- there is nothing to arm, because every
+  order in it comes from a person. Arming gets its own confirmation dialog
+  carrying the server's warnings, the same treatment switching a strategy off
+  gets and for the opposite reason.
+- **"No live track record" is on the page, above the numbers.** The
+  specification's 19.9% is a survivorship-biased, in-sample backtest of a rule
+  that has never traded a rupee, and showing this book's CAGR beside it without
+  saying so invites exactly the wrong comparison. The server puts the sentence
+  on every payload; the page does not compose its own.
+- **A withheld CAGR says why.** When money moved into or out of the portfolio
+  after the first trade, CAGR, drawdown and MAR come back null with a note -- a
+  deposit is not a gain and a withdrawal is not a drawdown.
+- **The page is NOT gated by the strategy toggle.** `/swing` is deliberately
+  outside `gated_pages()`: a journal is history, and switching the strategy off
+  must not hide the record of what it did. Reading it is open to any signed-in
+  user; TRIGGERING a run is admin-only, and the API enforces that regardless of
+  what the buttons show (section 5).
+
+---
+
 ## 6. Conventions
 
 - API access goes through `src/api/` (`client.js` wraps fetch and raises

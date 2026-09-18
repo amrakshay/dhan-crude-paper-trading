@@ -267,10 +267,19 @@ def strategy_state_baseline():
     registry = get_strategy_registry()
     strategies = registry.strategy_states()
     capabilities = registry.capability_states()
+    armed = registry.armed_states()
     for definition in registry.all():
         registry.set_enabled(definition.key, True)
+        # DISARMED, explicitly, for the same reason everything is enabled
+        # explicitly: the starting state should not depend on what a fresh
+        # install happens to ship. Unarmed is also the state that makes a test
+        # placing no orders mean something. A test about execution arms what it
+        # needs; a test whose subject IS the shipped default reads
+        # `automation.armed_by_default` off the definition.
+        if definition.automation.automated:
+            registry.set_armed(definition.key, False)
     yield
-    registry.apply_state(strategies, capabilities)
+    registry.apply_state(strategies, capabilities, armed)
 
 
 def pytest_sessionfinish(session, exitstatus):

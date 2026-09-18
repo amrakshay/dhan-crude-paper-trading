@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.logging_config import get_logger
 from src.strategies.database.db_models.feature_toggle_model import (
+    SCOPE_AUTOMATION,
     SCOPE_CAPABILITY,
     SCOPE_STRATEGY,
 )
@@ -65,11 +66,14 @@ class StrategyStateService:
         states = await self.repository.states()
         registry = get_strategy_registry()
         registry.apply_state(
-            states.get(SCOPE_STRATEGY, {}), states.get(SCOPE_CAPABILITY, {})
+            states.get(SCOPE_STRATEGY, {}),
+            states.get(SCOPE_CAPABILITY, {}),
+            states.get(SCOPE_AUTOMATION, {}),
         )
         return {
             "strategies": registry.strategy_states(),
             "capabilities": registry.capability_states(),
+            "armed": registry.armed_states(),
         }
 
     # --- writing -----------------------------------------------------------
@@ -95,6 +99,92 @@ class StrategyStateService:
             strategy_key, "enabled" if enabled else "disabled", effect,
         )
         return {"effect": effect, "warnings": warnings}
+
+    async def set_strategy_armed(
+        self, strategy_key: str, armed: bool, user_id: int = None
+    ) -> Dict[str, Any]:
+        """Let an automated strategy submit orders, or stop it.
+
+        Nothing about the feed changes -- arming does not subscribe an
+        instrument or start a task -- so this deliberately does NOT resync.
+        What it changes is whether the rebalance and the stop monitor are
+        allowed to place an order; both read `registry.is_armed()` at the
+        moment they would place one, so disarming takes effect on the next
+        decision rather than at the next restart.
+
+        Disarming NEVER cancels or closes anything. A position already opened
+        stays open and its stop keeps being recomputed and recorded; what stops
+        is the placing of new orders. Trapping a trader in a position by
+        disarming would be the same mistake as cancelling their resting orders
+        when a strategy is switched off.
+        """
+        registry = get_strategy_registry()
+        definition = registry.get(strategy_key)
+        if definition is None:
+            raise StrategyConfigError(f"Unknown strategy module {strategy_key!r}")
+
+        warnings = await self.warnings_for_arming(strategy_key) if armed else []
+
+        # set_armed refuses a module with no automation block, before anything
+        # is written -- a stored row must not be able to arm a discretionary
+        # strategy.
+        registry.set_armed(strategy_key, armed)
+        await self.repository.set_state(
+            SCOPE_AUTOMATION, strategy_key, armed, updated_by_user_id=user_id
+        )
+        await self.session.commit()
+
+        logger.warning(
+            "Strategy %s is now %s. It %s submit orders of its own accord.",
+            strategy_key,
+            "ARMED" if armed else "DISARMED",
+            "MAY" if armed else "may not",
+        )
+        return {"effect": {"armed": registry.is_armed(strategy_key)}, "warnings": warnings}
+
+    async def warnings_for_arming(self, strategy_key: str) -> List[str]:
+        """What arming actually lets loose, said before it is let loose.
+
+        Arming is the one control in this application that lets software spend
+        money without a person clicking anything. It is paper money, and the
+        warning still belongs in front of the switch.
+        """
+        registry = get_strategy_registry()
+        definition = registry.get(strategy_key)
+        if definition is None or not definition.automation.automated:
+            return []
+
+        warnings = [
+            f"{definition.label} will place orders on its own schedule, with "
+            f"nobody watching. Every order is paper money in this database and "
+            f"nothing reaches a broker -- but the decisions, the sizes and the "
+            f"stops will be its own.",
+        ]
+        if not registry.is_enabled(strategy_key):
+            warnings.append(
+                "It is currently switched OFF, so arming it changes nothing "
+                "until it is switched on again."
+            )
+
+        portfolios = await self._portfolios_running(strategy_key)
+        if not portfolios:
+            warnings.append(
+                "No active portfolio runs this strategy, so there is no book "
+                "for it to trade. Attach it to one on the Portfolios page."
+            )
+        else:
+            warnings.append(
+                "It will trade in: " + ", ".join(sorted(portfolios)) + "."
+            )
+        return warnings
+
+    async def _portfolios_running(self, strategy_key: str) -> List[str]:
+        from src.portfolios.database.db_operations.portfolio_repository import (
+            PortfolioRepository,
+        )
+
+        rows = await PortfolioRepository(self.session).portfolios_running(strategy_key)
+        return [row.name for row in rows]
 
     async def set_capability_enabled(
         self, capability: str, enabled: bool, user_id: int = None
@@ -228,6 +318,15 @@ class StrategyStateService:
                 f"{armed} open chart trade{'' if armed == 1 else 's'} will stop "
                 f"being watched: a stop-loss or take-profit level will NOT fire "
                 f"while this strategy is off."
+            )
+
+        definition = get_strategy_registry().get(strategy_key)
+        if definition is not None and definition.automation.automated:
+            warnings.append(
+                "Its scheduled runs stop: nothing is decided, nothing is "
+                "journalled and no trailing stop is recomputed or acted on "
+                "while it is off. Its arming switch keeps whatever state it "
+                "has; switching the strategy back on resumes both."
             )
 
         return warnings

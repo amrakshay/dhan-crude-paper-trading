@@ -49,6 +49,15 @@ class StrategyResponse(BaseModel):
     description: str = ""
     enabled: bool
 
+    # Enabled and ARMED are two switches. `automated` says whether this module
+    # trades on a schedule at all -- false for a discretionary one, where there
+    # is nothing to arm and the UI must offer no control. `armed` is the
+    # effective state (armed AND enabled); `armedByDefault` is what a fresh
+    # install starts from, shown so the page can say the switch was moved.
+    automated: bool = False
+    armed: bool = False
+    armed_by_default: bool = Field(False, alias="armedByDefault")
+
     symbol: str
     exchange_segment: str = Field(alias="exchangeSegment")
     exchange_id: str = Field(alias="exchangeId")
@@ -86,6 +95,20 @@ class StrategyListResponse(BaseModel):
 
 class ToggleRequest(BaseModel):
     enabled: bool
+
+
+class ArmRequest(BaseModel):
+    """Arming is its own request type, so `enabled` can never be sent by
+    mistake to the endpoint that lets software spend money."""
+
+    armed: bool
+
+
+class ArmResponse(BaseModel):
+    key: str
+    armed: bool
+    effect: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ToggleResponse(BaseModel):

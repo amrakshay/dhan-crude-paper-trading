@@ -415,6 +415,96 @@ async def test_the_portfolios_endpoint_never_returns_a_secret(
     _assert_clean(captured_logs, token)
 
 
+async def test_the_swing_endpoints_never_return_a_secret(auth_client, captured_logs):
+    """Every new endpoint gets its assertion in the same change.
+
+    The Swing Momentum page reports the regime, the breadth, the ranking, the
+    schedule and the arming state -- configuration, like Health and Strategies.
+    It reaches the strategy registry, the feed manager and the scheduler, all
+    of which sit next to the Dhan credentials in the same config tree.
+    """
+    import os
+
+    token = _sentinel_token()
+    saved = await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    portfolios = await auth_client.get("/api/portfolios")
+    portfolio_id = portfolios.json()["portfolios"][0]["id"]
+
+    responses = [
+        await auth_client.get("/api/swing/strategies"),
+        await auth_client.get("/api/swing/status"),
+        await auth_client.get(f"/api/swing/status?portfolioId={portfolio_id}"),
+        await auth_client.get(f"/api/swing/book?portfolioId={portfolio_id}"),
+        await auth_client.get("/api/swing/history"),
+        await auth_client.get("/api/swing/stops"),
+        await auth_client.get(f"/api/swing/performance?portfolioId={portfolio_id}"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 200, response.text
+        assert token not in response.text
+        for part in token.split("."):
+            if len(part) >= 9:
+                assert part not in response.text
+        assert SENTINEL_CLIENT_ID not in response.text
+        for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+            value = os.environ.get(name)
+            if value and len(value) >= 9:
+                assert value not in response.text, f"{name} reached a swing payload"
+        assert "jwt_secret" not in response.text
+        assert "encryption_key" not in response.text
+        assert "access_token" not in response.text
+    _assert_clean(captured_logs, token)
+
+
+async def test_a_plain_user_cannot_trigger_a_swing_run(auth_client):
+    """Reading the journal is open; TRIGGERING a rebalance spends money.
+
+    Admin-only at the route, not merely hidden from the sidebar -- the same
+    rule the settings and health endpoints follow.
+    """
+    import httpx
+
+    created = await auth_client.post(
+        "/api/users",
+        json={
+            "email": "swing-reader@abc.com",
+            "firstName": "Swing",
+            "lastName": "Reader",
+            "password": "reader-password-123",
+            "role": "ROLE_USER",
+            "mustChangePassword": False,
+        },
+    )
+    assert created.status_code in (200, 201), created.text
+
+    import main
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        login = await client.post(
+            "/api/auth/login",
+            json={"email": "swing-reader@abc.com", "password": "reader-password-123"},
+        )
+        assert login.status_code == 200, login.text
+
+        # Reading is allowed.
+        assert (await client.get("/api/swing/status")).status_code == 200
+        # Running is not.
+        for path in ("/api/swing/runs/nightly", "/api/swing/runs/rebalance"):
+            refused = await client.post(path, json={"portfolioId": 1})
+            assert refused.status_code == 403, f"{path}: {refused.text}"
+
+
 async def test_the_health_endpoint_feature_block_carries_no_secret(auth_client):
     """The features block was added to the health payload; its assertion goes
     in with it, per the root CLAUDE.md rule."""

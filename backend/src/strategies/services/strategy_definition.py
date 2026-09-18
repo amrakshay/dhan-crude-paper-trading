@@ -95,12 +95,46 @@ STRATEGY_LIVE_PAGES: Tuple[str, ...] = ("/live",)
 
 
 @dataclass(frozen=True)
+class ClosingAuction:
+    """An exchange session that is NOT continuous trading, at the end of a day.
+
+    NSE's Closing Auction Session went live on 3 August 2026: for F&O-eligible
+    names, continuous cash trading now ends at `continuous_close` (15:15) and a
+    call auction runs to `auction_close` (15:35), while the rest of the market
+    trades continuously to the ordinary close. Two things follow for anything
+    that fires a stop:
+
+      * an order sent between `continuous_close` and the close for one of those
+        names cannot execute in continuous trading -- it lands in the auction,
+        at a price the auction sets and that no depth book here publishes; and
+      * this simulator has no model of a call auction at all. Filling such an
+        order against the last continuous book would flatter it.
+
+    `applies_to` names the property that decides which instruments are in
+    scope. Only "fno_eligible" is understood, and it is a column on
+    `instruments`, derived from the master's own FUTSTK rows.
+
+    The times are configuration, not constants in Python, for the same reason
+    every charge rate is (root CLAUDE.md section 7): they change what a trade
+    does, so they belong in the strategy module with the rest of its session.
+    """
+
+    applies_to: str
+    continuous_close: time
+    auction_close: time
+
+    APPLIES_FNO_ELIGIBLE = "fno_eligible"
+
+
+@dataclass(frozen=True)
 class MarketHours:
     timezone: str
     open: time
     close: time
     close_us_dst: Optional[time]
     trading_days: Tuple[int, ...]
+    # None for an exchange with no auction session -- MCX has none.
+    closing_auction: Optional[ClosingAuction] = None
 
 
 @dataclass(frozen=True)
@@ -253,6 +287,40 @@ class MarginModel:
 
 
 @dataclass(frozen=True)
+class AutomationPolicy:
+    """Whether a strategy may act on its own, and what it starts allowed to do.
+
+    ENABLED AND ARMED ARE TWO SWITCHES, and this is where the framework learns
+    the difference. Enabling a strategy makes it compute, decide and write a
+    decision record. ARMING is what lets it submit an order. They are separate
+    because a strategy that trades on a schedule trades with nobody watching,
+    and watching it decide for a while before it can spend anything is the
+    cheapest possible safeguard.
+
+    `automated` is false for a strategy whose YAML declares no `automation`
+    block at all -- a discretionary module like MCX crude, where every order
+    comes from a human and there is nothing to arm. Nothing in the application
+    offers an arming control for one of those.
+
+    `armed_by_default` is only the state a brand-new installation starts in.
+    After that the live state is a row in `feature_toggles` under the
+    AUTOMATION scope, exactly as `enabled_by_default` is.
+
+    `max_lots_per_order` overrides `trading.max_lots_per_order` for this
+    strategy. It exists because "lots" means two different things: an MCX
+    option lot is 100 barrels and 100 of them is a fat finger, while an NSE
+    delivery "lot" is one share and 100 of them is a third of one position.
+    A single global cap cannot be right for both, and silently routing the
+    share count through `quantity_override` to dodge the check would leave
+    `order.lots` disagreeing with `order.quantity / order.lot_size`.
+    """
+
+    automated: bool
+    armed_by_default: bool
+    max_lots_per_order: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class StrategyDefinition:
     key: str
     label: str
@@ -276,6 +344,15 @@ class StrategyDefinition:
     charges_rate_card: str
     margin: MarginModel
     capabilities: FrozenSet[str] = field(default_factory=frozenset)
+
+    # Whether this module trades on a schedule, and whether it starts allowed
+    # to. A strategy with no `automation` block is discretionary and is never
+    # armed -- see AutomationPolicy.
+    automation: AutomationPolicy = field(
+        default_factory=lambda: AutomationPolicy(
+            automated=False, armed_by_default=False
+        )
+    )
 
     # A strategy owning MANY underlyings names the list here. None means it
     # owns exactly one -- `symbol` -- which is what MCX crude does and what
@@ -430,6 +507,11 @@ FRAMEWORK_KEYS = frozenset(
         "charges",
         "margin",
         "capabilities",
+        # Interpreted by the framework since 2026-09-18: whether a module
+        # trades unattended is a property every surface needs to know about
+        # (the Strategies page, the health page, the scheduler), not something
+        # only the owning module understands.
+        "automation",
     }
 )
 
@@ -628,6 +710,40 @@ def _build_reference_instruments(
     return built
 
 
+def _build_closing_auction(
+    hours: Dict[str, Any], source: str
+) -> Optional[ClosingAuction]:
+    """The auction session, where the exchange runs one. See ClosingAuction."""
+    block = hours.get("closing_auction")
+    if not block:
+        return None
+    if not isinstance(block, dict):
+        raise StrategyConfigError(
+            f"{source}: market_hours.closing_auction must be a mapping."
+        )
+    applies_to = str(_require(block, "applies_to", source))
+    if applies_to != ClosingAuction.APPLIES_FNO_ELIGIBLE:
+        raise StrategyConfigError(
+            f"{source}: market_hours.closing_auction.applies_to {applies_to!r} "
+            f"is not understood. The only scope implemented is "
+            f"{ClosingAuction.APPLIES_FNO_ELIGIBLE!r}, which reads the column "
+            f"of that name on `instruments`."
+        )
+    return ClosingAuction(
+        applies_to=applies_to,
+        continuous_close=_parse_hhmm(
+            _require(block, "continuous_close", source),
+            source,
+            "market_hours.closing_auction.continuous_close",
+        ),
+        auction_close=_parse_hhmm(
+            _require(block, "auction_close", source),
+            source,
+            "market_hours.closing_auction.auction_close",
+        ),
+    )
+
+
 def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinition:
     """Turn one parsed YAML document into a definition, or explain why not.
 
@@ -707,6 +823,34 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
             f"{', '.join(sorted(unknown))}. Known: {', '.join(KNOWN_CAPABILITIES)}."
         )
 
+    # A module with no `automation` block is discretionary: nothing schedules
+    # it, there is no arming control for it, and `is_armed` is permanently
+    # false. MCX crude is that case and must stay that way.
+    automation_block = document.get("automation")
+    if automation_block is not None and not isinstance(automation_block, dict):
+        raise StrategyConfigError(
+            f"{source}: 'automation' must be a mapping, got "
+            f"{type(automation_block).__name__}."
+        )
+    max_lots = (automation_block or {}).get("max_lots_per_order")
+    if max_lots is not None:
+        try:
+            max_lots = int(max_lots)
+        except (TypeError, ValueError) as error:
+            raise StrategyConfigError(
+                f"{source}: automation.max_lots_per_order must be an integer, "
+                f"got {max_lots!r}."
+            ) from error
+        if max_lots <= 0:
+            raise StrategyConfigError(
+                f"{source}: automation.max_lots_per_order must be positive."
+            )
+    automation = AutomationPolicy(
+        automated=automation_block is not None,
+        armed_by_default=bool((automation_block or {}).get("armed_by_default", False)),
+        max_lots_per_order=max_lots,
+    )
+
     margin = document.get("margin") or {}
     margin_model = str(margin.get("model") or MarginModel.PERCENT_OF_NOTIONAL)
     if margin_model != MarginModel.PERCENT_OF_NOTIONAL:
@@ -753,6 +897,7 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
                 else None
             ),
             trading_days=tuple(int(day) for day in (hours.get("trading_days") or [])),
+            closing_auction=_build_closing_auction(hours, source),
         ),
         subscription=SubscriptionPolicy(
             kind=subscription_kind,
@@ -775,6 +920,7 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
             ),
         ),
         capabilities=frozenset(declared),
+        automation=automation,
         universe=universe,
         instrument_sets=instrument_sets,
         reference_instruments=_build_reference_instruments(

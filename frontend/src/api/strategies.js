@@ -15,4 +15,10 @@ export const strategiesApi = {
     api.put(`/strategies/${key}/enabled`, { enabled }),
   setCapabilityEnabled: (key, enabled) =>
     api.put(`/strategies/capabilities/${key}/enabled`, { enabled }),
+
+  // ARMING is a separate switch from enabling, and it only exists for a module
+  // that trades on a schedule. Enabled means it computes, decides and writes a
+  // decision record; armed means it may submit an order with nobody watching.
+  armWarnings: (key) => api.get(`/strategies/${key}/arm-warnings`),
+  setStrategyArmed: (key, armed) => api.put(`/strategies/${key}/armed`, { armed }),
 };

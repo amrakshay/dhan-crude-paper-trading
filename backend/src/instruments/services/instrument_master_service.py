@@ -53,6 +53,13 @@ MASTER_FILENAME = "api-scrip-master-detailed.csv"
 COL_EXCH_ID = "EXCH_ID"
 COL_SECURITY_ID = "SECURITY_ID"
 COL_INSTRUMENT = "INSTRUMENT"
+
+# Dhan's INSTRUMENT value for a single-stock future. A name that has one is
+# F&O-eligible, which since 3 August 2026 means its continuous cash session
+# ends at 15:15 rather than 15:30 (the Closing Auction Session). These rows are
+# NEVER ingested -- nothing here trades a stock future -- they are read on the
+# same pass purely to stamp `fno_eligible` on the cash rows.
+SINGLE_STOCK_FUTURE_INSTRUMENTS = frozenset({"FUTSTK"})
 COL_UNDERLYING_SECURITY_ID = "UNDERLYING_SECURITY_ID"
 COL_UNDERLYING_SYMBOL = "UNDERLYING_SYMBOL"
 COL_SYMBOL_NAME = "SYMBOL_NAME"
@@ -340,6 +347,10 @@ class InstrumentMasterService:
         # is luck rather than a guarantee, so it is checked rather than assumed.
         seen_security_ids: Dict[str, str] = {}
         matched_symbols: Dict[str, set] = {key: set() for key in claimed_symbols}
+        # (EXCH_ID, UNDERLYING_SYMBOL) for every name with a listed single-stock
+        # future. Used only to stamp `fno_eligible` on the cash rows below --
+        # the futures themselves are not ingested and are not tradable here.
+        fno_underlyings: set = set()
 
         with open(path, "r", encoding="utf-8", errors="replace", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -356,12 +367,17 @@ class InstrumentMasterService:
             for record in reader:
                 scanned += 1
                 underlying_symbol = record.get(COL_UNDERLYING_SYMBOL, "").strip()
+                record_exchange = record.get(COL_EXCH_ID, "").strip()
+                record_instrument = record.get(COL_INSTRUMENT, "").strip()
+
+                # Collected on the SAME PASS, before the claim filter, because
+                # single-stock futures rows are claimed by no strategy here and
+                # would otherwise be skipped. See SINGLE_STOCK_FUTURE_INSTRUMENTS.
+                if record_instrument in SINGLE_STOCK_FUTURE_INSTRUMENTS:
+                    fno_underlyings.add((record_exchange, underlying_symbol))
+
                 claim = claims.get(
-                    (
-                        record.get(COL_EXCH_ID, "").strip(),
-                        record.get(COL_INSTRUMENT, "").strip(),
-                        underlying_symbol,
-                    )
+                    (record_exchange, record_instrument, underlying_symbol)
                 )
                 if claim is None:
                     continue
@@ -471,10 +487,30 @@ class InstrumentMasterService:
                         "option_type": option_type,
                         "lot_size": lot_size,
                         "tick_size": tick_size,
+                        # Filled in below: the FUTSTK rows that decide it may
+                        # appear after this one in the file.
+                        "fno_eligible": False,
                         "is_active": True,
                         "refreshed_at": refreshed_at,
                     }
                 )
+
+        # A second pass rather than a lookup inside the loop: Dhan's master is
+        # not ordered, so a stock's FUTSTK row may follow its EQUITY row and
+        # deciding eligibility in-line would mark the first few names wrong.
+        for row in rows:
+            row["fno_eligible"] = (
+                row["exchange_id"],
+                row["underlying_symbol"],
+            ) in fno_underlyings
+        eligible_count = sum(1 for row in rows if row["fno_eligible"])
+        logger.info(
+            "Instrument master: %s of %s ingested rows are F&O-eligible "
+            "underlyings (%s distinct names carry single-stock futures in the "
+            "whole file). Used by the Closing Auction Session rule, which ends "
+            "continuous trading for those names at 15:15.",
+            eligible_count, len(rows), len(fno_underlyings),
+        )
 
         for symbol, count in sorted(suspicious_lot_sizes.items()):
             strategy = next(

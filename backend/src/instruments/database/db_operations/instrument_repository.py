@@ -146,7 +146,7 @@ class InstrumentRepository(BaseRepository[Instrument]):
             "exchange_id", "exchange_segment", "segment_code", "instrument_type",
             "underlying_symbol", "underlying_scrip", "trading_symbol", "display_name",
             "expiry_date", "strike_price", "option_type", "lot_size", "tick_size",
-            "is_active", "refreshed_at",
+            "fno_eligible", "is_active", "refreshed_at",
         )
 
         for row in rows:

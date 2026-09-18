@@ -394,7 +394,13 @@ def test_the_shipped_swing_module_loads_and_is_the_enabled_strategy():
     swing = registry.require("nse-swing-momentum")
 
     assert swing.enabled_by_default is True
-    assert swing.module_section("automation")["armed_by_default"] is False
+    # `automation` became a FRAMEWORK key on 2026-09-18, when the scheduler
+    # made "does this module trade unattended" something the Strategies page,
+    # the health page and the scheduler all have to know without understanding
+    # momentum. It is no longer in `module_config`.
+    assert swing.automation.automated is True
+    assert swing.automation.armed_by_default is False
+    assert registry.is_armed("nse-swing-momentum") is False
     assert len(swing.universe.symbols) == 500
     assert swing.subscription.kind == SubscriptionPolicy.POSITIONS
     assert swing.instrument_sets[0].trusts_master_lot_size()

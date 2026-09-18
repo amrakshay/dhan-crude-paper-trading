@@ -236,6 +236,18 @@ async def lifespan(app: FastAPI):
         get_bracket_monitor,
         shutdown_bracket_monitor,
     )
+    # The rotation's chandelier stops and the clock it runs on. Both are
+    # server-side for the same reason the bracket monitor is: a stop that lives
+    # in a browser dies with the tab, and a schedule that lives in a browser
+    # does not exist at 18:15.
+    from src.swing.services.scheduler import (
+        get_swing_scheduler,
+        shutdown_swing_scheduler,
+    )
+    from src.swing.services.stop_monitor import (
+        get_swing_stop_monitor,
+        shutdown_swing_stop_monitor,
+    )
 
     try:
         await get_feed_manager().start()
@@ -255,12 +267,30 @@ async def lifespan(app: FastAPI):
             "levels will NOT be watched"
         )
 
+    try:
+        await get_swing_stop_monitor().start()
+    except Exception:
+        logger.exception(
+            "Swing stop monitor failed to start; chandelier trailing stops will "
+            "NOT fire and open rotation positions are unprotected"
+        )
+
+    try:
+        await get_swing_scheduler().start()
+    except Exception:
+        logger.exception(
+            "Swing scheduler failed to start; the nightly decision and the "
+            "rebalance will NOT run on their own"
+        )
+
     logger.info("Startup complete; the API is accepting requests")
 
     yield
 
     logger.info("Crude paper-trading backend shutting down")
     try:
+        await shutdown_swing_scheduler()
+        await shutdown_swing_stop_monitor()
         await shutdown_bracket_monitor()
         await shutdown_order_matcher()
         await shutdown_feed_manager()
@@ -405,6 +435,7 @@ from src.strategies import strategies_main_router  # noqa: E402
 from src.positions import positions_main_router  # noqa: E402
 from src.reports import reports_main_router  # noqa: E402
 from src.settings import settings_main_router  # noqa: E402
+from src.swing import swing_main_router  # noqa: E402
 from src.users import users_main_router  # noqa: E402
 from src.market import market_main_router, market_ws_router  # noqa: E402
 
@@ -421,6 +452,7 @@ app.include_router(strategies_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")
+app.include_router(swing_main_router, prefix="/api")
 app.include_router(users_main_router, prefix="/api")
 app.include_router(market_ws_router)   # /ws/market -- not under /api
 

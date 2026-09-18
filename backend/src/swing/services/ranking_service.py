@@ -397,6 +397,34 @@ class RankingService:
         )
 
     # --- the whole session -------------------------------------------------
+    async def session_snapshot(self, as_of: Optional[date] = None) -> "RankingSnapshot":
+        """The snapshot the strategy ACTS on, with the off-gate variant applied.
+
+        V3b uses its own momentum floor while the index is below its 200-day
+        SMA, and a floor is applied during RANKING rather than afterwards -- a
+        name filtered out by P6 never gets a rank at all, so filtering the
+        finished candidate list would leave every rank wrong. The regime is
+        therefore evaluated first, on the index's bars alone, and the resulting
+        floor is passed into the one ranking pass.
+
+        With V3b disabled -- which is the shipped state and should stay that
+        way -- this is exactly `snapshot()`, at the cost of reading one
+        symbol's bars twice.
+        """
+        floor: Optional[float] = None
+        if self.parameters.off_gate.enabled:
+            regime = await self.regime_state(as_of=as_of)
+            if not regime.gate_on:
+                floor = self.parameters.off_gate.momentum_floor
+                logger.info(
+                    "Swing %s: the regime gate is OFF and the V3b off-gate "
+                    "variant is ENABLED, so this session is ranked at its "
+                    "momentum floor of %.0f%% rather than P6's %.0f%%.",
+                    self.definition.key, floor * 100,
+                    self.parameters.momentum_floor * 100,
+                )
+        return await self.snapshot(as_of=as_of, momentum_floor=floor)
+
     async def snapshot(
         self,
         as_of: Optional[date] = None,
@@ -538,6 +566,15 @@ class RankingService:
                 "breadthSpan": parameters.breadth_span,
                 "rebalanceCadence": parameters.schedule.rebalance_cadence,
                 "offGateEnabled": parameters.off_gate.enabled,
+                "offGateSlots": parameters.off_gate.slots,
+                # Which set of rules produced this ranking. Stored because the
+                # momentum floor above is the EFFECTIVE one, and "10%" means
+                # two different things depending on which variant chose it.
+                "variant": (
+                    "v3b-off-gate"
+                    if (parameters.off_gate.enabled and not regime.gate_on)
+                    else "baseline"
+                ),
             },
         )
 
