@@ -155,6 +155,36 @@ class InstrumentRepository(BaseRepository[Instrument]):
         await self.session.flush()
         return {"inserted": inserted, "updated": updated, "unchanged": unchanged}
 
+    async def deactivate_missing_for_symbols(
+        self, underlying_symbols: Sequence[str], present_security_ids: Sequence[str]
+    ) -> int:
+        """Deactivate dropped contracts across MANY underlyings, in one query.
+
+        The single-symbol form below is a call per underlying, which is fine
+        for a strategy owning one and 500 round trips for a strategy owning a
+        universe.
+        """
+        symbols = list(dict.fromkeys(underlying_symbols))
+        if not symbols:
+            return 0
+        present = set(present_security_ids)
+        result = await self.session.execute(
+            select(Instrument).where(
+                and_(
+                    Instrument.underlying_symbol.in_(symbols),
+                    Instrument.is_active.is_(True),
+                )
+            )
+        )
+        deactivated = 0
+        for instrument in result.scalars().all():
+            if instrument.security_id not in present:
+                instrument.is_active = False
+                deactivated += 1
+        if deactivated:
+            await self.session.flush()
+        return deactivated
+
     async def deactivate_missing(
         self, underlying_symbol: str, present_security_ids: Sequence[str]
     ) -> int:

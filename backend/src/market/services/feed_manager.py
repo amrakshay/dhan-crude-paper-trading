@@ -38,7 +38,10 @@ from src.market.services.dhan_feed_client import DhanFeedClient
 from src.market.services.greeks_poller import GreeksPoller
 from src.market.services.market_book import MarketBook, now_ms
 from src.market.services.synthetic_feed import SyntheticFeed
-from src.strategies.services.strategy_definition import StrategyDefinition
+from src.strategies.services.strategy_definition import (
+    StrategyDefinition,
+    SubscriptionPolicy,
+)
 from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("market.manager")
@@ -89,6 +92,9 @@ class FeedManager:
         self._stopping = False
 
         self.strategy_state: Dict[str, StrategyFeedState] = {}
+        # Per strategy, security ids kept subscribed on top of whatever it
+        # holds. See pin_instruments().
+        self._pinned: Dict[str, Set[str]] = {}
         self._contract_meta: Dict[str, Dict[str, Any]] = {}
         self.last_resync_ms: Optional[int] = None
         self.last_error: Optional[str] = None
@@ -346,6 +352,77 @@ class FeedManager:
         return targets, meta
 
     async def _resolve_strategy_targets(
+        self, strategy: StrategyDefinition, repository: InstrumentRepository
+    ) -> Tuple[List[Tuple[str, str]], Dict[str, Dict[str, Any]]]:
+        """One strategy's contribution to the single upstream connection."""
+        if strategy.subscription.kind == SubscriptionPolicy.POSITIONS:
+            return await self._resolve_position_targets(strategy, repository)
+        return await self._resolve_option_chain_targets(strategy, repository)
+
+    async def _resolve_position_targets(
+        self, strategy: StrategyDefinition, repository: InstrumentRepository
+    ) -> Tuple[List[Tuple[str, str]], Dict[str, Dict[str, Any]]]:
+        """What a cash strategy needs live: what it HOLDS, and what it is about
+        to trade.
+
+        A rotation takes its decisions from daily bars fetched over REST, so
+        the live feed is needed only to price the book and to fill an order.
+        Subscribing the whole universe would spend the one connection's budget
+        on hundreds of instruments nothing reads.
+
+        `pin_instruments()` is how a rebalance adds the handful of candidates
+        it is about to buy, a few minutes ahead of placing the orders -- the
+        fill simulator needs a depth book for a name BEFORE the order, not
+        after it.
+        """
+        state = self.state_for(strategy.key)
+        targets: List[Tuple[str, str]] = []
+        meta: Dict[str, Dict[str, Any]] = {}
+
+        # Imported here rather than at module scope: src.positions imports the
+        # orders package, which reads the strategy registry (backend CLAUDE.md
+        # section 1).
+        from src.positions.database.db_operations.position_repository import (
+            PositionRepository,
+        )
+
+        positions = await PositionRepository(repository.session).list_all(
+            include_closed=False, strategy_key=strategy.key
+        )
+        wanted = {position.security_id for position in positions}
+        wanted.update(self._pinned.get(strategy.key, set()))
+
+        for instrument in await repository.get_many_by_security_ids(sorted(wanted)):
+            if not instrument.is_active:
+                continue
+            targets.append((instrument.exchange_segment, instrument.security_id))
+            meta[instrument.security_id] = self._meta_for(instrument, strategy)
+
+        state.near_future_security_id = None
+        state.subscribed_expiries = []
+        state.instrument_count = len(targets)
+        logger.debug(
+            "Resolved %s live instruments for %s (%s held, %s pinned)",
+            len(targets), strategy.key, len(positions),
+            len(self._pinned.get(strategy.key, set())),
+        )
+        return targets, meta
+
+    def pin_instruments(self, strategy_key: str, security_ids: Set[str]) -> None:
+        """Keep these subscribed for a `positions` strategy until unpinned.
+
+        Used by a rebalance to warm the book for names it is about to buy.
+        Pinning does not itself subscribe anything -- call `resync()` after.
+        """
+        if security_ids:
+            self._pinned[str(strategy_key)] = set(str(one) for one in security_ids)
+        else:
+            self._pinned.pop(str(strategy_key), None)
+
+    def pinned_instruments(self, strategy_key: str) -> Set[str]:
+        return set(self._pinned.get(str(strategy_key), set()))
+
+    async def _resolve_option_chain_targets(
         self, strategy: StrategyDefinition, repository: InstrumentRepository
     ) -> Tuple[List[Tuple[str, str]], Dict[str, Dict[str, Any]]]:
         """One strategy's contribution: its front future plus its ATM window."""

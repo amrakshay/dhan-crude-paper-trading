@@ -1,0 +1,171 @@
+# ---------------------------------------------------------------------------
+# STRATEGY MODULE: NSE Swing Momentum (breadth-gated momentum rotation).
+#
+# A weekly/daily momentum rotation on the Nifty 500. It owns MANY underlyings
+# rather than one, which is the first thing in this application to do so, and
+# it is the reason a strategy can now declare a UNIVERSE.
+#
+# The rules, the parameters and the backtested results live in the strategy
+# specification, not here:
+#   ~/Workarea/local/pullback/backend/intrday_test_strategy/research2/
+#     SWING_MOMENTUM_HANDOFF.md
+# This file carries only what THIS application needs to know to run it.
+#
+# WHETHER THIS STRATEGY IS ON is NOT declared here. `enabled_by_default` only
+# decides the state a brand-new installation starts in; after that the live
+# state is a row in the `feature_toggles` table, owned by the Strategies &
+# Features page.
+#
+# It ships OFF. This is the first strategy in the application that decides and
+# trades on a schedule with nobody watching, so an installation that has never
+# been configured must not start placing orders on its own.
+# ---------------------------------------------------------------------------
+
+key: "nse-swing-momentum"
+label: "NSE Swing Momentum"
+description: >-
+  A breadth-gated momentum rotation on the Nifty 500. Holds up to ten of the
+  strongest volatility-adjusted six-month momentum names, in proportion to
+  market breadth, with a chandelier trailing stop under each, and goes fully
+  to cash when the NIFTY 50 loses its 200-day SMA.
+enabled_by_default: false
+
+underlying:
+  # There is no single underlying. `symbol` names the BOOK rather than a
+  # contract; ownership is resolved against the universe below, not against
+  # this value. It is still the label a generic surface prints when it has
+  # only a strategy to go on.
+  symbol: "NIFTY500"
+  exchange_segment: "NSE_EQ"
+  exchange_segment_code: 1          # numeric code used by the binary feed
+  exchange_id: "NSE"
+
+universe:
+  # The list of symbols this strategy may trade. A FILE, deliberately, not a
+  # scrape: NSE publishes the current constituents at
+  #   https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv
+  # and refreshing this file is a quarterly manual copy. That keeps the
+  # application's outbound surface exactly as small as it was.
+  #
+  # Copied verbatim from the research project's universe_nifty500.csv on
+  # 2026-09-18 (500 rows). Its `security_id` column is NOT authoritative --
+  # see conf/universes/README.md.
+  name: "nifty500"
+  file: "universes/nifty500.csv"
+
+instrument_sets:
+  # Which rows of Dhan's instrument master this strategy claims.
+  - instrument_type: "EQUITY"
+    exchange_segment: "NSE_EQ"
+    exchange_segment_code: 1
+    symbols: "universe"
+
+    # -----------------------------------------------------------------------
+    # For NSE EQUITY, LOT_SIZE=1.0 in the master is CORRECT -- a delivery trade
+    # is one share. That is the opposite of the MCX defect (root CLAUDE.md
+    # section 5), where 1.0 means "not published" and is substituted from
+    # contract_specs. Requiring a contract_specs entry here would mean 500 of
+    # them, each restating a number the master already gets right.
+    # Verified against the live master 2026-09-18: every one of the 499
+    # universe rows present reports LOT_SIZE=1.0.
+    # -----------------------------------------------------------------------
+    lot_size_source: "master"
+
+    # -----------------------------------------------------------------------
+    # NSE publishes more than one EQUITY row under a single UNDERLYING_SYMBOL.
+    # Verified 2026-09-18: CHOLAFIN and MOTHERSON each have their share
+    # (SERIES=EQ) and a listed non-convertible debenture (SERIES=D1,
+    # DISPLAY_NAME "CIFCL-7.5%-30092026-NCD" and "SMIL-6.5%-20092027-NCD").
+    # Ingesting the debenture instead of the share would be a wrong price that
+    # looks entirely plausible.
+    #
+    # EQ is the ordinary rolling segment; BE is trade-for-trade, which is a
+    # settlement restriction rather than a different security -- HEG and HFCL
+    # are in BE today and are genuine constituents. Both are wanted; D1 is not.
+    # -----------------------------------------------------------------------
+    series: ["EQ", "BE"]
+
+    # The ticker, not the company's long name: DISPLAY_NAME for BHEL is
+    # "Bharat Heavy Electricals", while UNDERLYING_SYMBOL is "BHEL", which is
+    # what a ranking table and an order row want to show.
+    trading_symbol_source: "underlying_symbol"
+
+reference_instruments:
+  # Instruments this strategy READS but never trades. These are deliberately
+  # not ingested into the `instruments` table -- see ReferenceInstrument in
+  # src/strategies/services/strategy_definition.py for why (Dhan's security
+  # ids are unique per segment, not globally: id 13 is NIFTY in IDX_I and ABB
+  # in NSE_EQ, and ABB is in this universe).
+  regime_index:
+    # The regime gate (P8/P9 in the spec) is evaluated on this index's daily
+    # CLOSE. No live tick is needed and none is subscribed.
+    symbol: "NIFTY"
+    label: "NIFTY 50"
+    security_id: "13"
+    exchange_segment: "IDX_I"
+    exchange_segment_code: 0
+    instrument: "INDEX"
+
+contract_specs:
+  # No per-symbol contract specification: the master's lot size is trusted
+  # (see instrument_sets above), so there is nothing to override.
+  #
+  # -------------------------------------------------------------------------
+  # Dhan publishes TICK_SIZE in paise on NSE exactly as it does on MCX.
+  # Verified against the live master on 2026-09-18: the distinct TICK_SIZE
+  # values across the 9,884 NSE EQUITY rows are 1.0, 5.0, 10.0, 50.0, 100.0
+  # and 500.0 -- i.e. Rs 0.01 to Rs 5.00. Divide by this to get rupees.
+  #
+  # This corrects the comment in conf/strategies/mcx-crude-options.yaml, which
+  # claimed an NSE strategy "needs no tick-size divisor at all".
+  # -------------------------------------------------------------------------
+  tick_size_divisor: 100
+
+market_hours:
+  # NSE cash equity. Note the Closing Auction Session, live since 3 Aug 2026:
+  # for F&O-eligible names continuous trading now ends at 15:15, with an
+  # auction to 15:35. That affects when a stop can fill and is handled by the
+  # stop monitor, not by this window.
+  timezone: "Asia/Kolkata"
+  open: "09:15"
+  close: "15:30"
+  trading_days: [0, 1, 2, 3, 4]     # Mon-Fri (Python weekday numbering)
+
+subscription:
+  # This strategy has no option chain to centre and no strikes to window. Its
+  # decisions are taken from DAILY bars fetched over REST, so the live feed is
+  # needed only for what it actually trades: the names currently held, plus
+  # the handful a rebalance is about to touch. Subscribing all 500 would spend
+  # the one process-wide connection's budget on 490 instruments nobody reads.
+  kind: "positions"
+
+charges:
+  # conf/charges/nse-equity-delivery.yaml. NSE delivery pays STT on BOTH legs
+  # and a flat depository charge per sell -- neither of which a commodity card
+  # has. The rate card is part of the strategy; the engine that applies it is
+  # not.
+  rate_card: "nse-equity-delivery"
+
+margin:
+  # -------------------------------------------------------------------------
+  # This strategy never sells to open. Every position is a long delivery
+  # holding paid for in full, so there is no margin to block: the cash leaves
+  # the ledger when the buy fills and comes back when the sell does.
+  #
+  # The model is still declared, and still declared as an approximation, so
+  # that a short position appearing here would be blocked at 100% of notional
+  # rather than at zero -- a wrong number in the safe direction.
+  # as-of: 2026-09-18
+  # confidence: NOT APPLICABLE (no short leg exists in this strategy)
+  # -------------------------------------------------------------------------
+  model: "percent_of_notional"
+  short_option_percent_of_notional: 1.00
+
+capabilities:
+  # Generic features of THIS codebase that this strategy supports. It has no
+  # options, so it declares neither "option-chain" nor "greeks"; and
+  # "chart-trading" translates a chart click into an option, which is not what
+  # this strategy does.
+  - "price-chart"
+  - "trade-notes"
+  - "pnl-reports"
