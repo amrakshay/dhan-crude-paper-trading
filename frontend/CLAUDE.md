@@ -128,17 +128,57 @@ These are product requirements, not styling choices:
 
 ---
 
-## 4. Settings page
+## 4. Settings and Connections
 
-- The access token field is **write-only**. The API returns a mask, never the
-  token, so an empty field means "keep what is stored" — not "clear it".
-  Clearing is an explicit `clearAccessToken` flag.
-- The expiry countdown ticks locally off the absolute `expiresAt` the API
-  returns, rather than re-fetching every second.
-- Credentials are only required when the synthetic toggle is off; the Save
-  button's enabled state encodes that rule, and the server enforces it again.
+**They are two pages and the split is the point.** `/connections` owns anything
+this application authenticates to and calls over a network — the Dhan
+credentials, the Telegram bot. `/settings` keeps this application's own
+configuration, which today is the synthetic-feed switch: a MODE of this
+application rather than a credential, and it would sit oddly on a card
+describing a connection to somebody else.
+
+Both pages are admin-only, and `/connections` is deliberately NOT strategy-gated
+— it is how you fix the credentials the strategies run on.
+
+### Rules that span both
+
+- A secret field is **write-only**. The API returns a mask, never the secret, so
+  an empty field means "keep what is stored" — not "clear it". That applies to
+  the Dhan access token and the Telegram bot token alike.
 - Show where each value came from (`saved here` / `from .env`). Silently
   preferring one source over the other is how configuration becomes a mystery.
+- **Live mode is still refused without credentials**, even though the switch and
+  the credentials are now on different pages. The Settings page disables Save
+  and names Connections, because a form that offers an edit the server will
+  refuse is worse than one that does not (§5).
+
+### The Connections page
+
+- **The status pill is LAST KNOWN, and every card carries the AGE of its
+  check.** Opening the page costs no network call. The age ticks locally off the
+  absolute timestamp (the Settings countdown trick), so a card that has not been
+  re-checked visibly ages rather than reading "0s ago" until the next load.
+- **Null is not zero here either.** `lastCheckedAt: null` renders as "never",
+  not as a fresh timestamp, and `lastCheckOk: null` is a THIRD state — a
+  connection nobody has checked gets `Never checked`, not green and not red.
+  Six pill states, because two would force "not set up yet" and "set up and
+  broken" into the same red.
+- **A capability chip means the connection ACTUALLY has it.** Telegram with
+  commands switched off carries `ALERTS` and not `COMMANDS`. A chip claiming a
+  capability nobody enabled is the page lying about what is switched on.
+- **Five distinguishable failures get five messages.** The server sends
+  `failureKind` and a sentence naming the fix; the page renders it rather than
+  composing "Failed to send".
+- **Nothing arriving from the listen test is a RESULT, not an error**, and the
+  reasons come from the server in the order they are likely. The page also says,
+  *while the window is open*, to DM the bot rather than post in the channel — a
+  channel post carries no user, so posting discovers the chat id and teaches the
+  operator nothing about their own user id, which is what they came for.
+- **Discovering an id grants it nothing.** The listen result offers "use this
+  chat" and "map this user" as one-click SUGGESTIONS; applying either is an
+  explicit action, and mapping a user still requires choosing which account.
+- The token expiry countdown ticks locally off the absolute `expiresAt`, rather
+  than re-fetching every second.
 
 ## 5. Roles in the UI
 

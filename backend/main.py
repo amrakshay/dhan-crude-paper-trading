@@ -184,6 +184,39 @@ async def _apply_stored_settings() -> None:
         )
 
 
+async def _announce_startup() -> None:
+    """Say that this process started.
+
+    Low volume, high signal: a restart you did not perform is worth a message,
+    and it is the one alert whose absence is itself informative. Raised here
+    rather than from the watcher because "started" is an event, not a condition
+    a poll could notice.
+    """
+    from src.connections.database.db_models.alert_model import (
+        KIND_HEALTH,
+        SEVERITY_INFO,
+    )
+    from src.connections.services.alert_service import AlertService
+    from src.core.time_utils import ist_now
+    from src.database.session import session_scope
+
+    try:
+        async with session_scope() as session:
+            await AlertService(session).raise_alert(
+                kind=KIND_HEALTH,
+                severity=SEVERITY_INFO,
+                title="Dhan Paper Trading started",
+                body=(
+                    f"The application started at "
+                    f"{ist_now().strftime('%H:%M IST, %d %b %Y')}.\n"
+                    f"If you did not restart it, something else did."
+                ),
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("Could not record the startup alert; startup continues")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Nothing recorded when this process started, so the health page had no
@@ -255,6 +288,22 @@ async def lifespan(app: FastAPI):
         get_token_refresh_monitor,
         shutdown_token_refresh_monitor,
     )
+    # Alerts OUT and commands IN. The dispatcher is the only thing in this
+    # process that sends a message; the watcher decides what is worth sending;
+    # the poller reads commands and authorises each one by resolving its
+    # Telegram sender to an application user.
+    from src.connections.services.alert_dispatcher import (
+        get_alert_dispatcher,
+        shutdown_alert_dispatcher,
+    )
+    from src.connections.services.alert_watcher import (
+        get_alert_watcher,
+        shutdown_alert_watcher,
+    )
+    from src.connections.services.telegram_command_service import (
+        get_telegram_poller,
+        shutdown_telegram_poller,
+    )
 
     try:
         await get_feed_manager().start()
@@ -298,12 +347,43 @@ async def lifespan(app: FastAPI):
             "renewed automatically and the feed will stop when it expires"
         )
 
+    try:
+        await get_alert_dispatcher().start()
+    except Exception:
+        logger.exception(
+            "Alert dispatcher failed to start; alerts will be RECORDED in the "
+            "outbox but nothing will deliver them"
+        )
+
+    try:
+        await get_alert_watcher().start()
+    except Exception:
+        logger.exception(
+            "Alert health watcher failed to start; a background task that dies "
+            "will NOT be reported"
+        )
+
+    try:
+        if config_utils.get_property_value_boolean(
+            "connections.telegram_commands_task_enabled", True
+        ):
+            await get_telegram_poller().start()
+    except Exception:
+        logger.exception(
+            "Telegram command poller failed to start; commands will not be read"
+        )
+
+    await _announce_startup()
+
     logger.info("Startup complete; the API is accepting requests")
 
     yield
 
     logger.info("Crude paper-trading backend shutting down")
     try:
+        await shutdown_telegram_poller()
+        await shutdown_alert_watcher()
+        await shutdown_alert_dispatcher()
         await shutdown_token_refresh_monitor()
         await shutdown_swing_scheduler()
         await shutdown_swing_stop_monitor()
@@ -442,6 +522,7 @@ async def health_check() -> JSONResponse:
 from src.auth import auth_main_router  # noqa: E402
 from src.instruments import instruments_main_router  # noqa: E402
 from src.charges import charges_main_router  # noqa: E402
+from src.connections import connections_main_router  # noqa: E402
 from src.health import health_main_router  # noqa: E402
 from src.chart_trading import chart_trading_main_router  # noqa: E402
 from src.orders import orders_main_router  # noqa: E402
@@ -459,6 +540,7 @@ app.include_router(auth_main_router, prefix="/api")
 app.include_router(instruments_main_router, prefix="/api")
 app.include_router(market_main_router, prefix="/api")
 app.include_router(charges_main_router, prefix="/api")
+app.include_router(connections_main_router, prefix="/api")
 app.include_router(health_main_router, prefix="/api")
 app.include_router(orders_main_router, prefix="/api")
 app.include_router(chart_trading_main_router, prefix="/api")

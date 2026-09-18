@@ -24,6 +24,10 @@ class UserResponse(BaseModel):
     status: str
     must_change_password: bool = Field(alias="mustChangePassword")
     is_seed_user: bool = Field(alias="isSeedUser")
+    # Who may issue a Telegram command. Null is the normal state: nobody is
+    # mapped by default. This is an id, not a secret -- it identifies a person
+    # to Telegram and grants nothing on its own.
+    telegram_user_id: Optional[int] = Field(None, alias="telegramUserId")
     last_login_at: Optional[str] = Field(None, alias="lastLoginAt")
     created_at: Optional[str] = Field(None, alias="createdAt")
     # Why the UI greys out delete/role/status for this row. Sent so the reason
@@ -68,6 +72,11 @@ class UpdateUserRequest(BaseModel):
     # Optional: an admin resetting someone's password to a temporary one.
     password: Optional[str] = Field(None, max_length=256)
     must_change_password: Optional[bool] = Field(None, alias="mustChangePassword")
+    # Map (or unmap, with `clearTelegramUserId`) this user's Telegram account.
+    # Sending the field IS the explicit action: the Connections page's listen
+    # test discovers an id, and discovering one must never grant it anything.
+    telegram_user_id: Optional[int] = Field(None, alias="telegramUserId")
+    clear_telegram_user_id: bool = Field(False, alias="clearTelegramUserId")
 
     model_config = ConfigDict(populate_by_name=True)
 

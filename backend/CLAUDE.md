@@ -281,6 +281,69 @@ by-expiry / by-strike slices and the equity curve possible at all.
   are not stranded on a dead one. Do not replace the FeedManager singleton to
   apply settings.
 
+## 7a. Connections, alerts and Telegram
+
+`src/connections/` owns anything this application authenticates to and calls
+over the network. Root `CLAUDE.md` section 1 and section 4 have the rules that
+must not be broken; these are the ones that only matter once you are editing
+the code.
+
+- **`SettingsService`'s public surface did not change when the credentials
+  moved.** `dhan.client_id` and `dhan.access_token` are rows of the `dhan`
+  CONNECTION now, not of `app_settings` -- but `load_stored()`,
+  `apply_to_config()`, `save()` and `resolve_credentials()` all behave exactly
+  as they did. That is deliberate: `apply_to_config()` is called from the
+  lifespan BEFORE the feed starts and its position is pinned by
+  `tests/test_startup_applies_stored_settings.py`, and `token_refresh_service`
+  renews by calling `save()`. Moving the storage without moving the seam is
+  what kept all three working. `market_feed.synthetic_feed` deliberately stayed
+  in `app_settings`.
+- **`ConnectionStore` is the only place that knows a value might be a secret.**
+  It decides which column a key belongs in, registers every secret with
+  `log_redaction` on read AND on save, and returns `mask()` to anything
+  building a browser response. The repository enforces `value` XOR
+  `encrypted_value`; this decides which.
+- **A token handed in for VALIDATION is registered too** (`_registered()` in
+  `telegram_service`). The store covers a token it reads or saves; it does not
+  cover one an operator has typed into the form and not yet saved -- and
+  pressing Validate with an unsaved token is the first thing anybody does. That
+  path leaked a bot token into `app.log` through httpx's INFO URL line, found on
+  2026-09-18 by grepping the log after driving the page, not by reading the
+  code. `test_validating_an_UNSAVED_bot_token_does_not_log_it` keeps it fixed.
+- **`src/alert_sink.py` lives at `src/` root, like `log_buffer.py`, and for the
+  same reason:** `configure_logging()` installs it, and that runs before the
+  application has bootstrapped. It therefore imports `logging`, `threading`,
+  `collections` and `re` and nothing else. The database half imports the
+  normalisation FROM it rather than the other way round, which is also what
+  keeps the sink and the writer keyed identically.
+- **`emit()` queues in memory and never touches the database.** It is
+  synchronous and may be called from the middle of the order path. A deque that
+  overflows counts what it dropped rather than blocking the caller -- the
+  situation in which it overflows IS a flood.
+- **`apply_fill` raises the trade alert, and `alert_context` is an
+  ENRICHMENT.** A caller that forgets it still gets an alert, with less in it.
+  That is what makes the hook inherited rather than remembered. The emit is
+  wrapped so an alert can never lose a fill, and the flip path returns early so
+  it raises its own.
+- **`polling` is not `running`.** The command poller task starts
+  unconditionally and re-reads the connection each pass, so switching commands
+  on needs no restart -- which means that while commands are OFF the task is
+  alive and consuming nothing. The listen test borrows the stream only when
+  there is something to borrow; borrowing an idle one would make the button wait
+  its whole window and report "nothing arrived" for a message that arrived.
+- **A command is journalled in `handle()`, where it is DECIDED**, not in the
+  poller where the reply is sent. A command that arrived and whose answer could
+  not be delivered still happened, and a refusal that leaves no record is how
+  you fail to notice an attempt.
+- **Five distinguishable Telegram failures, five messages.** `_classify()` reads
+  the `description` because it is the only thing separating "the bot is not in
+  that channel" from "that channel does not exist", and those have different
+  fixes. Do not collapse them.
+- **Secrets: see the root `CLAUDE.md`.** Every new endpoint gets its assertion
+  in `tests/test_no_secrets_in_logs.py` in the same change.
+
+---
+
 ## 8. Logging
 
 `src/logging_config.py` is the only public API: `get_logger("<feature>.<area>")`
@@ -299,6 +362,11 @@ a handler at a call site.
   Tick volume is reported as aggregate counters from `Broadcaster._log_summary`
   on the broadcaster's own interval. `market_book.py` deliberately has no log
   calls at all.
+- **httpx logs the full request URL at INFO**, and a Telegram bot token is in
+  the URL PATH. The root logger's handlers use `RedactingFormatter`, so a
+  REGISTERED secret is scrubbed out of that line -- which is why every secret is
+  registered the moment it is read, saved or handed in for validation. Verified
+  on the real line: `POST https://api.telegram.org/bot***REDACTED***/getMe`.
 - **Never log a secret.** `tests/test_no_secrets_in_logs.py` fails the build on
   one, both at runtime and by AST-scanning every `logger.*()` call for
   secret-named arguments. Wrap a secret in `crypto_service.mask()`, `bool()` or

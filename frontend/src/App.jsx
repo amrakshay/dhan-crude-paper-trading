@@ -13,6 +13,7 @@ import NotesPage from './pages/NotesPage';
 import UsersPage from './pages/UsersPage';
 import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
+import ConnectionsPage from './pages/ConnectionsPage';
 import StrategiesPage from './pages/StrategiesPage';
 import SwingMomentumPage from './pages/SwingMomentumPage';
 import SystemHealthPage from './pages/SystemHealthPage';
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="/profile" element={<RoleRoute path="/profile"><ProfilePage /></RoleRoute>} />
         <Route path="/strategies" element={<RoleRoute path="/strategies"><StrategiesPage /></RoleRoute>} />
         <Route path="/swing" element={<RoleRoute path="/swing"><SwingMomentumPage /></RoleRoute>} />
+        <Route path="/connections" element={<RoleRoute path="/connections"><ConnectionsPage /></RoleRoute>} />
         <Route path="/settings" element={<RoleRoute path="/settings"><SettingsPage /></RoleRoute>} />
         <Route path="/health" element={<RoleRoute path="/health"><SystemHealthPage /></RoleRoute>} />
         {/* Positions, not the Crude Oil screen: that page is now gated

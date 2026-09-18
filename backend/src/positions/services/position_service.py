@@ -48,11 +48,20 @@ class PositionService:
         strike_price: Optional[Decimal] = None,
         option_type: Optional[str] = None,
         charges: Decimal = Decimal("0"),
+        alert_context: Optional[dict] = None,
     ) -> Tuple[Position, Decimal]:
         """Apply one execution. Returns (position, realised P&L from this fill).
 
         The realised figure is GROSS of charges; charges are accumulated on the
         position separately so the reports can show gross and net side by side.
+
+        **This is where a trade alert is raised**, and deliberately not in the
+        order service or in a strategy: chart trading, MCX crude and the
+        rotation all converge here, so one hook covers every way a share can
+        change hands, and a way added later inherits the alert rather than
+        having to remember it. `alert_context` is an ENRICHMENT the caller may
+        pass (the order's reason, its client id) -- a caller that forgets it
+        still gets an alert, with less in it.
         """
         side = str(side).upper()
         price = Decimal(str(price))
@@ -112,7 +121,25 @@ class PositionService:
                     trading_symbol, closing_quantity, price, realized, residual,
                 )
                 await self.repository.session.flush()
-                return position, _q(realized, MONEY_QUANTUM)
+                realized = _q(realized, MONEY_QUANTUM)
+                # The flip returns early, so it raises its own alert. The
+                # round trip that just CLOSED is the sale worth reporting; the
+                # residual that opened in the opposite direction is reported
+                # by the next fill that touches it.
+                await self._alert(
+                    strategy_key=strategy_key,
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    trading_symbol=trading_symbol,
+                    side=side,
+                    quantity=closing_quantity,
+                    price=price,
+                    realized=realized if side != OrderSide.BUY.value else None,
+                    charges=charges,
+                    position=position,
+                    context=alert_context,
+                )
+                return position, realized
 
         self._record_leg(position, side, quantity, price, charges)
 
@@ -127,7 +154,36 @@ class PositionService:
             await self._close_position(position)
 
         await self.repository.session.flush()
-        return position, _q(realized, MONEY_QUANTUM)
+        realized = _q(realized, MONEY_QUANTUM)
+        await self._alert(
+            strategy_key=strategy_key,
+            portfolio_id=portfolio_id,
+            security_id=security_id,
+            trading_symbol=trading_symbol,
+            side=side,
+            quantity=quantity,
+            price=price,
+            realized=realized if side != OrderSide.BUY.value else None,
+            charges=charges,
+            position=position,
+            context=alert_context,
+        )
+        return position, realized
+
+    async def _alert(self, **fields) -> None:
+        """Raise the trade alert. Never lets an alert break a fill.
+
+        The row is written on THIS session, where the fact happened; delivery
+        is `alert_dispatcher`'s job, so a fill never waits on somebody else's
+        HTTP. The import is inside the function per backend/CLAUDE.md section
+        1 -- positions must not import connections at module scope.
+        """
+        try:
+            from src.connections.services.alert_service import AlertService
+
+            await AlertService(self.repository.session).record_fill(**fields)
+        except Exception:  # noqa: BLE001 - a fill must never be lost to an alert
+            logger.debug("Could not raise a trade alert", exc_info=True)
 
     @staticmethod
     def _weighted_average(

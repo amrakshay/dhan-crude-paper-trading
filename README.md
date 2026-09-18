@@ -93,7 +93,8 @@ All live in `.env` at the project root. `conf/default-config.yaml` reads them vi
 `${VAR}` substitution — put secrets here, not in the YAML.
 
 **The three `DHAN_*` variables are only a fallback.** Anything saved on the
-Settings page is stored in the database and takes priority — see *Settings* below.
+Connections page is stored in the database and takes priority — see
+*Connections* below.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -163,15 +164,38 @@ All enforced server-side, not by disabling a button:
 
 ---
 
-## Settings page
+## Connections page
 
-Dhan credentials and the feed mode can be set in the UI at **Settings**, which
-avoids editing `.env` and restarting for a token that expires daily.
+**`/connections` owns anything this application authenticates to and calls over
+the network.** Two cards today: **Dhan** (market data) and **Telegram** (alerts
+out, commands in). Admin-only, and deliberately NOT gated by any strategy
+toggle — it is how you fix the credentials the strategies run on, so a toggle
+must never be able to hide it.
 
-**Precedence: database (UI) over `.env`.** Stored settings are overlaid onto the
-in-memory config at startup and after each save, so every existing config reader
-picks them up. The page shows where each value came from (`saved here` /
-`from .env` / `not set`).
+Before it existed, the two things that talked to a third party lived in
+different places and neither was called a connection: the Dhan credentials sat
+on Settings beside a switch that has nothing to do with credentials, and there
+was nowhere at all to put a second provider.
+
+**The status pill is LAST KNOWN, with its age.** Opening the page costs no
+network call. Every card carries the most recent check *and how long ago it
+was*; a card that has never been checked says so rather than showing green, and
+one that has gone quiet shows its last result with its age. Same rule the feed
+status indicator already follows.
+
+**The pill has six states, not two.** `Connected`, `Not configured`,
+`Never checked`, `Expiring soon`, `Error` and `Switched off`. Two would force
+"not set up yet" and "set up and broken" into the same red, and those are the
+two an operator most needs to tell apart. `last_check_ok` is nullable in the
+schema for the same reason: never checked, checked and failed, and checked and
+fine are three facts.
+
+### Dhan
+
+**The credentials moved here from Settings on 2026-09-18**, into a `dhan`
+connection row. The migration moves the token as Fernet **ciphertext, verbatim**
+— it is never decrypted, because there is no reason to have a live token in a
+migration's memory — and `downgrade()` puts both rows back.
 
 - **Client ID** — stored as plain text.
 - **Access token** — encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256,
@@ -179,19 +203,147 @@ picks them up. The page shows where each value came from (`saved here` /
   `APP_JWT_SECRET`). It is **never returned to the browser** — responses carry
   only a mask and decoded metadata. Leave the field blank to keep the stored
   token when changing something else.
-- **Synthetic feed** — the toggle. While it is on, both credentials are
-  optional; turning it off requires them.
-- **Validate token** — issues one real market-data request (the option chain
-  expiry list, already on the market-data allowlist) to confirm the credentials
-  work, without saving them. Expired tokens and a client ID that disagrees with
-  the token's own `dhanClientId` claim are caught locally first, with no network
+- **Validate** — issues one real market-data request (the option chain expiry
+  list, already on the market-data allowlist) to confirm the credentials work,
+  without saving them. Expired tokens and a client ID that disagrees with the
+  token's own `dhanClientId` claim are caught locally first, with no network
   call.
 - **Expiry countdown** — Dhan access tokens are JWTs, so the real `exp` claim is
-  decoded and counted down live, with warnings under two hours and on expiry.
-  No guessing "24 hours from whenever it was pasted".
+  decoded and counted down live, beside the automatic renewal's own state.
 
 Saving restarts the market feed in place so changes take effect immediately;
 connected browser tabs keep their WebSocket.
+
+### Telegram
+
+The first **outbound** path this application has ever had, and the first
+**inbound control** path. Everything else it does over the network is inbound
+market data: it fetches prices and sends nothing anywhere.
+
+`api.telegram.org` is named in exactly one module
+(`src/connections/services/telegram_client.py`), with
+`tests/test_outbound_hosts.py` asserting nothing else names it — the same
+containment `dhan_token_client.py` gives `/RenewToken`. The client may call four
+methods and no others: `getMe`, `getChat`, `sendMessage`, `getUpdates`.
+
+**The bot token is in the URL PATH** (`/bot<TOKEN>/METHOD`), and httpx logs the
+full request URL at INFO. Two defences, both needed: the token is registered
+with `log_redaction` the moment it is read, saved *or handed to the service for
+validation*, and nothing interpolates an httpx exception's message into a log
+line or an error string — only its type.
+
+**Validation has three outcomes, not two.** `getMe` proves the token; `getChat`
+proves the channel, and it fails differently when the bot is not a member of
+that channel — the single most common setup mistake — than when the channel does
+not exist. Bad token, not a member, cannot post, no such chat and flood control
+read as five different messages, because they have five different fixes.
+Validation posts **nothing**: a page that sends a message every time somebody
+opens it is not validation.
+
+#### The two test buttons
+
+They prove the two halves separately, which matters because they fail for
+completely different reasons. Neither runs on its own.
+
+**Send test message** proves the outbound half in one press — the token, the
+channel, and permission to post. The message identifies *itself*, not just its
+sender, because somebody running a staging copy and a real one needs to tell
+them apart at a glance:
+
+```
+Test message from Dhan Paper Trading
+Sent by hand from the Connections page — this is not an alert.
+Host: <hostname>  ·  21:58 IST, 18 Sep 2026
+If you can read this, alerts will reach this channel.
+```
+
+**Listen for a test message** is the more valuable of the two and the less
+obvious: it is the **setup tool**. It opens a 60-second window with a live
+countdown and reports the first update that arrives — the sender's numeric user
+id (which `users.telegram_user_id` needs and which Telegram offers no friendly
+way to find), the sender's name, the chat id and type, and the message text.
+Both discoveries are offered as one-click suggestions, and **applying them stays
+an explicit action**: discovering an id must never be what grants it anything.
+
+Four things the screen tells you, each of which otherwise wastes an hour:
+
+- **DM the bot, do not post in the channel.** The Bot API documents
+  `Message.from` as *"may be empty for messages sent to channels"* — a channel
+  post carries no user. Posting in the channel discovers the chat id and teaches
+  you nothing about your own user id, which is the thing you came for.
+- **A bot cannot message a person first**, so you must have pressed Start in its
+  chat at least once.
+- **Privacy mode hides ordinary group messages.** `getMe` returns
+  `can_read_all_group_messages`, so the card reports this as a fact rather than
+  leaving you guessing.
+- **A webhook makes this impossible.** `getUpdates` does not work while one is
+  set, and that is reported rather than timed out.
+
+**Nothing arriving is a RESULT, not an error.** After a quiet window it says
+"Nothing arrived" and lists the reasons in the order they are likely. A spinner
+that gives up silently is the worst version of this button.
+
+It works with commands switched **off**, because that is how you switch them on.
+It borrows the command poller's update stream rather than opening a second
+`getUpdates` consumer — but only when that poller is actually *consuming*. The
+task is alive even while commands are off (so switching them on needs no
+restart), and borrowing a stream nobody is reading would make the button wait
+its whole window and report "nothing arrived" for a message that did arrive.
+
+#### Commands in
+
+A channel id identifies a **destination, not a person**. Anyone who learns it
+and can post in it would otherwise be issuing commands. So a command is
+authorised by resolving the update's `from.id` to an **application user**
+(`users.telegram_user_id`, nullable and unique) and applying that user's
+existing role.
+
+That is not tidiness. A standalone allowlist of Telegram ids would be a *second*
+authorisation model, and this codebase already has one whose properties took
+work to get right: `require_admin` is what refuses rather than the sidebar, the
+user is re-read on every request so a demotion takes effect immediately, the
+seeded admin cannot be deleted or demoted, and a user who owes a password change
+reaches nothing until they stop owing one. Mapping the sender to a user inherits
+every one of those for free. A parallel list inherits none of them, and the
+first time somebody was deactivated they would still be able to arm a strategy
+from their phone.
+
+- **Nobody is mapped by default.** Commands are off until somebody is, and a
+  Telegram connection with alerts working and no command users is a normal,
+  complete state.
+- **Matching is on the NUMERIC id, never `@username`** — usernames are
+  reassignable, and an authorisation somebody can transfer by releasing a handle
+  is not an authorisation.
+- **Read-only** (`/status`, `/book`, `/pnl`, `/health`) needs any active user.
+  This is most of the value and none of the risk.
+- **Control** (`/arm`, `/disarm`, `/run`) needs `ROLE_ACCOUNT_ADMIN` — the same
+  gate the arming endpoint uses, not a thinner one — **and** its own switch,
+  which is off by default. A refusal because the switch is off says so, or it
+  cannot be told from a failure.
+- **Every state-changing command and every refusal is journalled** with its
+  sender's Telegram id and application user id. What the command *changed*
+  carries `updated_by_user_id` exactly as a click does.
+
+`getUpdates` long-polling rather than a webhook: a webhook needs this
+application reachable from the internet, which it is not and should not need to
+be.
+
+### What Settings keeps
+
+**Settings keeps this application's own configuration** — today, the
+synthetic-feed switch. It is a mode of *this* application rather than a
+credential, and it would sit oddly on a card describing a connection to somebody
+else.
+
+The rule that spans the two pages survived the split: **live mode is still
+refused without credentials.** Turning the synthetic feed off with no Dhan
+credentials means the feed errors out, and this application must never invent
+prices in their place. The server enforces it and the Settings page says where
+to go and fix it, rather than letting you find out after clicking.
+
+**Precedence: database (UI) over `.env`.** Stored settings are overlaid onto the
+in-memory config at startup — *before the feed starts* — and after each save, so
+every existing config reader picks them up.
 
 ### The access token renews itself
 
@@ -215,7 +367,8 @@ client id, six-digit PIN and a TOTP — is deliberately unreachable from this
 codebase and is not on the safety allowlist, because it would mean storing your
 PIN. The cost of that choice: a token allowed to lapse **completely** cannot be
 renewed by anyone, so generate a fresh one on Dhan Web and save it on the
-Settings page. The log and the health page say exactly that when it happens.
+**Connections** page. The log, the health page and a Telegram alert say exactly
+that when it happens.
 
 **Why not the API Key option** you see on Dhan's site: it is an OAuth flow whose
 second step is a browser login with 2FA, every time. The key and secret last 12
@@ -523,6 +676,111 @@ The page polls every 5 s with a visible "as of" age and a manual Refresh.
 `/api/healthcheck/system` and `/api/healthcheck/problems` are both in
 `LogRequestsMiddleware.IGNORED_PATHS`, so polling does not fill the access log
 the page reports on.
+
+---
+
+## Alerts
+
+What the application tells you about, and how it gets there.
+
+### An outbox, not a direct call
+
+An alert is a **row first and an HTTP call second**, never the other way round.
+The `alerts` table is written where the fact happens; an `alert-dispatcher` task
+drains it. Three reasons, every one of which has bitten this codebase in some
+other form:
+
+- A fill must never block on somebody else's HTTP. The emit is inside the order
+  path; a synchronous `sendMessage` there would put Telegram's latency on every
+  trade and Telegram's outage on every fill.
+- An alert raised during a crash still needs to arrive after the restart. A
+  direct call made while the process is dying delivers nothing and leaves no
+  trace that it tried.
+- *"What did it tell me, and did it arrive"* should be answerable. A row with a
+  status answers it; a log line saying `sendMessage returned 200` does not.
+
+A row carries `PENDING` / `SENT` / `FAILED` / `SUPPRESSED`, its attempt count,
+and the reason it was suppressed. **A fact is recorded even when nothing is
+configured to carry it** — the row is written `SUPPRESSED` with the reason,
+rather than the fact being dropped because there was no bot to tell.
+
+### De-duplication is the feature, not a nicety
+
+This codebase has produced exactly the flood an unthrottled version would have
+forwarded, twice in one evening: the swing stop monitor logged *"database is
+locked"* **once a second for twelve minutes** during the first full bar refresh,
+and the nightly re-ran every fifteen minutes from 18:15 until it was fixed.
+Either would have sent hundreds of messages and met Telegram's flood control —
+which is not merely noisy, it stops the one message that mattered from arriving.
+
+So the first occurrence goes out immediately and the rest collapse onto the row
+already holding the window open, which counts them; the next message after the
+floor says *"this has now happened 47 times"*. The key is the logger name plus a
+**normalised** message — normalised because the alert body carries its own
+occurrence count, and keying on raw text would give every repeat a new key and
+defeat the de-duplication it is reporting.
+
+**The alert path never alerts about its own failure.** A delivery error that
+logs an ERROR that raises an alert that fails to deliver is a loop ending in
+flood control, with the message that mattered stuck behind it. The alerting
+logger is excluded from its own sink explicitly, with a test.
+
+### What gets alerted
+
+**Trades**, emitted from `PositionService.apply_fill` — deliberately there and
+not from the order service or a strategy, because chart trading, MCX crude and
+the rotation all converge on it, so one hook covers every way a share can change
+hands and a way added later inherits the alert rather than having to remember
+it.
+
+- **Bought** — symbol, quantity, fill price, value, strategy, portfolio, the
+  reason already on the PLACED event (for the rotation, its rank and score), and
+  the cash remaining, because the next question is always "what is left".
+- **Sold** — plus **realised P&L in rupees and percent**, how long it was held,
+  charges, and **why it left**: `swing_stops.exit_kind` is a stored fact
+  (`TRAIL_STOP` / `ROTATION` / `REGIME` / `MANUAL`), and a sale with no
+  exit-kind row is reported as a manual close rather than being assigned a
+  category it was never given.
+
+The P&L comes from the figure `apply_fill` posted onto the position row, never
+recomputed. `reports/services/pnl_service.py` replays fills to the same number
+by construction; a third calculation would be a third thing that can disagree,
+and a message on your phone is the worst place to find that out.
+
+**Errors** — the sink is a logging handler at **ERROR and above** (WARNING is
+the right floor for a page somebody is reading and far too chatty for a phone).
+It stores text already formatted through `RedactingFormatter`, never raises out
+of `emit()`, and queues in memory rather than touching the database, because
+`emit()` is synchronous and may be called from the middle of anything.
+
+**System health**, evaluated by an `alert-watcher` task every 60 s. Every one
+hangs off a place that *already knows* the fact — nothing here is new
+measurement and nothing is on the tick path:
+
+1. **A background task that should be running is not.** `task_inspector`
+   already computes `missing` against `expected_task_names`. A dead
+   `swing-scheduler` on an ARMED strategy means nothing decides and nothing
+   trades, silently — the single most valuable alert here, and the only one
+   raised as CRITICAL on its own.
+2. **The Dhan token lapsed, or its renewal is failing.** Kept apart: only the
+   first needs waking somebody up, because only the first cannot fix itself.
+3. **The feed is stale or disconnected while a market is open.** Stale prices
+   that look live are the worst failure this tool can have.
+4. **A scheduled session was missed.**
+5. **Daily bars too stale to trade on** — the same sentence the rebalance would
+   refuse with, sent when the condition appears rather than at 09:16 when it is
+   too late to fix.
+6. **A stop triggered but its exit deferred to the next open.**
+7. **The application started.** Low volume, high signal: a restart you did not
+   perform is worth a message.
+
+De-duplication here is keyed on the **event**, because a health condition
+persists — a dead task stays dead, and keying on the message would send the same
+sentence every minute until somebody fixed it.
+
+**Deliberately not alerted on**: anything WARNING-level and routine, the
+synthetic feed being on (every screen already says so, permanently), or a
+strategy switched off by somebody looking at the screen at the time.
 
 ---
 
@@ -1695,6 +1953,52 @@ not carried over.
 * **The LIQUIDBEES cash sleeve and the gold overlay are not implemented.** The
   specification records the first as arithmetic rather than a simulation and the
   second as an overlay estimate; neither was adopted.
+
+### Connections, alerts and Telegram
+
+* **Nothing here has been proven against a real Telegram bot.** Every failure
+  path was exercised against the live `api.telegram.org` with a deliberately
+  invalid token (bad token, `getUpdates`, `sendMessage` and `getMe` all round
+  trip and classify correctly), and the delivery, de-duplication and command
+  paths are covered by tests with the HTTP call stubbed. What has **not** been
+  seen: a message actually arriving in a channel, an update actually arriving
+  from a DM, and therefore the listen test's happy path end to end. Create a
+  bot, save its token, and press both buttons before relying on any of it.
+* **UNVERIFIED — one `getUpdates` consumer per bot.** Telegram is widely
+  reported to serve one `getUpdates` consumer at a time and to answer a second
+  with HTTP 409 ("terminated by other getUpdates request"). **This is not in the
+  official documentation** — it is not on the `getUpdates` page — so it is
+  treated as likely but unconfirmed. It matters because the command poller and
+  the listen-test window would be exactly two concurrent consumers. The design
+  is safe either way: the listen test **borrows** the running poller's stream
+  and polls directly only when that poller is not consuming. A 409 is also
+  classified and reported rather than swallowed. Confirm the behaviour against a
+  real bot before designing anything else around it.
+* **`Message.from` on a channel post is documented as "may be empty", not
+  "always empty".** The listen test treats a missing sender as a channel post
+  and says so; if Telegram ever populates it for some channel configuration, the
+  message would be pessimistic rather than wrong.
+* **The alert dispatcher retries five times, then gives up.** A row that has
+  failed five times is failing for a reason a retry will not fix, and leaving it
+  PENDING for ever would block everything behind it. There is no UI to requeue a
+  FAILED row; the fact is still in the table, and `GET /api/connections/alerts`
+  shows it.
+* **A suppressed occurrence has no row of its own.** Collapsed repeats increment
+  `suppressed_count` on the row holding the window open, so the *count* is
+  durable but the individual timestamps are not. Writing a row per occurrence
+  would move the flood into the table.
+* **The `alerts` table is never pruned.** Nothing deletes old rows. At this
+  application's volume that is years away from mattering, but it is unbounded.
+* **A Dhan token that is typed in and validated is registered with the log
+  redactor permanently for the process.** That includes a mistyped one. The
+  alternative was leaking a real token into `app.log` through httpx's INFO URL
+  line — which this build actually did until it was found by grepping the log
+  after driving the page, not by reading the code.
+* **MySQL, as ever, is DDL-compile-verified only.** The three new tables and
+  `users.telegram_user_id` (BigInteger) have been round-tripped
+  upgrade→downgrade→upgrade on SQLite against a copy of the real database, with
+  the token ciphertext byte-identical at each step. They have never been
+  executed against a live MySQL server.
 
 ### Everything else
 

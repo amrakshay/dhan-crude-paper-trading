@@ -14,7 +14,7 @@ import os
 import sys
 from typing import Optional
 
-from src import log_buffer, log_redaction
+from src import alert_sink, log_buffer, log_redaction
 
 _APP_LOGGER_NAME = "dcpt"
 _ACCESS_LOGGER_NAME = "dcpt.access"
@@ -147,6 +147,14 @@ def configure_logging(
     # app.log.
     log_buffer.install(logging.getLogger(_APP_LOGGER_NAME))
 
+    # The alert outbox's ERROR+ sink, installed the same way and for the same
+    # reason: one handler sees every record, so nothing has to remember to
+    # alert at a call site. It queues in memory and never touches the database
+    # -- src/connections/services/alert_dispatcher.py drains it. The alerting
+    # machinery is excluded from it, or a delivery failure would alert about
+    # itself in a loop.
+    alert_sink.install(logging.getLogger(_APP_LOGGER_NAME))
+
     _CONFIGURED = True
 
     if failure:
@@ -173,6 +181,7 @@ def reset_logging_for_tests() -> None:
             except Exception:  # pragma: no cover - best effort
                 pass
     log_buffer.reset_for_tests()
+    alert_sink.reset_for_tests()
     _CONFIGURED = False
 
 

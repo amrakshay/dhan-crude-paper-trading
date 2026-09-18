@@ -11,7 +11,7 @@ recovering, so it is stored as a bcrypt hash with a per-user salt. Contrast the
 Dhan access token in `src/settings/`, which is *correctly* Fernet-encrypted
 because it has to be replayed to Dhan verbatim.
 """
-from sqlalchemy import Boolean, Column, String
+from sqlalchemy import BigInteger, Boolean, Column, String
 
 from src.constants import UserRole, UserStatus
 from src.database.base import PreciseDateTime, TimestampedModel
@@ -46,6 +46,24 @@ class User(TimestampedModel):
     # the email so the guard rails (never delete, never demote, never
     # deactivate) are enforced on data, not on a string comparison.
     is_seed_user = Column(Boolean, nullable=False, default=False, index=True)
+
+    # WHO MAY ISSUE A TELEGRAM COMMAND. Nullable and unique: nobody is mapped
+    # by default, and commands are off until somebody is.
+    #
+    # It lives here rather than as an allowlist hanging off the Telegram
+    # connection because an allowlist would be a SECOND authorisation model.
+    # Resolving a Telegram sender to a user means `require_admin`'s gate, the
+    # re-read-on-every-request that makes a demotion take effect immediately,
+    # the `is_seed_user` guard rails and the owes-a-password-change refusal all
+    # hold for Telegram too, for free. A parallel list inherits none of them,
+    # and the first time somebody was deactivated they would still be able to
+    # arm a strategy from their phone.
+    #
+    # BigInteger because Telegram user ids have already passed 2^31, and the
+    # numeric id is matched rather than @username -- a username is
+    # reassignable, and an authorisation somebody can transfer by releasing a
+    # handle is not an authorisation.
+    telegram_user_id = Column(BigInteger, nullable=True, unique=True, index=True)
 
     last_login_at = Column(PreciseDateTime, nullable=True)
     password_changed_at = Column(PreciseDateTime, nullable=True)

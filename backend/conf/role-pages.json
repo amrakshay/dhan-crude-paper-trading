@@ -26,7 +26,13 @@
     "by ANY strategy being live, which left it in the sidebar showing a front",
     "contract no running strategy had. /profile stays here and stays a real",
     "route; it is simply not in the sidebar -- the header account menu is",
-    "where it lives now."
+    "where it lives now.",
+    "",
+    "/connections owns anything this application authenticates to and calls",
+    "over the network -- the Dhan credentials, and the Telegram bot that",
+    "carries alerts out and commands in. Admin-only, like /settings and",
+    "/health, and NOT strategy-gated: it is how you fix the credentials the",
+    "strategies run on, so a toggle must never be able to hide it."
   ],
   "pages": [
     "/live",
@@ -41,6 +47,7 @@
     "/users",
     "/profile",
     "/settings",
+    "/connections",
     "/health"
   ],
   "roles": {
@@ -60,12 +67,13 @@
         "/users",
         "/profile",
         "/settings",
+        "/connections",
         "/health"
       ]
     },
     "ROLE_USER": {
       "label": "User",
-      "description": "Everything except Settings, System Health and Strategies. Sees portfolios and the user list but cannot change either.",
+      "description": "Everything except Settings, Connections, System Health and Strategies. Sees portfolios and the user list but cannot change either.",
       "pages": [
         "/live",
         "/chain",

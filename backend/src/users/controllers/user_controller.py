@@ -64,6 +64,7 @@ def to_response(user: User, acting_user_id: Optional[int] = None) -> UserRespons
         status=user.status,
         must_change_password=bool(user.must_change_password),
         is_seed_user=bool(user.is_seed_user),
+        telegram_user_id=user.telegram_user_id,
         last_login_at=_iso(user.last_login_at),
         created_at=_iso(user.created_at),
         can_be_deleted=can_be_deleted,
@@ -151,6 +152,8 @@ class UserController:
                 status=request.status,
                 password=request.password,
                 must_change_password=request.must_change_password,
+                telegram_user_id=request.telegram_user_id,
+                clear_telegram_user_id=request.clear_telegram_user_id,
             )
         except UserValidationError as exc:
             logger.warning(

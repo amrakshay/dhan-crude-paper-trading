@@ -635,6 +635,14 @@ class OrderService:
             strike_price=order.strike_price,
             option_type=order.option_type,
             charges=incremental_charges,
+            # The enrichment the trade alert wants and the position row cannot
+            # know: which order this was, and WHY it was placed. The reason is
+            # already on the PLACED event (`submit_paper_order(reason=...)`),
+            # and for the rotation it is its rank and score.
+            alert_context={
+                "clientOrderId": order.client_order_id,
+                "reason": await self._placed_reason(order),
+            },
         )
 
         await self._record_cash_effect(
@@ -644,6 +652,22 @@ class OrderService:
             incremental_charges=incremental_charges,
             at=now,
         )
+
+    @staticmethod
+    async def _placed_reason(order: Order) -> Optional[str]:
+        """Why this order was placed, off its own PLACED event.
+
+        Read rather than recomputed: `submit_paper_order(reason=...)` writes it
+        there precisely so there is one copy, and a `strategy_reason` column on
+        `orders` would be a third one, null for every human order.
+        """
+        try:
+            for event in order.events or []:
+                if event.event_type == "PLACED" and event.message:
+                    return event.message
+        except Exception:  # noqa: BLE001 - an alert detail is never worth a failure
+            return None
+        return None
 
     async def _record_cash_effect(
         self,

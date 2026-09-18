@@ -1,4 +1,18 @@
-"""Runtime settings: Dhan credentials and the synthetic-feed toggle.
+"""Runtime settings: the synthetic-feed toggle, and the Dhan credentials' home.
+
+**The Dhan credentials moved to `connections` on 2026-09-18.** `client_id` and
+`access_token` are now rows of the `dhan` CONNECTION, not of `app_settings`;
+the synthetic-feed switch stayed here, because it is a mode of THIS application
+rather than a credential and would sit oddly on a card describing a connection
+to somebody else.
+
+**This module's public surface did not change**, and that is deliberate.
+`apply_to_config()` is called from the lifespan BEFORE the feed starts and its
+position is pinned by `tests/test_startup_applies_stored_settings.py`;
+`token_refresh_service` renews a token by calling `save()`; every caller of
+`resolve_credentials()` is unaffected. Moving the storage without moving the
+seam is what keeps all three working, and keeps the startup overlay exactly
+where it was.
 
 **Precedence: values saved in the UI (database) override `.env`.** `.env` is the
 fallback, which keeps a fresh checkout working before anyone opens the Settings
@@ -37,6 +51,15 @@ KEY_SYNTHETIC_FEED = "market_feed.synthetic_feed"
 
 MANAGED_KEYS = (KEY_CLIENT_ID, KEY_ACCESS_TOKEN, KEY_SYNTHETIC_FEED)
 SECRET_KEYS = (KEY_ACCESS_TOKEN,)
+
+# Which of those live in `app_settings` and which in the `dhan` connection.
+# The config keys are unchanged either way: what moved is the row, not the name
+# every `config_utils` caller reads.
+APP_SETTING_KEYS = (KEY_SYNTHETIC_FEED,)
+CONNECTION_KEYS = {
+    KEY_CLIENT_ID: "client_id",
+    KEY_ACCESS_TOKEN: "access_token",
+}
 
 # Warn when the stored Dhan token has less than this left. Dhan tokens are
 # day-scoped, and a feed that dies mid-session because nobody noticed the
@@ -120,12 +143,39 @@ class SettingsService:
         self.repository = repository
 
     # --- reading -----------------------------------------------------------
+    def _connection_store(self):
+        """The Dhan connection's settings, on this service's own session."""
+        from src.connections.services.connection_store import ConnectionStore
+
+        return ConnectionStore(self.repository.session)
+
     async def load_stored(self) -> Dict[str, Optional[str]]:
-        """Decrypted settings from the database. Missing keys are omitted."""
-        stored = await self.repository.get_all()
+        """Decrypted settings from the database. Missing keys are omitted.
+
+        Two sources now, one dictionary: the synthetic switch out of
+        `app_settings`, the credentials out of the `dhan` connection. Callers
+        see the same keys they always did.
+        """
         resolved: Dict[str, Optional[str]] = {}
 
-        for key in MANAGED_KEYS:
+        from src.connections.services import providers as connection_providers
+
+        try:
+            values = await self._connection_store().values(
+                connection_providers.PROVIDER_DHAN
+            )
+        except Exception:  # noqa: BLE001 - never block startup on a settings read
+            logger.exception(
+                "Could not read the Dhan connection; falling back to .env for "
+                "the credentials"
+            )
+            values = {}
+        for config_key, connection_key in CONNECTION_KEYS.items():
+            if values.get(connection_key):
+                resolved[config_key] = values[connection_key]
+
+        stored = await self.repository.get_all()
+        for key in APP_SETTING_KEYS:
             setting = stored.get(key)
             if setting is None:
                 continue
@@ -152,6 +202,12 @@ class SettingsService:
         return resolved
 
     async def decrypt_failed_for(self, key: str) -> bool:
+        if key in CONNECTION_KEYS:
+            from src.connections.services import providers as connection_providers
+
+            return await self._connection_store().decrypt_failed(
+                connection_providers.PROVIDER_DHAN, CONNECTION_KEYS[key]
+            )
         setting = await self.repository.get_by_key(key)
         if setting is None or not setting.is_encrypted:
             return False
@@ -255,32 +311,51 @@ class SettingsService:
             if not effective_token and not clear_access_token:
                 effective_token = (await self.load_stored()).get(KEY_ACCESS_TOKEN)
             if not effective_client_id or not effective_token:
+                # The refusal SURVIVED the move to Connections, deliberately:
+                # live mode with no credentials means the feed errors out, and
+                # this application must never invent prices in its place. What
+                # changed is where the operator is sent to fix it.
                 raise SettingsValidationError(
                     "A Dhan client ID and access token are required when the "
-                    "synthetic feed is off. Turn the synthetic feed on, or "
-                    "supply both credentials."
+                    "synthetic feed is off. They now live on the Connections "
+                    "page -- set them there, or turn the synthetic feed on."
                 )
 
         await self.repository.upsert(
             KEY_SYNTHETIC_FEED, value="true" if synthetic_feed else "false"
         )
-        await self.repository.upsert(KEY_CLIENT_ID, value=client_id or None)
 
-        if clear_access_token:
-            logger.info("Clearing the stored Dhan access token at the operator's request")
-            await self.repository.delete_by_key(KEY_ACCESS_TOKEN)
-        elif access_token:
-            if not crypto_service.is_available():
-                raise SettingsValidationError(crypto_service.unavailable_reason())
-            await self.repository.upsert(
-                KEY_ACCESS_TOKEN,
-                encrypted_value=crypto_service.encrypt(access_token),
-                is_encrypted=True,
-            )
-            log_redaction.register_secret(access_token)
-            logger.info(
-                "Stored a new Dhan access token (%s)", crypto_service.mask(access_token)
-            )
+        # The credentials are rows of the `dhan` CONNECTION now. The store owns
+        # encryption, the value-XOR-encrypted_value invariant and registering
+        # the token with the log redactor, exactly as this method used to.
+        from src.connections.services import providers as connection_providers
+        from src.connections.services.connection_store import ConnectionStoreError
+
+        store = self._connection_store()
+        try:
+            if client_id:
+                await store.put(
+                    connection_providers.PROVIDER_DHAN,
+                    connection_providers.DHAN_CLIENT_ID,
+                    client_id,
+                )
+            if clear_access_token:
+                logger.info(
+                    "Clearing the stored Dhan access token at the operator's request"
+                )
+                await store.put(
+                    connection_providers.PROVIDER_DHAN,
+                    connection_providers.DHAN_ACCESS_TOKEN,
+                    "",
+                )
+            elif access_token:
+                await store.put(
+                    connection_providers.PROVIDER_DHAN,
+                    connection_providers.DHAN_ACCESS_TOKEN,
+                    access_token,
+                )
+        except ConnectionStoreError as error:
+            raise SettingsValidationError(str(error)) from error
 
         await self.repository.session.commit()
         applied = await self.apply_to_config()
@@ -357,6 +432,13 @@ class SettingsService:
             resolved_id, resolved_token = await self.resolve_credentials()
             client_id = client_id or resolved_id
             access_token = access_token or resolved_token
+
+        # A token the operator has TYPED IN and not yet saved has never been
+        # through the store, so it has never been registered with the log
+        # redactor. Dhan sends it as a header rather than in the URL, so this
+        # is not the leak the Telegram path had -- but registering it costs
+        # nothing and closes the same class of gap for the same reason.
+        log_redaction.register_secret(access_token)
 
         token_info = inspect_token(access_token)
         result: Dict[str, Any] = {

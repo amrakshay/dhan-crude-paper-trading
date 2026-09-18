@@ -10,6 +10,7 @@ import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import TuneIcon from '@mui/icons-material/Tune';
 import AutoModeIcon from '@mui/icons-material/AutoMode';
+import HubIcon from '@mui/icons-material/Hub';
 
 /**
  * Every page the app has. Which of them a given role actually sees is decided
@@ -37,6 +38,10 @@ export const navigationItems = [
   { path: '/swing', label: 'Swing Momentum', icon: AutoModeIcon },
   { path: '/users', label: 'Users', icon: GroupIcon },
   { path: '/strategies', label: 'Strategies & Features', icon: TuneIcon },
+  // Anything this application authenticates to and calls over the network.
+  // Admin-only, and NOT strategy-gated: it is how you fix the credentials the
+  // strategies run on, so a toggle must never be able to hide it.
+  { path: '/connections', label: 'Connections', icon: HubIcon },
   { path: '/settings', label: 'Settings', icon: SettingsIcon },
   { path: '/health', label: 'System Health', icon: MonitorHeartIcon },
 ];

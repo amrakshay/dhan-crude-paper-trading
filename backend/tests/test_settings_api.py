@@ -118,6 +118,26 @@ async def test_the_response_carries_a_mask_and_the_decoded_expiry(auth_client):
     assert token_info["dhanClientId"] == "1100123456"
 
 
+async def _dhan_setting(session, key: str):
+    """One setting of the `dhan` CONNECTION.
+
+    The credentials moved out of `app_settings` into the `connections` tables
+    on 2026-09-18. The INVARIANT did not move: a secret lives in
+    `encrypted_value` and nowhere else, enforced in the repository. These two
+    tests assert that invariant in its new home rather than asserting the old
+    address.
+    """
+    from src.connections.database.db_operations.connection_repository import (
+        ConnectionRepository,
+        ConnectionSettingRepository,
+    )
+
+    connection = await ConnectionRepository(session).get_by_provider("dhan")
+    if connection is None:
+        return None
+    return await ConnectionSettingRepository(session).get_by_key(connection.id, key)
+
+
 async def test_the_token_is_stored_encrypted_not_in_the_plaintext_column(
     auth_client, db_session
 ):
@@ -129,11 +149,14 @@ async def test_the_token_is_stored_encrypted_not_in_the_plaintext_column(
 
     session = get_session_factory()()
     try:
-        stored = await AppSettingRepository(session).get_by_key(KEY_ACCESS_TOKEN)
+        stored = await _dhan_setting(session, "access_token")
         assert stored is not None
         assert stored.is_encrypted is True
         assert stored.value is None, "a secret must never land in the plaintext column"
         assert stored.encrypted_value and token not in stored.encrypted_value
+        # And it must NOT have been left behind in app_settings, or two copies
+        # of one token would drift apart the first time one was renewed.
+        assert await AppSettingRepository(session).get_by_key(KEY_ACCESS_TOKEN) is None
     finally:
         await session.close()
 
@@ -145,9 +168,11 @@ async def test_the_client_id_is_stored_as_plain_text(auth_client, db_session):
 
     session = get_session_factory()()
     try:
-        stored = await AppSettingRepository(session).get_by_key(KEY_CLIENT_ID)
+        stored = await _dhan_setting(session, "client_id")
+        assert stored is not None
         assert stored.value == "1100123456"
         assert stored.is_encrypted is False
+        assert await AppSettingRepository(session).get_by_key(KEY_CLIENT_ID) is None
     finally:
         await session.close()
 

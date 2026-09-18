@@ -29,6 +29,18 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_telegram_user_id(self, telegram_user_id: int) -> Optional[User]:
+        """The user a Telegram sender maps to, or None.
+
+        None is the normal state: nobody is mapped by default, and an unmapped
+        sender is refused and logged rather than being treated as anonymous
+        access. Matching is on the NUMERIC id -- a @username is reassignable.
+        """
+        result = await self.session.execute(
+            select(User).where(User.telegram_user_id == int(telegram_user_id))
+        )
+        return result.scalar_one_or_none()
+
     async def list_users(self) -> List[User]:
         """Every user, admins first then alphabetically. No pagination: this is
         a single-operator tool with a handful of accounts."""

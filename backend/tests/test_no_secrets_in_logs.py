@@ -1093,3 +1093,215 @@ def test_the_static_scan_catches_a_leaky_log_call(snippet):
 @pytest.mark.parametrize("snippet", SAFE_SNIPPETS)
 def test_the_static_scan_does_not_flag_a_safe_log_call(snippet):
     assert not _scan_source(snippet), f"scan false-positived on: {snippet}"
+
+
+# --- the Telegram bot token, added 2026-09-18 with the Connections page ------
+# THE BOT TOKEN IS IN THE URL PATH. Every call is
+# `https://api.telegram.org/bot<TOKEN>/METHOD`, and httpx logs the full request
+# URL at INFO -- that is happening in logs/app.log right now for Dhan's chart
+# endpoint. A naive implementation therefore writes the bot token into the log
+# on every single call. These are the assertions for both defences.
+SENTINEL_BOT_TOKEN = "123456789:AAH-sentinel-bot-token-DO-NOT-LOG-5e91b7"
+SENTINEL_CHAT_ID = "-1005551234567"
+
+
+async def test_saving_a_telegram_bot_token_never_logs_it(auth_client, captured_logs):
+    response = await auth_client.put(
+        "/api/connections/telegram",
+        json={
+            "settings": {
+                "bot_token": SENTINEL_BOT_TOKEN,
+                "chat_id": SENTINEL_CHAT_ID,
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    # The save must be logged, just not with the token in it.
+    assert "bot token" in captured_logs.text.lower()
+    _assert_clean(captured_logs, SENTINEL_BOT_TOKEN)
+
+
+async def test_the_connections_endpoints_never_return_the_bot_token(
+    auth_client, captured_logs
+):
+    """Every new endpoint gets its assertion in the same change.
+
+    The Connections page reads credentials, a bot token and the list of people
+    who may issue a command from a chat app -- the likeliest surface in this
+    build to leak one after the health page.
+    """
+    import os
+
+    dhan_token = _sentinel_token()
+    await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": dhan_token,
+        },
+    )
+    saved = await auth_client.put(
+        "/api/connections/telegram",
+        json={
+            "settings": {
+                "bot_token": SENTINEL_BOT_TOKEN,
+                "chat_id": SENTINEL_CHAT_ID,
+            }
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    responses = [
+        saved,
+        await auth_client.get("/api/connections"),
+        await auth_client.get("/api/connections/telegram"),
+        await auth_client.get("/api/connections/dhan"),
+        await auth_client.get("/api/connections/alerts"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 200, response.text
+        assert SENTINEL_BOT_TOKEN not in response.text
+        # The token's two halves on their own would still be a leak.
+        for part in SENTINEL_BOT_TOKEN.split(":"):
+            if len(part) >= 9:
+                assert part not in response.text
+        assert dhan_token not in response.text
+        for part in dhan_token.split("."):
+            if len(part) >= 9:
+                assert part not in response.text
+        for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+            value = os.environ.get(name)
+            if value and len(value) >= 9:
+                assert value not in response.text, (
+                    f"{name} reached a connections payload"
+                )
+        assert "jwt_secret" not in response.text
+        assert "encryption_key" not in response.text
+    _assert_clean(captured_logs, SENTINEL_BOT_TOKEN, dhan_token)
+
+
+async def test_a_failed_telegram_call_does_not_log_the_url_it_called(
+    captured_logs, monkeypatch
+):
+    """An httpx error can carry the request; the request carries the TOKEN.
+
+    Unlike Dhan, where the token is a header, a Telegram bot token is in the
+    URL PATH -- so an exception message interpolated into a log line leaks it
+    directly. Only the exception TYPE is reported, the same rule
+    `dhan_token_client.py` follows.
+    """
+    from src.connections.services import telegram_client as module
+
+    class _Exploding:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, *args, **kwargs):
+            raise RuntimeError(f"connection failed for {url}")
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", _Exploding)
+
+    client = module.TelegramClient(SENTINEL_BOT_TOKEN)
+    with pytest.raises(module.TelegramError) as raised:
+        await client.get_me()
+
+    _assert_clean(captured_logs, SENTINEL_BOT_TOKEN)
+    assert SENTINEL_BOT_TOKEN not in raised.value.message
+
+
+async def test_the_httpx_url_line_is_scrubbed_once_the_token_is_registered(
+    auth_client, captured_logs
+):
+    """The real leak path, exercised rather than assumed.
+
+    httpx logs `HTTP Request: POST https://api.telegram.org/bot<TOKEN>/getMe`
+    at INFO. Registering the token with log_redaction the moment it is read or
+    saved is what turns that line into a redaction.
+    """
+    from src import log_redaction
+
+    await auth_client.put(
+        "/api/connections/telegram",
+        json={"settings": {"bot_token": SENTINEL_BOT_TOKEN}},
+    )
+
+    # Exactly the line httpx would emit, through the same formatter.
+    get_logger("httpx").info(
+        "HTTP Request: POST https://api.telegram.org/bot%s/getMe \"HTTP/1.1 200\"",
+        SENTINEL_BOT_TOKEN,
+    )
+
+    _assert_clean(captured_logs, SENTINEL_BOT_TOKEN)
+    assert log_redaction.REDACTED in captured_logs.text
+
+
+async def test_validating_an_UNSAVED_bot_token_does_not_log_it(
+    auth_client, captured_logs, monkeypatch
+):
+    """The gap found by grepping app.log after driving the page for real.
+
+    `ConnectionStore` registers a token it reads or saves, which covers the
+    CONFIGURED bot. It does not cover one an operator has typed into the form
+    and not yet saved -- and pressing Validate with an unsaved token is the
+    very first thing anybody does.
+
+    That path leaked, because httpx logs the full request URL at INFO and a
+    bot token is in the PATH:
+
+        HTTP Request: POST https://api.telegram.org/bot<TOKEN>/getMe "401"
+
+    Reading the code would not have found it. This is the assertion that keeps
+    it fixed.
+    """
+    from src import log_redaction
+    from src.connections.services import telegram_client as module
+
+    unsaved = "999888777:AAH-unsaved-token-DO-NOT-LOG-a1b2c3d4e5"
+
+    class _Unauthorised:
+        status_code = 401
+
+        @staticmethod
+        def json():
+            return {"ok": False, "error_code": 401, "description": "Unauthorized"}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, *args, **kwargs):
+            # Exactly what httpx logs at INFO, with the token in the PATH.
+            get_logger("httpx").info(
+                'HTTP Request: POST %s "HTTP/1.1 401 Unauthorized"', url
+            )
+            return _Unauthorised()
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", _Client)
+
+    response = await auth_client.post(
+        "/api/connections/telegram/validate",
+        json={"settings": {"bot_token": unsaved}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["failureKind"] == "BAD_TOKEN"
+    # The URL line must have been emitted AND scrubbed -- not simply absent.
+    assert "api.telegram.org" in captured_logs.text
+    assert log_redaction.REDACTED in captured_logs.text
+    _assert_clean(captured_logs, unsaved)
+    assert unsaved not in response.text

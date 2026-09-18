@@ -42,6 +42,18 @@ TASK_DESCRIPTIONS = {
         "Renews the Dhan access token before its 24 hours run out, so the feed "
         "does not stop overnight"
     ),
+    "alert-dispatcher": (
+        "Drains the alert outbox to Telegram, so a fill never blocks on "
+        "somebody else's HTTP"
+    ),
+    "alert-watcher": (
+        "Evaluates the watched health conditions -- a dead task first among "
+        "them -- and raises an alert for each"
+    ),
+    "telegram-commands": (
+        "Long-polls Telegram for commands, authorised by resolving the sender "
+        "to an application user"
+    ),
 }
 
 
@@ -178,6 +190,22 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
         expected.add("dhan-token-refresh")
     if _chart_trading_expected():
         expected.add("bracket-monitor")
+
+    # The alerting pair. Both are started once and keep running; what makes
+    # them expected is alerts being switched on at all. Switching them off
+    # must not make the health page report two missing tasks -- a false problem
+    # on the page whose whole job is to surface real ones.
+    if config_utils.get_property_value_boolean("connections.alerts_enabled", True):
+        expected.update({"alert-dispatcher", "alert-watcher"})
+
+    # The command poller is different: it is expected whenever the TASK is
+    # allowed to exist, not whenever commands are configured. It starts, reads
+    # the connection each pass and sits idle while commands are off -- which
+    # is what lets switching them on take effect without a restart.
+    if config_utils.get_property_value_boolean(
+        "connections.telegram_commands_task_enabled", True
+    ):
+        expected.add("telegram-commands")
 
     if _automation_expected():
         # The rotation's two background tasks. Each has its own config switch

@@ -72,6 +72,28 @@ class SwingStopRepository(BaseRepository[SwingStop]):
         )
         return result.scalars().first()
 
+    async def latest_for_security(
+        self, portfolio_id: int, security_id: str
+    ) -> Optional[SwingStop]:
+        """The most recent row for a holding, whatever its status.
+
+        `get_active` cannot answer "why did this position leave", because by
+        the time the exit fills the row is no longer ACTIVE. This one is keyed
+        per portfolio for the same reason every other open-row lookup here is
+        (root `CLAUDE.md` section 3a): dropping it merges two books silently.
+        """
+        result = await self.session.execute(
+            select(SwingStop)
+            .where(
+                and_(
+                    SwingStop.portfolio_id == int(portfolio_id),
+                    SwingStop.security_id == str(security_id),
+                )
+            )
+            .order_by(desc(SwingStop.id))
+        )
+        return result.scalars().first()
+
     async def list_active(
         self,
         strategy_key: Optional[str] = None,

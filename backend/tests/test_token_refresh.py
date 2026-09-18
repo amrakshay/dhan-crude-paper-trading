@@ -98,16 +98,16 @@ async def test_an_expired_token_is_reported_not_retried(db_session, monkeypatch)
     from src.settings.services import token_refresh_service as module
 
     await _store(db_session, _token(hours_left=24))
-    # Now age it past the cliff, behind the service's back.
-    from src.settings.database.db_operations.app_setting_repository import (
-        AppSettingRepository,
-    )
-    from src.settings.services import crypto_service
+    # Now age it past the cliff, behind the service's back. The token lives on
+    # the `dhan` CONNECTION since 2026-09-18, so that is what gets aged --
+    # writing to `app_settings` here would age a row nothing reads.
+    from src.connections.services import providers
+    from src.connections.services.connection_store import ConnectionStore
 
-    await AppSettingRepository(db_session).upsert(
-        KEY_ACCESS_TOKEN,
-        encrypted_value=crypto_service.encrypt(_token(hours_left=-1)),
-        is_encrypted=True,
+    await ConnectionStore(db_session).put(
+        providers.PROVIDER_DHAN,
+        providers.DHAN_ACCESS_TOKEN,
+        _token(hours_left=-1),
     )
     await db_session.commit()
 

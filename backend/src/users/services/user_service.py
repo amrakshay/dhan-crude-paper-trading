@@ -158,6 +158,8 @@ class UserService:
         status: Optional[str] = None,
         password: Optional[str] = None,
         must_change_password: Optional[bool] = None,
+        telegram_user_id: Optional[int] = None,
+        clear_telegram_user_id: bool = False,
     ) -> User:
         """Update a user. `email` is absent by design -- it can never change."""
         user = await self.get_user(user_id)
@@ -204,9 +206,40 @@ class UserService:
         if must_change_password is not None:
             user.must_change_password = bool(must_change_password)
 
+        if clear_telegram_user_id:
+            user.telegram_user_id = None
+            logger.info(
+                "Telegram mapping removed for user %s (%s) by user %s",
+                user.id, user.email, acting_user_id,
+            )
+        elif telegram_user_id is not None:
+            await self._guard_telegram_mapping(user, int(telegram_user_id))
+            user.telegram_user_id = int(telegram_user_id)
+            logger.info(
+                "Telegram user id mapped to user %s (%s) by user %s -- that "
+                "account's existing role now applies to commands it sends",
+                user.id, user.email, acting_user_id,
+            )
+
         await self.repository.session.flush()
         logger.info("User %s (%s) updated by user %s", user.id, user.email, acting_user_id)
         return user
+
+    async def _guard_telegram_mapping(self, user: User, telegram_user_id: int) -> None:
+        """One Telegram account maps to at most one application user.
+
+        The column is unique, so the database would refuse it anyway -- this
+        turns an integrity error into a sentence naming the account that
+        already holds it. Two users sharing one Telegram id would make "who
+        sent this command" unanswerable, which is the whole point of the
+        mapping.
+        """
+        existing = await self.repository.get_by_telegram_user_id(telegram_user_id)
+        if existing is not None and existing.id != user.id:
+            raise UserValidationError(
+                f"Telegram user {telegram_user_id} is already mapped to "
+                f"{existing.email}. Remove it there first."
+            )
 
     async def update_own_profile(
         self,

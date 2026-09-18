@@ -59,6 +59,17 @@ a guarantee if it is closed against the hosts nobody thought of. It now matches
 `dhan.co` and every subdomain, so a new Dhan host fails the build until someone
 allowlists it on purpose.
 
+On 2026-09-18 the application gained its **first OUTBOUND host**,
+`api.telegram.org`, and with it the first inbound CONTROL path. Everything
+before it was inbound market data: the app fetched prices and sent nothing
+anywhere. Telegram is not a broker and must not become one -- there is no broker
+surface for a command to reach, because none exists -- and
+`test_no_real_orders.py` is deliberately UNCHANGED by it. Widening that file
+would blur what it is for. The sibling guard is
+`tests/test_outbound_hosts.py`: every non-Dhan external host must be named in
+exactly ONE module and listed there, or the build fails. Same containment
+`dhan_token_client.py` gives `/RenewToken`, applied to the general case.
+
 **Consequences for naming.** Local order operations are deliberately called
 `submit_paper_order` and `cancel_paper_order`, never `place_order` /
 `cancel_order`. Those names are banned outright so a genuine broker call can
@@ -358,6 +369,35 @@ are in `LogRequestsMiddleware.IGNORED_PATHS` so the polling does not fill the
 access log the page reports on. Do not add timing or sampling inside
 `apply_packet` to feed it.
 
+**An alert is a ROW first and an HTTP call second.** `PositionService.
+apply_fill` writes the fact; `alert-dispatcher` delivers it. A fill must never
+block on somebody else's HTTP, an alert raised during a crash still has to
+arrive after the restart, and "what did it tell me, and did it arrive" has to be
+answerable -- a log line saying `sendMessage returned 200` answers none of the
+three. A fact with nothing configured to carry it is recorded SUPPRESSED with
+the reason, never dropped.
+
+**De-duplication is the alert feature, not a nicety.** This codebase has already
+produced the flood: "database is locked" once a second for twelve minutes, and
+the nightly re-running every fifteen minutes for two hours. Unthrottled, either
+would have sent hundreds of messages and met flood control -- which stops the
+ONE message that mattered from arriving. Collapse on the logger name plus a
+NORMALISED message (raw text fails, because the body carries its own counter),
+and **exclude the alerting logger from its own sink** or a delivery failure
+alerts about itself in a loop. Both are asserted.
+
+**A command is authorised by resolving its sender to a USER.**
+`users.telegram_user_id` -> the user -> that user's existing role. Never a
+standalone allowlist of Telegram ids: that would be a second authorisation
+model, and the one this codebase has already gets deactivation, demotion, the
+seeded-admin guard rails and the owes-a-password-change refusal right. Mapping
+inherits all of them for free; a parallel list inherits none, and the first time
+somebody was deactivated they could still arm a strategy from their phone.
+Nobody is mapped by default, matching is on the NUMERIC id (a username is
+reassignable), and control commands need `ROLE_ACCOUNT_ADMIN` AND their own
+default-off switch -- a Telegram message that arms a strategy must not be a
+thinner path than the button.
+
 **Money is `Decimal`, never `float`.** Timestamps are stored naive-UTC. That
 includes every ledger amount, margin estimate and equity figure.
 
@@ -449,6 +489,15 @@ backend/src/strategies/services/market_clock.py    is the market open, and may a
                                                    order fill continuously
 backend/src/strategies/            the registry, the toggles and their page
 backend/src/portfolios/            portfolios, the cash ledger, the balance maths
+backend/src/connections/           Dhan and Telegram: credentials, alerts, commands
+backend/src/connections/services/telegram_client.py  the ONLY module naming
+                                                     api.telegram.org
+backend/src/connections/services/alert_service.py    writes the outbox rows
+backend/src/connections/services/alert_dispatcher.py the only thing that SENDS
+backend/src/connections/services/alert_watcher.py    the seven health events
+backend/src/alert_sink.py          the ERROR+ logging sink feeding the outbox
+frontend/src/pages/ConnectionsPage.jsx            the cards and the two test buttons
+backend/tests/test_outbound_hosts.py   one module per external host
 backend/src/health/                the system health page's backend (no tables)
 backend/src/log_buffer.py          in-memory ring buffer of recent WARNING+ records
 frontend/src/pages/SystemHealthPage.jsx            the system health page
