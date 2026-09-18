@@ -197,9 +197,9 @@ with a live countdown, then the result.
 | Chat id and chat type | Fills in the channel id field without hunting for it |
 | The message text | Confirms it is the message they just sent, not a stale one |
 
-Offer both discoveries as one-click suggestions — "add this user to the command
-to a user", "use this chat as the alert channel" — but **applying them stays an
-explicit action**. Discovering an id must never grant it anything.
+Offer both discoveries as one-click suggestions — "map this Telegram user to an
+application user", "use this chat as the alert channel" — but **applying them
+stays an explicit action**. Discovering an id must never grant it anything.
 
 It should work even when commands are switched OFF, because it is how you set
 commands up in the first place.
