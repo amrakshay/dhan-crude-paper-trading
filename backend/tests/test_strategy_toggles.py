@@ -35,14 +35,24 @@ BOOK_DEPTH = [
 ]
 
 
+# Registry state is snapshotted and restored for every test by the autouse
+# `restore_strategy_state` fixture in conftest.py.
+
+
 @pytest.fixture(autouse=True)
-def restore_state():
-    """Every test here flips a global; none of them may leak it."""
+def only_crude_is_running():
+    """This file's subject is what switching a strategy OFF does.
+
+    So it starts from a state where the strategy being switched off is
+    actually running. Crude ships off since 2026-09-18 and the swing rotation
+    ships on; these tests were written when there was one module and they mean
+    "the strategy", so they pin the starting state explicitly instead of
+    inheriting whichever default is current. conftest restores the defaults.
+    """
     registry = get_strategy_registry()
-    strategies = registry.strategy_states()
-    capabilities = registry.capability_states()
+    registry.set_enabled(CRUDE, True)
+    registry.set_enabled("nse-swing-momentum", False)
     yield
-    registry.apply_state(strategies, capabilities)
 
 
 async def _seed_instrument():

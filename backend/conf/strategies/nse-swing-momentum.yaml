@@ -16,9 +16,15 @@
 # state is a row in the `feature_toggles` table, owned by the Strategies &
 # Features page.
 #
-# It ships OFF. This is the first strategy in the application that decides and
-# trades on a schedule with nobody watching, so an installation that has never
-# been configured must not start placing orders on its own.
+# It ships ON as of 2026-09-18, at the owner's request -- but NOT ARMED. The two
+# switches are separate precisely because this is the first strategy in the
+# application that decides on a schedule with nobody watching:
+#
+#   enabled  -> it computes, decides and writes a decision record every session
+#   armed    -> it may submit an order
+#
+# `automation.armed_by_default` below is false, and stays false. Enabling the
+# strategy therefore starts the journal, not the trading.
 # ---------------------------------------------------------------------------
 
 key: "nse-swing-momentum"
@@ -28,7 +34,7 @@ description: >-
   strongest volatility-adjusted six-month momentum names, in proportion to
   market breadth, with a chandelier trailing stop under each, and goes fully
   to cash when the NIFTY 50 loses its 200-day SMA.
-enabled_by_default: false
+enabled_by_default: true
 
 underlying:
   # There is no single underlying. `symbol` names the BOOK rather than a

@@ -78,10 +78,19 @@ def test_the_crude_module_declares_a_margin_estimate_not_a_broker_figure():
     assert strategy.margin.short_option_percent_of_notional == Decimal("0.10")
 
 
-def test_the_crude_module_is_enabled_and_owns_crude_contracts():
+def test_the_crude_module_ships_off_and_still_owns_crude_contracts():
+    """Ownership is a property of the CONTRACT, not of the enabled state.
+
+    Crude was switched off by default on 2026-09-18 in favour of the swing
+    rotation. A contract still belongs to the module that describes it, which
+    is what keeps its order history explainable while it is off.
+    """
     registry = get_strategy_registry()
 
-    assert registry.is_enabled(CRUDE)
+    # The SHIPPED default, read off the definition. Runtime state is whatever
+    # the test baseline set (conftest enables everything), which is a different
+    # question.
+    assert registry.require(CRUDE).enabled_by_default is False
     assert registry.for_instrument("MCX_COMM", "CRUDEOIL").key == CRUDE
     assert registry.for_instrument("NSE_FNO", "NIFTY") is None
     # Same underlying on another segment is not the same instrument.
@@ -148,14 +157,22 @@ def test_a_capability_switched_off_globally_is_off_for_every_strategy():
 
 def test_a_disabled_strategy_makes_its_capabilities_ineffective():
     registry = get_strategy_registry()
-    try:
-        registry.set_enabled(CRUDE, False)
-        assert not registry.capability_active(CAPABILITY_OPTION_CHAIN, CRUDE)
-        assert not registry.capability_active_anywhere(CAPABILITY_OPTION_CHAIN)
-        assert registry.enabled() == []
-    finally:
-        registry.set_enabled(CRUDE, True)
+    _disable_every_strategy(registry)
 
+    assert not registry.capability_active(CAPABILITY_OPTION_CHAIN, CRUDE)
+    assert not registry.capability_active_anywhere(CAPABILITY_OPTION_CHAIN)
+    assert registry.enabled() == []
+
+
+def _disable_every_strategy(registry):
+    """Switch them all off.
+
+    Written as "all" rather than "crude" on purpose: there are two modules
+    now, and a test whose subject is "nothing is running" has to mean it. The
+    autouse `restore_strategy_state` fixture in conftest puts them back.
+    """
+    for definition in registry.all():
+        registry.set_enabled(definition.key, False)
 
 # --- pages -----------------------------------------------------------------
 def test_pages_follow_the_enabled_strategies_and_capabilities():
@@ -183,12 +200,12 @@ def test_pages_that_show_history_are_never_gated():
 
 def test_no_strategy_running_means_no_live_page():
     registry = get_strategy_registry()
-    try:
-        registry.set_enabled(CRUDE, False)
-        assert "/live" not in registry.feature_pages()
-        assert "/chain" not in registry.feature_pages()
-    finally:
-        registry.set_enabled(CRUDE, True)
+    _disable_every_strategy(registry)
+
+    assert "/live" not in registry.feature_pages()
+    assert "/chain" not in registry.feature_pages()
+
+    registry.set_enabled(CRUDE, True)
     assert "/live" in registry.feature_pages()
 
 
@@ -201,7 +218,8 @@ def test_stored_state_for_an_unknown_strategy_is_ignored_not_trusted():
 
     assert registry.get("no-such-strategy") is None
     assert not registry.is_capability_enabled("no-such-capability")
-    assert registry.is_enabled(CRUDE)
+    # The real strategies' states are untouched by a stale row.
+    assert registry.is_enabled(CRUDE) is True
 
 
 def test_capability_defaults_come_from_the_legacy_enable_flags():

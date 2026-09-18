@@ -28,7 +28,13 @@ description: >-
   Options on the MCX CRUDEOIL futures contract, traded from the future's own
   price chart. A Buy holds an ATM call and a Sell an ATM put, so the worst case
   is always the premium paid.
-enabled_by_default: true
+# Off by default as of 2026-09-18, at the owner's request: NSE Swing Momentum
+# is now the strategy this installation runs. Switching this on is a click on
+# the Strategies & Features page, and doing so costs nothing that was lost --
+# every order, position and P&L figure this module produced stays exactly where
+# it is while it is off (root CLAUDE.md section 3a, "off means off... and
+# history never moves").
+enabled_by_default: false
 
 underlying:
   # MCX CRUDEOIL. UnderlyingScrip 294 = CRUDEOIL, 556 = CRUDEOILM (mini).

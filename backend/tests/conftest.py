@@ -237,6 +237,42 @@ def sample_master_csv(tmp_path):
     return str(path)
 
 
+@pytest.fixture(autouse=True)
+def strategy_state_baseline():
+    """Every strategy ON for the duration of a test, restored afterwards.
+
+    Two problems, one fixture.
+
+    **Leakage.** The registry is a process-wide singleton, so a test that flips
+    a toggle leaks it into every test that runs after. That used to be handled
+    by a `try/finally` per test restoring the value it *believed* was the
+    default -- which stopped being true the moment the defaults changed on
+    2026-09-18, and broke tests that never touched a toggle. Snapshotting
+    cannot go stale.
+
+    **Dependence on the shipped defaults.** `submit_paper_order` refuses a new
+    order for a switched-off strategy, so every test that trades a contract
+    used to depend on that contract's module happening to ship enabled. When
+    crude was switched off by default, 71 tests failed for a reason that had
+    nothing to do with what they were testing. Enabling everything makes the
+    starting state explicit and independent of what a fresh install does.
+
+    A test whose subject IS the shipped default reads `enabled_by_default` off
+    the definition; a test whose subject is what switching a strategy off does
+    sets the state it wants (see `only_crude_is_running` in
+    test_strategy_toggles.py).
+    """
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    strategies = registry.strategy_states()
+    capabilities = registry.capability_states()
+    for definition in registry.all():
+        registry.set_enabled(definition.key, True)
+    yield
+    registry.apply_state(strategies, capabilities)
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Remove this run's own database and log directory.
 

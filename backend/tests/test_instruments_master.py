@@ -111,7 +111,12 @@ def test_no_matching_contracts_is_an_error_not_an_empty_success(service, tmp_pat
 
     with pytest.raises(Exception) as exc_info:
         service.parse(str(path))
-    assert "No CRUDEOIL contracts" in str(exc_info.value)
+
+    message = str(exc_info.value)
+    # The message names what was looked for, which is every enabled strategy's
+    # underlying rather than a single hardcoded one.
+    assert "contracts found in the instrument master" in message
+    assert "CRUDEOIL" in message
 
 
 @pytest.mark.parametrize(

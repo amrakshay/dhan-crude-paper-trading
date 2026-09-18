@@ -382,13 +382,19 @@ def test_a_security_id_in_two_segments_is_refused(universe_file, tmp_path):
 # --- the shipped module -----------------------------------------------------
 
 
-def test_the_shipped_swing_module_loads_and_ships_disabled():
-    """It decides and trades unattended, so a fresh install must not start it."""
+def test_the_shipped_swing_module_loads_and_is_the_enabled_strategy():
+    """On by default since 2026-09-18 -- but enabled is not armed.
+
+    The safety property is not that the module is off; it is that being on
+    starts the decision journal and nothing else. Submitting an order needs
+    the separate arming switch, which stays false (see
+    `test_the_strategy_ships_unarmed` in test_swing_parity.py).
+    """
     registry = get_strategy_registry()
     swing = registry.require("nse-swing-momentum")
 
-    assert swing.enabled_by_default is False
-    assert registry.is_enabled("nse-swing-momentum") is False
+    assert swing.enabled_by_default is True
+    assert swing.module_section("automation")["armed_by_default"] is False
     assert len(swing.universe.symbols) == 500
     assert swing.subscription.kind == SubscriptionPolicy.POSITIONS
     assert swing.instrument_sets[0].trusts_master_lot_size()
@@ -406,6 +412,15 @@ def test_the_shipped_swing_module_declares_no_option_capabilities():
 
 
 def test_a_disabled_strategy_contributes_no_instruments():
-    """Off means off: it claims nothing until an operator switches it on."""
+    """Off means off: it claims nothing until an operator switches it on.
+
+    Crude is the module that ships off now, and the property is the same one
+    either way -- a disabled strategy contributes no filter to the instrument
+    master and no target to the feed.
+    """
     registry = get_strategy_registry()
-    assert "nse-swing-momentum" not in {one.key for one in registry.enabled()}
+    registry.set_enabled("mcx-crude-options", False)
+    enabled = {one.key for one in registry.enabled()}
+
+    assert "mcx-crude-options" not in enabled
+    assert "nse-swing-momentum" in enabled
