@@ -73,7 +73,8 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (796 tests)
+.venv/bin/python -m pytest tests/ -q                      # full suite (875 tests, ~1 min)
+.venv/bin/python -m pytest tests/ -q -n0                  # the same, serially (~6.5 min)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored

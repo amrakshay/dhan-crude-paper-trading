@@ -748,6 +748,23 @@ fills by that module, and the two agree by construction (section 6).
   to do with what they were testing. A test whose subject IS a shipped default
   reads `enabled_by_default` off the definition; a test whose subject is what
   switching a strategy off *does* sets the state it wants.
+- **The suite runs in PARALLEL by default** (`addopts = -n auto --dist
+  loadfile` in `pytest.ini`): 6m29s serially, under a minute across 12 workers.
+  The cost was never one slow test -- the 25 slowest accounted for 40s of 389s
+  -- it was per-test setup repeated 875 times, which is what parallelism fixes
+  and micro-optimising a fixture would not.
+
+  **It is safe because of the PID naming below, which already existed.** Each
+  xdist worker is its own process, so it gets its own temp database, its own
+  log directory and its own copies of the process-wide singletons.
+
+  **`loadfile`, not `load`.** loadfile gives a whole FILE to one worker and so
+  preserves the order tests run in within it; `load` scatters individual tests
+  across workers. This suite has at least one test that depends on process
+  state a previous test in the same file left behind, and `load` measured 53.8s
+  against loadfile's 56.9s. Five percent does not buy back a class of failure
+  that is intermittent and reads like a real bug. Pass `-n0` to run serially
+  when debugging or using a breakpoint.
 - **The temp database and log directory are named after the process id**, and
   `pytest_sessionfinish` removes them. They used to have fixed names, so two
   concurrent runs shared one SQLite file — the second run's schema setup tears

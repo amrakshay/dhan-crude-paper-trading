@@ -48,3 +48,6 @@ psutil==6.1.1
 # --- tests ---
 pytest==8.3.4
 pytest-asyncio==0.25.0
+# Runs the suite across worker PROCESSES. See pytest.ini for why the
+# distribution mode is loadfile and not load.
+pytest-xdist==3.8.0
