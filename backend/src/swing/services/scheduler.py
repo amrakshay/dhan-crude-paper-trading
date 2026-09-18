@@ -214,9 +214,16 @@ class SwingScheduler:
             # there is no point spending a Dhan refresh on it.
             return ran
 
+        from src.swing.services.schedule_settings import resolve_schedule
+
         parameters = SwingParameters.from_definition(definition)
-        rebalance_at = parse_hhmm(parameters.schedule.rebalance_at)
-        nightly_at = parse_hhmm(parameters.schedule.nightly_at)
+        # The EFFECTIVE times: the YAML's, with the operator's on top. Read on
+        # every pass rather than cached at start-up, so a change from the
+        # Configuration tab takes effect at the next run instead of at the next
+        # restart -- the same way a toggle does.
+        schedule = resolve_schedule(definition, parameters)
+        rebalance_at = schedule.rebalance
+        nightly_at = schedule.nightly
         today = now.date()
 
         # --- warm the book, a few minutes before the open ------------------
@@ -649,21 +656,23 @@ class SwingScheduler:
                 parameters = SwingParameters.from_definition(definition)
             except Exception:  # noqa: BLE001
                 continue
+            from src.swing.services.schedule_settings import resolve_schedule
+
             trading_days = definition.market_hours.trading_days
-            next_nightly = self.next_occurrence(
-                parse_hhmm(parameters.schedule.nightly_at), trading_days
-            )
-            next_rebalance = self.next_occurrence(
-                parse_hhmm(parameters.schedule.rebalance_at), trading_days
-            )
+            schedule = resolve_schedule(definition, parameters)
+            next_nightly = self.next_occurrence(schedule.nightly, trading_days)
+            next_rebalance = self.next_occurrence(schedule.rebalance, trading_days)
             schedules.append(
                 {
                     "strategyKey": definition.key,
                     "label": definition.label,
                     "enabled": registry.is_enabled(definition.key),
                     "armed": registry.is_armed(definition.key),
-                    "nightlyAtIst": parameters.schedule.nightly_at,
-                    "rebalanceAtIst": parameters.schedule.rebalance_at,
+                    # The times in force, which are not necessarily the YAML's.
+                    "nightlyAtIst": schedule.nightly_at,
+                    "rebalanceAtIst": schedule.rebalance_at,
+                    "nightlyAtDefaultIst": parameters.schedule.nightly_at,
+                    "rebalanceAtDefaultIst": parameters.schedule.rebalance_at,
                     # Absolute, so the page counts down locally rather than
                     # polling once a second. Null when it cannot be computed --
                     # a countdown that cannot be worked out says so rather than

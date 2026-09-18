@@ -64,14 +64,14 @@ function CostLine({ label, value, hint }) {
 function ArmDialog({ strategy, warnings, onCancel, onConfirm }) {
   return (
     <Dialog open onClose={onCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>Arm {strategy.label}?</DialogTitle>
+      <DialogTitle>Turn auto trade ON for {strategy.label}?</DialogTitle>
       <DialogContent>
         <DialogContentText component="div">
           <Typography variant="body2" sx={{ mb: 2 }}>
-            Enabled means it computes, decides and writes a decision record
-            every session. ARMED means it may also submit orders on its own
-            schedule. Paper money only — nothing reaches a broker — but the
-            decisions, the sizes and the stops will be its own.
+            ON means it computes, decides and writes a decision record every
+            session. AUTO TRADE means it may also place orders on its own
+            schedule, with nobody watching. Paper money only — nothing reaches a
+            broker — but the decisions, the sizes and the stops will be its own.
           </Typography>
           <Stack spacing={1}>
             {warnings.map((warning) => (
@@ -85,59 +85,7 @@ function ArmDialog({ strategy, warnings, onCancel, onConfirm }) {
       <DialogActions>
         <Button onClick={onCancel}>Cancel</Button>
         <Button color="warning" variant="contained" onClick={onConfirm}>
-          Arm it
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-/**
- * Whether one of a strategy's own RULES is enforced.
- *
- * Not a parameter of the rule. P1–P19 — the lookbacks, the momentum floor, the
- * ATR multiple, the rank cut-off — live in the strategy's YAML and are editable
- * from nowhere, so the file stays greppable against the specification's own
- * table (root CLAUDE.md §3a). These three switches say whether the application
- * OBEYS a rule, which is the same kind of runtime state as enabled and armed.
- *
- * The dialog carries the server's own warnings, and they say what the change
- * does AND what it does not do. The second half is the one that gets missed:
- * re-enforcing the regime gate stops new entries and does NOT sell the book.
- */
-function PolicyDialog({ strategy, policy, enforced, warnings, onCancel, onConfirm }) {
-  return (
-    <Dialog open onClose={onCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        {policy.label} → {enforced ? policy.onLabel : policy.offLabel}
-      </DialogTitle>
-      <DialogContent>
-        <DialogContentText component="div">
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            {policy.description}
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 2 }} color="text.secondary">
-            This changes whether {strategy.label} obeys the rule. It does not
-            change the rule: every threshold, lookback and multiple stays in the
-            strategy&apos;s configuration file and is editable from nowhere.
-          </Typography>
-          <Stack spacing={1}>
-            {warnings.map((warning) => (
-              <Alert
-                key={warning}
-                severity={enforced ? 'info' : 'warning'}
-                icon={enforced ? <InfoOutlinedIcon /> : <WarningAmberIcon />}
-              >
-                {warning}
-              </Alert>
-            ))}
-          </Stack>
-        </DialogContentText>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button color="warning" variant="contained" onClick={onConfirm}>
-          {enforced ? policy.onLabel : policy.offLabel}
+          Turn auto trade on
         </Button>
       </DialogActions>
     </Dialog>
@@ -185,7 +133,6 @@ export default function StrategiesPage() {
   const [error, setError] = useState(null);
   const [pending, setPending] = useState(null);
   const [arming, setArming] = useState(null);
-  const [policyChange, setPolicyChange] = useState(null);
   const [notice, setNotice] = useState(null);
 
   const load = useCallback(async () => {
@@ -242,8 +189,8 @@ export default function StrategiesPage() {
       await strategiesApi.setStrategyArmed(key, armed);
       setNotice(
         armed
-          ? `${key} is ARMED. It may now submit orders on its own schedule.`
-          : `${key} is disarmed. It keeps deciding and recording; it places nothing. Open positions and their stops are untouched.`,
+          ? `Auto trade is ON for ${key}. It may now place orders on its own schedule.`
+          : `Auto trade is OFF for ${key}. It keeps deciding and recording; it places nothing. Open positions and their stops are untouched.`,
       );
       await load();
     } catch (armError) {
@@ -261,38 +208,6 @@ export default function StrategiesPage() {
       setArming({ strategy, warnings: response.warnings ?? [] });
     } catch (warningError) {
       setArming({ strategy, warnings: [] });
-    }
-  };
-
-  const applyPolicy = async (strategy, policy, enforced) => {
-    try {
-      await strategiesApi.setStrategyPolicy(strategy.key, policy.key, enforced);
-      setNotice(
-        enforced
-          ? `${policy.label}: ${policy.onLabel} for ${strategy.key}. It applies at the next decision; positions already open are unaffected.`
-          : `${policy.label}: ${policy.offLabel} for ${strategy.key}. It applies at the next decision, and every trade taken under it is recorded as such.`,
-      );
-      await load();
-    } catch (policyError) {
-      setError(policyError.message);
-    }
-  };
-
-  const requestPolicy = async (strategy, policy, enforced) => {
-    try {
-      const response = await strategiesApi.policyWarnings(
-        strategy.key,
-        policy.key,
-        enforced,
-      );
-      setPolicyChange({
-        strategy,
-        policy,
-        enforced,
-        warnings: response.warnings ?? [],
-      });
-    } catch (warningError) {
-      setPolicyChange({ strategy, policy, enforced, warnings: [] });
     }
   };
 
@@ -359,7 +274,7 @@ export default function StrategiesPage() {
                           color={strategy.armed ? 'warning.main' : 'text.secondary'}
                           sx={{ fontWeight: 600 }}
                         >
-                          {strategy.armed ? 'ARMED' : 'NOT ARMED'}
+                          {strategy.armed ? 'AUTO TRADE ON' : 'AUTO TRADE OFF'}
                         </Typography>
                         <Switch
                           color="warning"
@@ -368,7 +283,7 @@ export default function StrategiesPage() {
                           onChange={(event) => requestArm(strategy, event.target.checked)}
                         />
                         <Typography variant="caption" color="text.disabled">
-                          may place orders
+                          places its own orders
                         </Typography>
                       </Stack>
                     ) : null}
@@ -401,8 +316,8 @@ export default function StrategiesPage() {
                     sx={{ mb: 2 }}
                   >
                     {strategy.armed
-                      ? 'Armed: this module places its own orders on its own schedule. Every one of them is paper money in this database.'
-                      : 'Not armed: it computes, decides and writes a decision record every session, and places nothing. Watching it decide before arming it is the cheapest possible safeguard.'}
+                      ? 'Auto trade is ON: this strategy places its own orders on its own schedule. Every one of them is paper money in this database.'
+                      : 'Auto trade is OFF: it computes, decides and writes a decision record every session, and places nothing. Watching it decide before letting it trade is the cheapest possible safeguard.'}
                   </Alert>
                 ) : null}
 
@@ -472,84 +387,41 @@ export default function StrategiesPage() {
                   </Stack>
                 )}
 
+                {/* The RULE switches used to live here and now live on the
+                    strategy's own Configuration tab, beside its timings, so
+                    everything an operator may change about one strategy is in
+                    one place. This card keeps the two switches that are about
+                    RUNNING it rather than about what it decides. */}
                 {(strategy.policies ?? []).length > 0 ? (
-                  <Box sx={{ mt: 2 }}>
-                    <Typography variant="overline" color="text.secondary">
-                      Rules — enforced or not
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      Whether this module OBEYS one of its own rules. The rules
-                      themselves — every threshold, lookback and multiple —
-                      live in its configuration file and are not editable here.
-                    </Typography>
-                    {strategy.policyContradiction ? (
-                      <Alert severity="error" sx={{ mt: 1 }} icon={<WarningAmberIcon />}>
-                        {strategy.policyContradiction}
+                  (() => {
+                    // Only the switches actually MOVED are worth naming here.
+                    // "Not enforced" is the correct, shipped state of the
+                    // off-gate variant, and listing it as a deviation would
+                    // cry wolf on every card for ever.
+                    const moved = strategy.policies.filter(
+                      (one) => one.enforced !== one.default,
+                    );
+                    return (
+                      <Alert
+                        severity={moved.length ? 'warning' : 'info'}
+                        icon={moved.length ? <WarningAmberIcon /> : <InfoOutlinedIcon />}
+                        sx={{ mb: 2 }}
+                      >
+                        {moved.length
+                          ? `Changed from the shipped rules: ${moved
+                              .map(
+                                (one) =>
+                                  `${one.label} is ${
+                                    one.enforced ? one.onLabel : one.offLabel
+                                  }`,
+                              )
+                              .join('; ')}. `
+                          : 'Running on its shipped rules. '}
+                        Its rules and its timings are on the strategy&apos;s own
+                        Configuration tab.
                       </Alert>
-                    ) : null}
-                    <Paper variant="outlined" sx={{ mt: 1 }}>
-                      <Stack divider={<Divider />}>
-                        {strategy.policies.map((policy) => (
-                          <Stack
-                            key={policy.key}
-                            direction="row"
-                            alignItems="center"
-                            justifyContent="space-between"
-                            gap={2}
-                            sx={{ px: 2, py: 1.25 }}
-                          >
-                            <Box>
-                              <Stack direction="row" spacing={1} alignItems="center">
-                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                                  {policy.label}
-                                </Typography>
-                                {/* Said only when the switch has actually been
-                                    moved. "Set to the same value as the
-                                    default" and "nobody has touched it" are
-                                    different facts. */}
-                                {policy.enforced !== policy.default ? (
-                                  <Chip
-                                    size="small"
-                                    label={`default: ${
-                                      policy.default
-                                        ? policy.onLabel.toLowerCase()
-                                        : policy.offLabel.toLowerCase()
-                                    }`}
-                                    sx={{
-                                      bgcolor: 'warning.main',
-                                      color: 'warning.contrastText',
-                                    }}
-                                  />
-                                ) : null}
-                              </Stack>
-                              <Typography variant="caption" color="text.secondary">
-                                {policy.description}
-                              </Typography>
-                            </Box>
-                            <Stack alignItems="center">
-                              <Typography
-                                variant="caption"
-                                sx={{ fontWeight: 600 }}
-                                color={
-                                  policy.enforced ? 'success.main' : 'warning.main'
-                                }
-                              >
-                                {policy.enforced ? policy.onLabel : policy.offLabel}
-                              </Typography>
-                              <Switch
-                                color={policy.enforced ? 'primary' : 'warning'}
-                                checked={policy.enforced}
-                                disabled={!isAdmin}
-                                onChange={(event) =>
-                                  requestPolicy(strategy, policy, event.target.checked)
-                                }
-                              />
-                            </Stack>
-                          </Stack>
-                        ))}
-                      </Stack>
-                    </Paper>
-                  </Box>
+                    );
+                  })()
                 ) : null}
 
                 <Stack direction="row" spacing={0.5} sx={{ mt: 2 }} flexWrap="wrap">
@@ -628,21 +500,6 @@ export default function StrategiesPage() {
             const key = arming.strategy.key;
             setArming(null);
             await applyArmed(key, true);
-          }}
-        />
-      ) : null}
-
-      {policyChange ? (
-        <PolicyDialog
-          strategy={policyChange.strategy}
-          policy={policyChange.policy}
-          enforced={policyChange.enforced}
-          warnings={policyChange.warnings}
-          onCancel={() => setPolicyChange(null)}
-          onConfirm={async () => {
-            const { strategy, policy, enforced } = policyChange;
-            setPolicyChange(null);
-            await applyPolicy(strategy, policy, enforced);
           }}
         />
       ) : null}

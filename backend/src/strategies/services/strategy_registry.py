@@ -38,6 +38,7 @@ from src.strategies.services.strategy_definition import (
     CAPABILITY_PAGES,
     KNOWN_CAPABILITIES,
     KNOWN_POLICIES,
+    KNOWN_SETTINGS,
     STRATEGY_LIVE_PAGES,
     StrategyConfigError,
     StrategyDefinition,
@@ -74,6 +75,11 @@ class StrategyRegistry:
         # its YAML declares as the default. The registry deliberately does not
         # learn what a regime gate is.
         self._policy_overrides: Dict[str, Dict[str, bool]] = {}
+        # Runtime VALUES, as against the booleans above. Held raw, as text, for
+        # the same reason the policy overrides are held as an override map: the
+        # registry holds the row and the strategy's own module knows what it
+        # means and whether it is legal.
+        self._setting_overrides: Dict[str, Dict[str, str]] = {}
         self._capability_enabled: Dict[str, bool] = {}
         self._lock = threading.RLock()
         self._loaded = False
@@ -136,6 +142,7 @@ class StrategyRegistry:
                 for key, definition in definitions.items()
             }
             self._policy_overrides = {}
+            self._setting_overrides = {}
             self._capability_enabled = {
                 capability: self._capability_default(capability)
                 for capability in KNOWN_CAPABILITIES
@@ -205,6 +212,7 @@ class StrategyRegistry:
         capability_states: Dict[str, bool],
         automation_states: Optional[Dict[str, bool]] = None,
         policy_states: Optional[Dict[str, bool]] = None,
+        setting_states: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> None:
         """Overlay stored state on the defaults. Called at startup and on save.
 
@@ -252,11 +260,35 @@ class StrategyRegistry:
                     continue
                 key, policy = parsed
                 self._policy_overrides.setdefault(key, {})[policy] = bool(enforced)
+            self._setting_overrides = {}
+            for key, values in (setting_states or {}).items():
+                definition = self._definitions.get(key)
+                if definition is None:
+                    logger.warning(
+                        "Ignoring stored settings for unknown strategy %r", key
+                    )
+                    continue
+                if not definition.automation.automated:
+                    # Only an automated module has a schedule of its own to
+                    # move. A stored row must not give a discretionary one one.
+                    logger.warning(
+                        "Ignoring stored settings for %r: it declares no "
+                        "automation block, so nothing schedules it.", key,
+                    )
+                    continue
+                for setting, value in (values or {}).items():
+                    if setting not in KNOWN_SETTINGS:
+                        logger.warning(
+                            "Ignoring stored value for unknown setting %r on %r",
+                            setting, key,
+                        )
+                        continue
+                    self._setting_overrides.setdefault(key, {})[setting] = str(value)
         logger.info(
             "Strategy state applied: strategies=%s capabilities=%s armed=%s "
-            "policies=%s",
+            "policies=%s settings=%s",
             self._strategy_enabled, self._capability_enabled, self._strategy_armed,
-            self._policy_overrides,
+            self._policy_overrides, self._setting_overrides,
         )
 
     def is_enabled(self, key: str) -> bool:
@@ -406,6 +438,42 @@ class StrategyRegistry:
         """Every stored override, per strategy. Absent means "not set"."""
         self._ensure()
         return {key: dict(value) for key, value in self._policy_overrides.items()}
+
+    # --- settings ----------------------------------------------------------
+    def setting_override(self, key: str, setting: str) -> Optional[str]:
+        """The stored value, or None if nobody has set one.
+
+        None is not "" and not a default. "Nobody has touched this" means the
+        YAML's value applies, and the two must stay distinguishable so the page
+        can say which of them an operator is looking at.
+        """
+        self._ensure()
+        return self._setting_overrides.get(str(key), {}).get(str(setting))
+
+    def set_setting(self, key: str, setting: str, value: Optional[str]) -> None:
+        """Store an override, or clear it with None."""
+        self._ensure()
+        definition = self.require(key)
+        if not definition.automation.automated:
+            raise StrategyConfigError(
+                f"Strategy {key!r} declares no automation block, so nothing "
+                f"schedules it and it has no runtime settings."
+            )
+        if setting not in KNOWN_SETTINGS:
+            raise StrategyConfigError(
+                f"Unknown setting {setting!r}. Known: {', '.join(KNOWN_SETTINGS)}."
+            )
+        with self._lock:
+            if value is None:
+                self._setting_overrides.get(str(key), {}).pop(str(setting), None)
+            else:
+                self._setting_overrides.setdefault(str(key), {})[str(setting)] = str(
+                    value
+                )
+
+    def setting_states(self) -> Dict[str, Dict[str, str]]:
+        self._ensure()
+        return {key: dict(value) for key, value in self._setting_overrides.items()}
 
     # --- capabilities ------------------------------------------------------
     def is_capability_enabled(self, capability: str) -> bool:

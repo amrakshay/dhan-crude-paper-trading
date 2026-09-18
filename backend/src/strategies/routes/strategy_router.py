@@ -17,6 +17,8 @@ from src.strategies.api_schemas.strategy_schemas import (
     ArmResponse,
     PolicyRequest,
     PolicyToggleResponse,
+    SettingRequest,
+    SettingToggleResponse,
     StrategyListResponse,
     ToggleRequest,
     ToggleResponse,
@@ -152,6 +154,51 @@ async def set_strategy_policy(
     """
     return await controller.set_strategy_policy(
         strategy_key, policy, request.enforced, user_id=principal.user_id
+    )
+
+
+@strategy_router.get("/{strategy_key}/setting-warnings/{setting}")
+async def setting_warnings(
+    strategy_key: str,
+    setting: str,
+    value: str = Query(...),
+    controller: StrategyController = Depends(get_strategy_controller),
+    _: SessionPrincipal = Depends(require_admin),
+) -> Dict[str, Any]:
+    """What moving this time would change, before it is moved."""
+    return await controller.setting_warnings(strategy_key, setting, value)
+
+
+@strategy_router.put(
+    "/{strategy_key}/settings/{setting}", response_model=SettingToggleResponse
+)
+async def set_strategy_setting(
+    strategy_key: str,
+    setting: str,
+    request: SettingRequest,
+    controller: StrategyController = Depends(get_strategy_controller),
+    principal: SessionPrincipal = Depends(require_admin),
+) -> SettingToggleResponse:
+    """Move one of a strategy's runtime VALUES. Admin-only, like arming.
+
+    A null `value` clears the override and goes back to the strategy's own
+    configured value.
+
+    WHAT THIS DOES NOT DO, and the line is the same one the policy endpoint
+    draws. It does not edit a parameter of the rule: the momentum floor, the
+    ATR multiple, the breadth ramp, the rank cut-off, every lookback and the
+    rebalance CADENCE (P18, measured both ways) stay in the strategy's YAML and
+    are editable from nowhere, so the file stays greppable against the
+    specification's own table (root `CLAUDE.md` section 3a). What this moves is
+    WHEN the machine wakes up.
+
+    The value is validated before it is stored, and two of the refusals are
+    about correctness rather than taste: an analysis time inside the session
+    would store a half-finished bar as a finished one, and an order time
+    outside the session would configure a strategy that never trades.
+    """
+    return await controller.set_strategy_setting(
+        strategy_key, setting, request.value, user_id=principal.user_id
     )
 
 

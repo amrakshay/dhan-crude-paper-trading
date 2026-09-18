@@ -17,6 +17,8 @@ from src.strategies.api_schemas.strategy_schemas import (
     CapabilityResponse,
     PolicyResponse,
     PolicyToggleResponse,
+    SettingResponse,
+    SettingToggleResponse,
     StrategyCostResponse,
     StrategyListResponse,
     StrategyResponse,
@@ -94,6 +96,7 @@ class StrategyController:
                     pages=definition.pages(registry.enabled_capabilities()),
                     policies=self._policies_for(definition),
                     policyContradiction=self._policy_contradiction(definition),
+                    settings=self._settings_for(definition),
                     cost=await self._cost_for(definition),
                 )
             )
@@ -148,6 +151,61 @@ class StrategyController:
 
     def _policy_contradiction(self, definition) -> Optional[str]:
         return self._describe_policies(definition)["contradiction"]
+
+    @staticmethod
+    def _settings_for(definition) -> List[SettingResponse]:
+        """The runtime values an operator may move. Empty for a discretionary
+        module: nothing schedules it, so it has no times."""
+        if not definition.automation.automated:
+            return []
+        from src.swing.services.schedule_settings import describe_settings
+
+        try:
+            return [
+                SettingResponse(**row)
+                for row in describe_settings(definition)["settings"]
+            ]
+        except Exception:  # noqa: BLE001 - the page must still render
+            logger.exception(
+                "Could not describe the settings for %s", definition.key
+            )
+            return []
+
+    async def set_strategy_setting(
+        self,
+        strategy_key: str,
+        setting: str,
+        value: Optional[str],
+        user_id: Optional[int] = None,
+    ) -> SettingToggleResponse:
+        try:
+            result = await self.service.set_strategy_setting(
+                strategy_key, setting, value, user_id
+            )
+        except StrategyConfigError as error:
+            # "Unknown strategy" is a 404. A discretionary module, an unknown
+            # setting name, and a value that would break something are all 400:
+            # the strategy exists and the request does not apply to it.
+            status = 404 if "Unknown strategy" in str(error) else 400
+            raise HTTPException(status_code=status, detail=str(error)) from error
+
+        return SettingToggleResponse(
+            key=strategy_key,
+            setting=setting,
+            value=result["effect"]["value"],
+            effect=result["effect"],
+            warnings=result["warnings"],
+        )
+
+    async def setting_warnings(
+        self, strategy_key: str, setting: str, value: str
+    ) -> Dict[str, object]:
+        """What moving this time does, and whether it would be refused."""
+        if get_strategy_registry().get(strategy_key) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown strategy module {strategy_key!r}"
+            )
+        return await self.service.setting_warnings(strategy_key, setting, value)
 
     @staticmethod
     def _rate_card_version(definition) -> Optional[str]:

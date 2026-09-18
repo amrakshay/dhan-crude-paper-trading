@@ -28,6 +28,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { swingApi } from '../api/swing';
+import SwingConfiguration from '../components/SwingConfiguration';
 import SwingExplainer from '../components/SwingExplainer';
 import { useAuth } from '../auth/AuthContext';
 import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
@@ -58,6 +59,11 @@ const STRATEGY = 'nse-swing-momentum';
  */
 
 const POLL_MS = 10000;
+
+/** The stored run kind, in the words the rest of the page uses. The DATABASE
+ *  keeps NIGHTLY / REBALANCE — renaming stored values would rewrite history —
+ *  so the translation belongs here, at the edge. */
+const RUN_LABELS = { NIGHTLY: 'Analysis', REBALANCE: 'Order placement' };
 
 function Missing({ children = 'not measured', hint }) {
   const body = (
@@ -411,8 +417,8 @@ function ActivityStrip({ status }) {
           when they are wondering why no order appeared. */}
       {status?.enabled && !status?.armed ? (
         <Alert severity="info" icon={<InfoOutlinedIcon />} sx={{ mt: 2 }}>
-          NOT ARMED. It will compute, decide and write a decision record at every
-          scheduled run, and it will place no order at all.
+          AUTO TRADE IS OFF. It will compute, decide and write a decision record
+          at every scheduled run, and it will place no order at all.
         </Alert>
       ) : null}
       {!status?.enabled ? (
@@ -427,7 +433,7 @@ function ActivityStrip({ status }) {
       <Grid container spacing={2}>
         <Grid item xs={12} sm={6} md={3}>
           <Figure
-            label="Next rebalance"
+            label="Next order placement"
             value={
               nextRebalance
                 ? `in ${nextRebalance}`
@@ -444,11 +450,11 @@ function ActivityStrip({ status }) {
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <Figure
-            label="Next nightly"
+            label="Next analysis"
             value={nextNightly ? `in ${nextNightly}` : schedule ? 'not scheduled' : '—'}
             hint={
               schedule?.nextNightlyAtIst
-                ? `${new Date(schedule.nextNightlyAtIst).toLocaleString()} IST. It refreshes the daily bars, decides, ratchets every trailing stop and journals. It places no order.`
+                ? `${new Date(schedule.nextNightlyAtIst).toLocaleString()} IST. It refreshes prices, decides, moves every trailing stop and writes the record. It places no order.`
                 : 'No next run could be computed.'
             }
           />
@@ -512,7 +518,7 @@ function ActivityStrip({ status }) {
         {monitor.unprotected ? (
           <Typography variant="caption" color="warning.main">
             {monitor.unprotected} position(s) have no stop yet — ATR14 was not
-            available at entry, and the next nightly ratchet sets one.
+            available at entry, and the next analysis run sets one.
           </Typography>
         ) : null}
         {monitor.deferredToAuction ? (
@@ -574,7 +580,7 @@ function ActivityLog({ status }) {
               <TableCell className="numeric">
                 {new Date(run.atIst).toLocaleString()}
               </TableCell>
-              <TableCell>{run.kind}</TableCell>
+              <TableCell>{RUN_LABELS[run.kind] ?? run.kind}</TableCell>
               <TableCell>
                 <Chip
                   size="small"
@@ -625,7 +631,7 @@ function ArmingCardBody({ status }) {
         />
         <Chip
           size="small"
-          label={status?.armed ? 'ARMED' : 'NOT ARMED'}
+          label={status?.armed ? 'AUTO TRADE ON' : 'AUTO TRADE OFF'}
           sx={{
             bgcolor: status?.armed ? 'warning.main' : 'action.selected',
             color: status?.armed ? 'warning.contrastText' : 'text.secondary',
@@ -640,18 +646,26 @@ function ArmingCardBody({ status }) {
 
       <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
         {status?.armed
-          ? 'Armed: this module submits its own orders on its own schedule. Every one is paper money in this database and nothing reaches a broker.'
-          : 'Not armed: it computes, decides and writes a decision record every session, and places nothing. Arming is a separate switch on Strategies & Features.'}
+          ? 'Auto trade is ON: this strategy places its own orders on its own schedule. Every one is paper money in this database and nothing reaches a broker.'
+          : 'Auto trade is OFF: it computes, decides and writes a decision record every session, and places nothing. The switch is on Strategies & Features.'}
       </Typography>
 
       <Divider sx={{ my: 2 }} />
 
       <Grid container spacing={2}>
         <Grid item xs={6} sm={3}>
-          <Figure label="Nightly" value={schedule?.nightlyAtIst ?? '—'} hint="IST. After the close, once Dhan's end-of-day data has settled." />
+          <Figure
+            label="Analysis of stocks"
+            value={schedule?.nightlyAtIst ?? '—'}
+            hint="IST. Refreshes prices, re-ranks the universe and moves every trailing stop on to the session's close. It never places an order. Change it on the Configuration tab."
+          />
         </Grid>
         <Grid item xs={6} sm={3}>
-          <Figure label="Rebalance" value={schedule?.rebalanceAtIst ?? '—'} hint="IST. Just after the open: the rule executes at the next session's open." />
+          <Figure
+            label="Order placement"
+            value={schedule?.rebalanceAtIst ?? '—'}
+            hint="IST. When it sells and buys. Just after the open, because the rule executes at the next session's open. Change it on the Configuration tab."
+          />
         </Grid>
         <Grid item xs={6} sm={3}>
           <Figure label="Cadence" value={schedule?.cadence ?? '—'} />
@@ -780,7 +794,7 @@ function BookTable({ book }) {
                       <span>{formatPrice(Number(stop.stopPrice))}</span>
                     </Tooltip>
                   ) : (
-                    <Missing hint="No ATR was available at entry, so no chandelier stop was set. The next nightly ratchet sets one.">
+                    <Missing hint="No ATR was available at entry, so no chandelier stop was set. The next analysis run sets one.">
                       no stop
                     </Missing>
                   )}
@@ -853,7 +867,7 @@ function SessionRow({ session, onOpen, open, detail }) {
     <>
       <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => onOpen(session.id)}>
         <TableCell>{session.sessionDate}</TableCell>
-        <TableCell>{session.runKind}</TableCell>
+        <TableCell>{RUN_LABELS[session.runKind] ?? session.runKind}</TableCell>
         <TableCell>{session.status}</TableCell>
         <TableCell align="right" className="numeric">
           {session.gateOn === null || session.gateOn === undefined
@@ -1084,7 +1098,10 @@ export default function SwingMomentumPage() {
 
   // The tab lives in the URL so "read this page" is a link somebody can send.
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'how-it-works' ? 'how-it-works' : 'live';
+  const requested = params.get('tab');
+  const tab = ['how-it-works', 'configuration'].includes(requested)
+    ? requested
+    : 'live';
 
   const load = useCallback(async () => {
     try {
@@ -1188,11 +1205,14 @@ export default function SwingMomentumPage() {
         sx={{ borderBottom: 1, borderColor: 'divider' }}
       >
         <Tab value="live" label="Live" />
+        <Tab value="configuration" label="Configuration" />
         <Tab value="how-it-works" label="How it works" />
       </Tabs>
 
       {tab === 'how-it-works' ? (
         <SwingExplainer explain={explain} status={status} />
+      ) : tab === 'configuration' ? (
+        <SwingConfiguration status={status} isAdmin={isAdmin} onChanged={load} />
       ) : (
         <>
 
@@ -1215,7 +1235,7 @@ export default function SwingMomentumPage() {
             disabled={busy !== null || !status?.enabled}
             onClick={() => run('nightly')}
           >
-            {busy === 'nightly' ? 'Deciding…' : 'Run nightly now'}
+            {busy === 'nightly' ? 'Analysing…' : 'Run analysis now'}
           </Button>
           <Button
             variant="outlined"
@@ -1223,11 +1243,11 @@ export default function SwingMomentumPage() {
             disabled={busy !== null || !status?.enabled}
             onClick={() => run('rebalance')}
           >
-            {busy === 'rebalance' ? 'Rebalancing…' : 'Run rebalance now'}
+            {busy === 'rebalance' ? 'Placing orders…' : 'Place orders now'}
           </Button>
           <Typography variant="caption" color="text.disabled" sx={{ alignSelf: 'center' }}>
-            The nightly run never places an order. The rebalance places one only
-            when the strategy is armed.
+            The analysis never places an order. Order placement happens only
+            when auto trade is on, and only inside market hours.
           </Typography>
         </Stack>
       ) : null}

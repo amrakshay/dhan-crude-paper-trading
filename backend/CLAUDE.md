@@ -174,6 +174,13 @@ are the ones that only matter once you are editing the code.
   (`src/swing/services/gate_policy.py`). A row naming an unknown strategy, an
   unknown policy, or a module with no `automation` block is ignored on load, the
   same property `MANAGED_KEYS` gives the settings table.
+- **`strategy_settings` is the sibling table for runtime VALUES.** Toggles are
+  booleans; these are not. The registry caches them as raw strings and does not
+  learn what they mean, the same way it holds a policy override without
+  learning what a regime gate is -- the owning module parses and validates
+  (`src/swing/services/schedule_settings.py`). `setting_override` returns
+  `None` when nobody has set one, which is not `""` and not the default.
+  Clearing an override DELETES the row rather than storing a sentinel.
 - **`get_strategy_registry()` is synchronous and cached.** It is read from code
   that cannot await (the feed's target resolution, `expected_task_names`), which
   is why enabled state is held in memory and refreshed by

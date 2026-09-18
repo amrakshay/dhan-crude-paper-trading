@@ -48,6 +48,7 @@ from src.swing.services.gate_policy import (
     describe_policies,
     resolve_gate_policy,
 )
+from src.swing.services.schedule_settings import describe_settings
 from src.swing.services.ranking_service import RankingService
 from src.swing.services.rebalance_planner import effective_gate
 from src.swing.services.stop_service import StopService
@@ -211,6 +212,10 @@ class SwingService:
             "stopMonitor": get_swing_stop_monitor().status(),
             "policies": policies["policies"],
             "policyContradiction": policies["contradiction"],
+            # The Configuration tab reads both from here rather than from the
+            # Strategies payload, so the page it is on is the page it comes
+            # from.
+            "settings": describe_settings(self.definition, self.parameters)["settings"],
             "balance": balance,
             # Said on every payload, deliberately. The specification's 19.9% is
             # a survivorship-biased, in-sample backtest of a rule that has never
@@ -266,6 +271,10 @@ class SwingService:
         policies = describe_policies(self.definition, parameters)
         effective = {row["key"]: row["enforced"] for row in policies["policies"]}
 
+        from src.swing.services.schedule_settings import resolve_schedule
+
+        effective_schedule = resolve_schedule(self.definition, parameters)
+
         return {
             "strategyKey": self.definition.key,
             "label": self.definition.label,
@@ -289,8 +298,12 @@ class SwingService:
                 "closingAuction": self._closing_auction_payload(),
             },
             "schedule": {
+                # The YAML's own times, and the ones in force. The cadence has
+                # no second value: it is P18 and is not editable at runtime.
                 "nightlyAtIst": schedule.nightly_at,
                 "rebalanceAtIst": schedule.rebalance_at,
+                "effectiveNightlyAtIst": effective_schedule.nightly_at,
+                "effectiveRebalanceAtIst": effective_schedule.rebalance_at,
                 "cadence": schedule.rebalance_cadence,
             },
             "automation": {

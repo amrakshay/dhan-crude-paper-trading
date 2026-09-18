@@ -327,8 +327,26 @@ than anywhere except the health page.
   are offered only for a module that declares an `automation` block, and each
   gets a confirmation dialog carrying the server's warnings -- including the one
   that says re-enforcing the gate does NOT sell the open book.
-- **The tab is in the URL** (`?tab=how-it-works`), so "read this page" is a
-  link somebody can send.
+- **Three tabs, and the Configuration one draws a line.** `SwingConfiguration.jsx`
+  holds everything about ONE strategy an operator may change: the three rule
+  switches (moved off Strategies & Features on 2026-09-18, so a strategy's
+  settings are in one place) and the two clock times. It also states what is
+  NOT editable there and why -- P1-P19 and the rebalance cadence live in the
+  YAML, and the "How it works" tab renders them read-only from that same file.
+  Auto trade deliberately stays on Strategies & Features: it is the one control
+  that lets the software spend money on its own and it belongs with the
+  strategy's running state.
+- **The dialog shows the server's refusal BEFORE the confirm button, and
+  disables it.** A form that offers an edit the server will refuse is worse
+  than one that does not (section 5), so the time fields ask
+  `setting-warnings` first and render the reason.
+- **The screen says "auto trade", "analysis of stocks" and "order placement";
+  the code and the database still say armed, NIGHTLY and REBALANCE.** Renaming
+  stored run kinds would rewrite history, so the translation lives at the edge
+  (`RUN_LABELS` in the page). Keep the two vocabularies apart rather than
+  half-renaming either.
+- **The tab is in the URL** (`?tab=how-it-works`, `?tab=configuration`), so
+  "read this page" is a link somebody can send.
 - **The page is NOT gated by the strategy toggle.** `/swing` is deliberately
   outside `gated_pages()`: a journal is history, and switching the strategy off
   must not hide the record of what it did. Reading it is open to any signed-in

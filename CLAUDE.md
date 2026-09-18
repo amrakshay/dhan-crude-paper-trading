@@ -146,6 +146,17 @@ Rules that are not negotiable:
   parameter ever needs to be editable that is its own piece of work with its own
   decision. Resolved in `src/swing/services/gate_policy.py`, read ONCE when a
   run starts, and refused outright when two switches contradict each other.
+- **WHEN a strategy wakes up is runtime state too; what it decides is not.**
+  A strategy may declare SETTINGS -- runtime VALUES, as against policies, which
+  are runtime booleans -- whose default is in its YAML and whose live value is a
+  `strategy_settings` row. Two exist: `schedule.nightly_at` and
+  `schedule.rebalance_at`. A second table rather than a fifth toggle scope,
+  because every toggle is a boolean and these are values. Resolved in
+  `src/swing/services/schedule_settings.py`, validated there before anything is
+  stored, and REFUSED rather than warned about when the value would break
+  something: an analysis time inside the session stores a forming bar as a
+  finished one, and an order time outside it configures a strategy that never
+  trades. The rebalance CADENCE is P18 and stays in the YAML.
 - **A policy change applies to NEW decisions only.** A position keeps the
   policy it was opened under -- recorded on its own `swing_stops` row -- so
   re-enforcing the regime gate stops new entries and does NOT liquidate a book
@@ -366,6 +377,8 @@ backend/src/chart_trading/services/bracket_monitor.py   server-side SL/TP watche
 backend/src/swing/                 the NSE rotation: ranking, planner, execution,
                                    stops, scheduler, journal -- see its README
 backend/src/swing/services/gate_policy.py          whether a RULE is enforced
+backend/src/swing/services/schedule_settings.py   WHEN it wakes up, and the two
+                                                  times it refuses
 backend/src/swing/services/scheduler.py            the only clock in this app
 backend/src/swing/services/stop_monitor.py         the chandelier stop watcher
 backend/src/reports/services/metrics_service.py    CAGR, drawdown, MAR, concentration

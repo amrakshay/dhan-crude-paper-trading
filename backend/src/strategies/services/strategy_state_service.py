@@ -26,7 +26,7 @@ when it comes back on. Cancelling them would destroy work an operator set up;
 freezing them is recoverable, and the warnings this service returns say exactly
 that so the choice is made with open eyes.
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,9 @@ from src.strategies.database.db_models.feature_toggle_model import (
 )
 from src.strategies.database.db_operations.feature_toggle_repository import (
     FeatureToggleRepository,
+)
+from src.strategies.database.db_operations.strategy_setting_repository import (
+    StrategySettingRepository,
 )
 from src.strategies.services.strategy_definition import (
     KNOWN_CAPABILITIES,
@@ -53,6 +56,7 @@ class StrategyStateService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repository = FeatureToggleRepository(session)
+        self.settings = StrategySettingRepository(session)
 
     # --- loading -----------------------------------------------------------
     async def apply_stored_state(self) -> Dict[str, Any]:
@@ -65,18 +69,21 @@ class StrategyStateService:
         the next toggle.
         """
         states = await self.repository.states()
+        settings = await self.settings.states()
         registry = get_strategy_registry()
         registry.apply_state(
             states.get(SCOPE_STRATEGY, {}),
             states.get(SCOPE_CAPABILITY, {}),
             states.get(SCOPE_AUTOMATION, {}),
             states.get(SCOPE_POLICY, {}),
+            settings,
         )
         return {
             "strategies": registry.strategy_states(),
             "capabilities": registry.capability_states(),
             "armed": registry.armed_states(),
             "policies": registry.policy_states(),
+            "settings": registry.setting_states(),
         }
 
     # --- writing -----------------------------------------------------------
@@ -283,6 +290,108 @@ class StrategyStateService:
         try:
             resolve_gate_policy(definition, overrides=overrides)
         except GatePolicyError as error:
+            raise StrategyConfigError(str(error)) from error
+
+    async def set_strategy_setting(
+        self,
+        strategy_key: str,
+        setting: str,
+        value: Optional[str],
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        """Change one of a strategy's runtime VALUES -- or clear it with None.
+
+        The same distinction as `set_strategy_policy`, one level along: what is
+        editable here is when the machine wakes up, never a parameter of the
+        rule. Root `CLAUDE.md` section 3a and
+        `src/swing/services/schedule_settings.py` say which is which and why.
+
+        Nothing about the feed changes, so this does not resync. The scheduler
+        reads the effective time on its next pass, so a change applies to the
+        next run rather than at the next restart -- and a run already going
+        keeps the schedule it started under.
+
+        THE VALUE IS VALIDATED BEFORE IT IS WRITTEN, by the strategy's own
+        module. Two of the failures it catches are silent afterwards: an
+        analysis time inside the session stores a half-finished bar as a
+        finished one, and an order time outside the session configures a
+        strategy that never trades.
+        """
+        registry = get_strategy_registry()
+        definition = registry.get(strategy_key)
+        if definition is None:
+            raise StrategyConfigError(f"Unknown strategy module {strategy_key!r}")
+        if not definition.automation.automated:
+            raise StrategyConfigError(
+                f"{definition.label} declares no automation block, so nothing "
+                f"schedules it and it has no runtime settings."
+            )
+
+        warnings: List[str] = []
+        if value is None:
+            registry.set_setting(strategy_key, setting, None)
+            await self.settings.clear(strategy_key, setting)
+        else:
+            value = self._validate_setting(definition, setting, value)
+            warnings = self._setting_warnings(definition, setting, value)
+            registry.set_setting(strategy_key, setting, value)
+            await self.settings.set_value(
+                strategy_key, setting, value, updated_by_user_id=user_id
+            )
+        await self.session.commit()
+
+        logger.warning(
+            "Strategy %s: setting %s is now %s. It applies to the next run.",
+            strategy_key, setting, value if value is not None else "the configured default",
+        )
+        return {
+            "effect": {"setting": setting, "value": value},
+            "warnings": warnings,
+        }
+
+    async def setting_warnings(
+        self, strategy_key: str, setting: str, value: str
+    ) -> Dict[str, Any]:
+        """What moving this time does -- and whether it would be refused.
+
+        The refusal is computed HERE, before the operator confirms, rather than
+        only when they press the button. A form that offers an edit the server
+        will refuse is worse than one that does not (frontend/CLAUDE.md
+        section 5), and the reason is the useful half of the answer.
+        """
+        definition = get_strategy_registry().get(strategy_key)
+        if definition is None or not definition.automation.automated:
+            return {"warnings": [], "refusal": None}
+
+        refusal = None
+        try:
+            self._validate_setting(definition, setting, value)
+        except StrategyConfigError as error:
+            refusal = str(error)
+        return {
+            "warnings": self._setting_warnings(definition, setting, value),
+            "refusal": refusal,
+        }
+
+    # Same arrangement as the policy warnings: the strategy's own module owns
+    # what a setting means, what is legal and the prose in front of it. A
+    # SECOND automated module needs a lookup by strategy key here.
+    @staticmethod
+    def _setting_warnings(definition, setting: str, value: str) -> List[str]:
+        from src.swing.services.schedule_settings import setting_warnings
+
+        return setting_warnings(definition, setting, value)
+
+    @staticmethod
+    def _validate_setting(definition, setting: str, value: str) -> str:
+        from src.swing.services.schedule_settings import (
+            ScheduleSettingError,
+            validate,
+        )
+
+        try:
+            return validate(definition, setting, value)
+        except ScheduleSettingError as error:
             raise StrategyConfigError(str(error)) from error
 
     async def set_capability_enabled(

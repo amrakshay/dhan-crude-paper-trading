@@ -68,6 +68,21 @@ class PolicyResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SettingResponse(BaseModel):
+    key: str
+    label: str
+    description: str = ""
+    kind: str = "time"
+    # What the strategy's configuration file says, and what is in force. BOTH,
+    # always: showing only the file would describe a schedule nothing runs on.
+    default: str
+    value: str
+    overridden: bool = False
+    allowed: str = ""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class StrategyResponse(BaseModel):
     key: str
     label: str
@@ -109,6 +124,9 @@ class StrategyResponse(BaseModel):
     # Empty for a discretionary module: it has no rules of its own to enforce,
     # so the page must offer no switch at all.
     policies: List[PolicyResponse] = Field(default_factory=list)
+    # Runtime VALUES, as against the booleans above. Empty for a discretionary
+    # module: nothing schedules it, so it has no times to move.
+    settings: List[SettingResponse] = Field(default_factory=list)
     # Two operator-chosen switches that contradict each other, described rather
     # than silently resolved by a precedence rule nobody would remember.
     policy_contradiction: Optional[str] = Field(None, alias="policyContradiction")
@@ -139,6 +157,25 @@ class ArmRequest(BaseModel):
 class ArmResponse(BaseModel):
     key: str
     armed: bool
+    effect: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class SettingRequest(BaseModel):
+    """Its own request type, like `ArmRequest` and `PolicyRequest`.
+
+    `value` of null CLEARS the override and goes back to the strategy's own
+    configured value. There is no "unset" string, because a value meaning "no
+    value" is a second way to express an absence.
+    """
+
+    value: Optional[str] = None
+
+
+class SettingToggleResponse(BaseModel):
+    key: str
+    setting: str
+    value: Optional[str] = None
     effect: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
 

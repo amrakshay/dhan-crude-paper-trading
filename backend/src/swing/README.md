@@ -100,6 +100,38 @@ For the second to be safe a row has to exist for EVERY position, so
 meaning "no stop yet". The monitor skips a null stop rather than comparing
 against it, and `ratchet_one` sets the first stop as soon as an ATR exists.
 
+## The two clock times
+
+`schedule_settings.py` owns them, and it is the sibling of `gate_policy.py`:
+that module answers "is this rule enforced" (a boolean, in `feature_toggles`),
+this one answers "at what time" (a value, in `strategy_settings`).
+
+| Setting | Default | Hard constraint |
+|---|---|---|
+| `schedule.nightly_at` | 18:15 | **not inside the session** |
+| `schedule.rebalance_at` | 09:16 | **inside continuous trading** |
+
+Both constraints are REFUSED rather than warned about, because both failures
+are silent afterwards:
+
+- the analysis refreshes `daily_bars` from Dhan, and during trading hours Dhan
+  returns TODAY'S FORMING BAR, which would be stored as a finished daily bar and
+  silently change every ranking, ATR and stop computed from it afterwards;
+- an order time outside the session means every order is refused per instrument,
+  i.e. a strategy that decides every day and never trades.
+
+A time after 15:15 is allowed and warned about: F&O-eligible names cannot trade
+continuously then. The refusal is also returned by the warnings endpoint, so the
+UI can show the reason before the operator confirms rather than after.
+
+**The cadence is NOT here.** It is P18, measured both ways, and choosing between
+daily and weekly is picking a different strategy rather than configuring this
+one. Same for every parameter in `parameters:`.
+
+A stored value that stops validating is ignored with a loud log and the YAML's
+time is used -- a scheduler that stopped running because a stored string went
+stale would be the worse failure.
+
 ## The rebalance
 
 Sells are planned AND EXECUTED before the buys are planned. The backtest

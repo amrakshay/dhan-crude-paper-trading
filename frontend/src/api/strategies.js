@@ -32,4 +32,15 @@ export const strategiesApi = {
     ),
   setStrategyPolicy: (key, policy, enforced) =>
     api.put(`/strategies/${key}/policies/${policy}`, { enforced }),
+
+  // Runtime VALUES rather than booleans — the two clock times the scheduler
+  // runs on. Same line as the policies: WHEN the machine wakes up is editable,
+  // what the rule says is not. A null value clears the override and goes back
+  // to the strategy's own configured time.
+  settingWarnings: (key, setting, value) =>
+    api.get(
+      `/strategies/${key}/setting-warnings/${setting}?value=${encodeURIComponent(value)}`,
+    ),
+  setStrategySetting: (key, setting, value) =>
+    api.put(`/strategies/${key}/settings/${setting}`, { value }),
 };

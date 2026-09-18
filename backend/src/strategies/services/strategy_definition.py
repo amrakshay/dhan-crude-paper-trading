@@ -140,6 +140,55 @@ POLICY_DESCRIPTIONS: Dict[str, str] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# SETTINGS: runtime VALUES, as against policies, which are runtime booleans.
+#
+# The same line applies and it is worth restating, because this is the list
+# somebody will be tempted to extend. These two are WHEN THE MACHINE WAKES UP.
+# Moving the order placement from 09:16 to 09:30 does not change what the
+# strategy is; it changes when this installation acts on it.
+#
+# P1-P19 are not that and do not belong here: the momentum floor, the ATR
+# multiple, the breadth ramp, the rank cut-off, every lookback -- and the
+# rebalance CADENCE, which is P18 and was measured both ways (daily 23.4% CAGR
+# at -22.2% drawdown against weekly's 19.9% and -18.3%). Choosing between those
+# is picking a different strategy, not configuring this one. The moment one
+# appears here, the YAML stops being greppable against the specification's own
+# table and root CLAUDE.md section 3a stops being true.
+#
+# As with policies, the framework knows only the NAMES. What a setting MEANS,
+# what its default is and what values are legal belong to the strategy's own
+# module -- see `src/swing/services/schedule_settings.py`.
+SETTING_NIGHTLY_AT = "schedule.nightly_at"
+SETTING_REBALANCE_AT = "schedule.rebalance_at"
+
+KNOWN_SETTINGS: Tuple[str, ...] = (
+    SETTING_NIGHTLY_AT,
+    SETTING_REBALANCE_AT,
+)
+
+SETTING_LABELS: Dict[str, str] = {
+    SETTING_NIGHTLY_AT: "Analysis of stocks",
+    SETTING_REBALANCE_AT: "Order placement time",
+}
+
+SETTING_DESCRIPTIONS: Dict[str, str] = {
+    SETTING_NIGHTLY_AT: (
+        "IST. When it refreshes prices from Dhan, re-ranks the universe, moves "
+        "every trailing stop on to the session's close and writes the decision "
+        "record. It never places an order, so it may run at any hour -- except "
+        "during the session itself, which would store a half-finished bar as a "
+        "finished one."
+    ),
+    SETTING_REBALANCE_AT: (
+        "IST. When it sells what the rule says to sell and buys what it says to "
+        "buy. It must be inside continuous trading: an order sent outside the "
+        "session is refused, so a time outside it would mean a strategy that "
+        "decides and never trades."
+    ),
+}
+
+
 # Which page a capability grants, where it grants one. The trading pages that
 # show HISTORY (/orders, /positions) are deliberately absent: a strategy going
 # off must never hide trades that already happened.

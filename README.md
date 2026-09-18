@@ -1075,6 +1075,78 @@ the regime flip — which is exactly when the best trades fire. Expect this
 configuration to underperform the 19.9% headline by more than the 12–18% the
 specification already predicts for live trading.
 
+### The two clock times are configurable; the rule's numbers are not
+
+Added 2026-09-18 alongside the Configuration tab, and the line it draws is the
+same one the switches above draw, one step along:
+
+| | Editable at runtime | Where |
+|---|---|---|
+| Whether a rule is **enforced** | yes (boolean) | `feature_toggles`, `POLICY` scope |
+| **When** the strategy wakes up | yes (value) | `strategy_settings` |
+| What the rule **is** — P1–P19 | **no** | the strategy's YAML, and nowhere else |
+
+`strategy_settings` is a second table rather than a fifth toggle scope because
+every toggle is a boolean and these are values; `feature_toggle_model.py` said a
+dedicated table would earn its migration when the first non-boolean setting
+appeared, and it has.
+
+Two settings exist, both times in IST, both offered only for a module with an
+`automation` block, both admin-only:
+
+- **Analysis of stocks** (`schedule.nightly_at`, default 18:15)
+- **Order placement time** (`schedule.rebalance_at`, default 09:16)
+
+Each has a hard constraint that is **refused rather than warned about**, because
+both failures are silent afterwards:
+
+- The analysis **may not run inside the session**. It refreshes `daily_bars`
+  from Dhan, and during trading hours Dhan returns *today's forming bar* — which
+  would be stored as a finished daily bar and silently change every ranking, ATR
+  and chandelier stop computed from it afterwards. Nothing downstream can tell.
+- The order placement **must be inside continuous trading**, or the per-instrument
+  guard refuses every order and you have configured a strategy that decides
+  every day and never trades. A time after 15:15 is allowed and warned about:
+  F&O-eligible names cannot trade continuously then, so their orders are refused
+  while the rest of the market still trades to 15:30.
+
+The refusal is computed by `GET /api/strategies/{key}/setting-warnings/{setting}`
+*before* the operator confirms, so the dialog shows the reason and disables the
+button rather than offering an edit the server will reject.
+
+**The rebalance cadence stays in the YAML.** It is P18, it was measured both
+ways — daily 23.4% CAGR at −22.2% drawdown against weekly's 19.9% and −18.3% —
+and choosing between them is picking a different strategy rather than
+configuring this one. The same goes for the momentum floor, the ATR multiple,
+the breadth ramp, the rank cut-off and every lookback.
+
+A stored value that stops validating — because the market hours moved under it,
+say — is **ignored with a loud log** and the YAML's own time is used. A strategy
+that stopped deciding because a stored string went stale would be the worse
+failure.
+
+### Where each control lives
+
+The wording on screen is deliberately plainer than the code's:
+
+| On screen | In the code and the database | What it means |
+|---|---|---|
+| Auto trade ON / OFF | `armed` / `AUTOMATION` scope | may it place orders by itself |
+| Analysis of stocks | `nightly` / `RUN_NIGHTLY` | re-rank, move the stops, write the record; never places an order |
+| Order placement | `rebalance` / `RUN_REBALANCE` | sell the sell list, buy the buy list |
+
+Stored run kinds are **not** renamed — `swing_sessions.run_kind` still reads
+`NIGHTLY` and `REBALANCE`, because renaming stored values rewrites history. The
+translation happens at the edge, in the page.
+
+Auto trade stays on **Strategies & Features**, beside the on/off switch: it is
+the one control that lets this software spend money on its own, and it belongs
+with the strategy's running state. Everything else — the three rule switches and
+the two timings — is on the strategy's own **Configuration** tab
+(`/swing?tab=configuration`), so all of one strategy's settings are in one
+place. The card on Strategies & Features names any rule that has been moved away
+from its shipped value and points at the tab.
+
 ### Orders only inside continuous trading
 
 Analysis runs at any hour: the ranking, the nightly decision, the stop ratchet
