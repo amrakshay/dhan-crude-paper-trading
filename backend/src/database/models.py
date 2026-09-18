@@ -22,6 +22,10 @@ from src.settings.database.db_models.app_setting_model import AppSetting  # noqa
 from src.strategies.database.db_models.feature_toggle_model import (  # noqa: F401
     FeatureToggle,
 )
+from src.swing.database.db_models.swing_session_model import (  # noqa: F401
+    SwingDecision,
+    SwingSession,
+)
 from src.users.database.db_models.user_model import User  # noqa: F401
 
 __all__ = [
@@ -39,5 +43,7 @@ __all__ = [
     "TradeNote",
     "AppSetting",
     "FeatureToggle",
+    "SwingSession",
+    "SwingDecision",
     "User",
 ]
