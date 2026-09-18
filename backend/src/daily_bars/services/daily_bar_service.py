@@ -130,6 +130,19 @@ def candle_to_row(
     if candle.high < candle.low:
         return None
 
+    # A session the exchange did not hold: all four prices identical with zero
+    # volume. Live Dhan has produced none of these -- zero across 1,108,462
+    # rows on 2026-09-18 -- but the same shape is what the research project's
+    # spliced panel carries for 395 equities on an NSE holiday, and every
+    # lookback in this strategy counts ROWS rather than days. The guard is here
+    # as well as in the importer because this is where a future vendor change
+    # would arrive. See `bar_import_service.is_phantom_bar`.
+    if (
+        candle.volume == 0
+        and candle.open == candle.high == candle.low == candle.close
+    ):
+        return None
+
     return {
         "symbol": symbol,
         "exchange_segment": exchange_segment,

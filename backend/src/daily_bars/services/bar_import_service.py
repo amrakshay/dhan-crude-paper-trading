@@ -39,6 +39,36 @@ logger = get_logger("daily_bars.import")
 REQUIRED_COLUMNS = ("date", "open", "high", "low", "close")
 
 
+def is_phantom_bar(
+    open_: Decimal, high: Decimal, low: Decimal, close: Decimal, volume: Optional[int]
+) -> bool:
+    """A bar for a session the exchange did not hold.
+
+    Shape: all four prices identical to each other (and to the previous
+    session's close), with ZERO volume. NSE never produces that -- a suspended
+    stock has no bar at all, and a circuit-locked one still has volume -- but a
+    vendor filling a calendar will.
+
+    Verified on 2026-09-18: the research project's *extended* panel carries
+    exactly this for **395 of 499 equities on 2026-09-14**, a Monday NSE was
+    shut for (no NIFTY bar exists in any source). Live Dhan has **zero** such
+    bars across 1,108,462 rows.
+
+    It matters far more than 0.036% of rows suggests, because every lookback in
+    this strategy is POSITIONAL: `close.shift(5)`, `close.shift(126)`, the ATR
+    EWM and the ADV20 window all count rows, not days. One phantom row shifts
+    every one of them by a session, and the zero drags the 20-day turnover mean
+    down on top of that.
+    """
+    if volume not in (0, None):
+        return False
+    if volume is None:
+        # A missing volume is not a zero. Only an explicit zero, with the flat
+        # price shape, is the artefact.
+        return False
+    return open_ == high == low == close
+
+
 class BarImportError(Exception):
     """The import cannot proceed, and says why."""
 
@@ -122,12 +152,22 @@ def _parse_volume(value: str) -> Optional[int]:
 
 
 def read_bar_file(
-    path: str, symbol: str, exchange_segment: str, security_id: Optional[str] = None
+    path: str,
+    symbol: str,
+    exchange_segment: str,
+    security_id: Optional[str] = None,
+    drop_phantom_bars: bool = True,
 ) -> Tuple[List[Dict[str, Any]], List[str], int]:
     """Parse one CSV into upsertable rows. Returns (rows, warnings, read).
 
     A row is dropped only when it cannot be trusted -- an unparseable date, a
-    non-positive price, or a high below its own low. Each drop is reported.
+    non-positive price, a high below its own low, or the flat zero-volume shape
+    of a session the exchange did not hold (see `is_phantom_bar`). Each drop is
+    reported.
+
+    `drop_phantom_bars=False` exists for one caller: the test that reproduces
+    the specification's section 13 snapshot, which has to import the same rows
+    the specification was computed from, artefact included.
     """
     warnings: List[str] = []
     rows: List[Dict[str, Any]] = []
@@ -167,6 +207,16 @@ def read_bar_file(
                 )
                 continue
 
+            volume = _parse_volume(record.get("volume", ""))
+            if drop_phantom_bars and is_phantom_bar(
+                prices["open"], prices["high"], prices["low"], prices["close"], volume
+            ):
+                warnings.append(
+                    f"{symbol} {bar_date}: dropped a flat zero-volume bar -- the "
+                    f"exchange did not hold this session"
+                )
+                continue
+
             rows.append(
                 {
                     "symbol": symbol,
@@ -177,7 +227,7 @@ def read_bar_file(
                     "high": prices["high"],
                     "low": prices["low"],
                     "close": prices["close"],
-                    "volume": _parse_volume(record.get("volume", "")),
+                    "volume": volume,
                     "source": SOURCE_IMPORT,
                 }
             )
@@ -196,6 +246,7 @@ class BarImportService:
         directory: str,
         wanted: Iterable[Tuple[str, str, Optional[str], Optional[str]]],
         commit_each_symbol: bool = True,
+        drop_phantom_bars: bool = True,
     ) -> ImportResult:
         """Import one file per wanted symbol.
 
@@ -227,7 +278,9 @@ class BarImportService:
                 result.missing_files.append(name)
                 continue
 
-            rows, warnings, read = read_bar_file(path, symbol, segment, security_id)
+            rows, warnings, read = read_bar_file(
+                path, symbol, segment, security_id, drop_phantom_bars=drop_phantom_bars
+            )
             counts = await self.repository.upsert_many(rows)
             entry = SymbolImport(
                 symbol=symbol,

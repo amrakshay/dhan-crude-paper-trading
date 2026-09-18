@@ -407,7 +407,14 @@ async def test_section_13_of_the_specification_is_reproduced(db_session, definit
         (symbol, SEGMENT, None, None)
         for symbol in sorted(definition.universe.symbols)
     ] + [("NIFTY", INDEX_SEGMENT, "13", "NIFTY50.csv")]
-    await BarImportService(repository).import_symbols(str(EXTENDED_PANEL), wanted)
+    # `drop_phantom_bars=False` deliberately. The extended panel carries a
+    # flat zero-volume bar for 395 equities on 2026-09-14, a Monday NSE was
+    # shut for, and the specification's section 13 figures were computed WITH
+    # those rows. Importing them is what makes this a like-for-like
+    # reproduction; the production path drops them (see test_daily_bars.py).
+    await BarImportService(repository).import_symbols(
+        str(EXTENDED_PANEL), wanted, drop_phantom_bars=False
+    )
 
     snapshot = await RankingService(repository, definition).snapshot(
         as_of=date(2026, 9, 17)

@@ -563,3 +563,88 @@ async def test_a_symbol_with_no_instrument_row_is_reported_not_guessed(
 
     assert [one.symbol for one in result.unresolved] == ["JBCHEPHARM"]
     assert result.as_dict()["symbolsUnresolved"] == 1
+
+
+# --- the phantom-session guard ----------------------------------------------
+#
+# Found on 2026-09-18 by pulling the live universe and comparing it with the
+# research project's extended panel: that panel carries a bar for 395 of 499
+# equities on 2026-09-14, a Monday NSE was shut for. Every one has
+# open = high = low = close = the previous close, and volume 0. Live Dhan has
+# ZERO such bars across 1,108,462 rows.
+#
+# It matters because every lookback in this strategy is POSITIONAL --
+# close.shift(5), close.shift(126), the ATR EWM, the ADV20 window all count
+# rows rather than days. One phantom row shifts all of them by a session.
+
+
+def test_a_flat_zero_volume_bar_is_recognised_as_a_session_that_never_happened():
+    from src.daily_bars.services.bar_import_service import is_phantom_bar
+
+    flat = Decimal("2676.60")
+    assert is_phantom_bar(flat, flat, flat, flat, 0) is True
+
+
+def test_a_real_bar_is_not_mistaken_for_a_phantom_one():
+    from src.daily_bars.services.bar_import_service import is_phantom_bar
+
+    # Traded, however narrowly.
+    assert is_phantom_bar(
+        Decimal("100"), Decimal("100"), Decimal("100"), Decimal("100"), 5_000
+    ) is False
+    # A missing volume is NOT a zero, and must not be treated as one.
+    assert is_phantom_bar(
+        Decimal("100"), Decimal("100"), Decimal("100"), Decimal("100"), None
+    ) is False
+    # Zero volume but a real range: odd, but not the artefact.
+    assert is_phantom_bar(
+        Decimal("100"), Decimal("101"), Decimal("99"), Decimal("100"), 0
+    ) is False
+
+
+def test_the_importer_drops_a_phantom_bar_and_says_so(tmp_path):
+    path = tmp_path / "WELCORP.csv"
+    path.write_text(
+        "date,open,high,low,close,volume\n"
+        "2026-09-11,2745.0,2761.8,2658.5,2676.6,1221515\n"
+        "2026-09-14,2676.6,2676.6,2676.6,2676.6,0\n"      # NSE was shut
+        "2026-09-15,2661.2,2718.4,2363.6,2413.3,3340619\n",
+        encoding="utf-8",
+    )
+
+    rows, warnings, read = read_bar_file(str(path), "WELCORP", SEGMENT, "1")
+
+    assert read == 3
+    assert [row["bar_date"] for row in rows] == [date(2026, 9, 11), date(2026, 9, 15)]
+    assert any("flat zero-volume" in warning for warning in warnings)
+
+
+def test_the_importer_can_be_told_to_keep_phantom_bars(tmp_path):
+    """One caller needs them: the like-for-like section 13 reproduction."""
+    path = tmp_path / "WELCORP.csv"
+    path.write_text(
+        "date,open,high,low,close,volume\n"
+        "2026-09-14,2676.6,2676.6,2676.6,2676.6,0\n",
+        encoding="utf-8",
+    )
+
+    rows, _, _ = read_bar_file(
+        str(path), "WELCORP", SEGMENT, "1", drop_phantom_bars=False
+    )
+
+    assert len(rows) == 1
+
+
+def test_the_live_path_drops_a_phantom_candle_too():
+    """The guard sits on both paths; this is where a vendor change would land."""
+    stamp = int(datetime(2026, 9, 14, 0, 0, tzinfo=IST).timestamp())
+
+    assert candle_to_row(
+        Candle(time=stamp, open=100.0, high=100.0, low=100.0, close=100.0, volume=0.0),
+        "WELCORP", SEGMENT, "1",
+    ) is None
+    # The same flat shape WITH volume is a real, if illiquid, session.
+    assert candle_to_row(
+        Candle(time=stamp, open=100.0, high=100.0, low=100.0, close=100.0, volume=25.0),
+        "WELCORP", SEGMENT, "1",
+    ) is not None
