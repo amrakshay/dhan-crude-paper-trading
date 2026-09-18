@@ -473,16 +473,30 @@ class SettingsService:
             )
             return result
 
-        # The probe is a cheap authenticated read against whichever underlying
-        # is actually configured, so it stays correct for a strategy that is
-        # not CRUDEOIL.
-        from src.strategies.services.strategy_registry import get_strategy_registry
+        # The probe needs an underlying that HAS an option chain, and not every
+        # strategy has one.
+        #
+        # This picked the first ENABLED strategy and assumed it could be
+        # probed. `nse-swing-momentum` declares no `underlying_scrip` on
+        # purpose -- a rotation over five hundred equities has no single
+        # underlying -- so from the day MCX crude was switched off the probe
+        # sent a null security id, Dhan answered `400 Invalid SecurityId`, and
+        # a working token was reported as rejected. Telling somebody to
+        # regenerate a credential that is working is the worst answer this
+        # check can give.
+        probe = self._probe_target()
+        if probe is None:
+            result["message"] = (
+                "The credentials could not be checked against Dhan: no strategy "
+                "module declares an option-chain underlying to probe with, and "
+                "this check has nothing else cheap to ask for. That says nothing "
+                "about whether the credentials work -- the feed's own connection "
+                "state on the system health page does."
+            )
+            result["detail"] = "No strategy declares underlying.underlying_scrip"
+            return result
 
-        registry = get_strategy_registry()
-        running = registry.enabled()
-        probe_strategy = running[0] if running else registry.default()
-        underlying_scrip = probe_strategy.underlying_scrip
-        underlying_segment = probe_strategy.exchange_segment
+        probe_strategy, underlying_scrip, underlying_segment = probe
         client = DhanOptionChainClient(client_id=client_id, access_token=access_token)
 
         try:
@@ -500,7 +514,8 @@ class SettingsService:
                 "Dhan credential validation failed for client id %s: %s",
                 client_id, detail[:300],
             )
-            if "401" in detail or "invalid" in detail.lower() or "unauthor" in detail.lower():
+            lowered = detail.lower()
+            if self._is_authentication_failure(lowered):
                 result["message"] = (
                     "Dhan rejected these credentials. Check the client ID and "
                     "regenerate the access token."
@@ -509,6 +524,18 @@ class SettingsService:
                 result["message"] = (
                     "Dhan accepted the token but refused the request. The Data "
                     "APIs subscription may not be active on this account."
+                )
+            elif "400" in detail:
+                # Dhan answered with a STRUCTURED business error, which it only
+                # does after authenticating the caller -- a bad token is a 401.
+                # So this says the credentials work and the probe was wrong,
+                # and it must not read as "regenerate your token".
+                result["message"] = (
+                    f"The credentials reached Dhan and were accepted -- Dhan "
+                    f"answered, it simply refused this particular request for "
+                    f"{probe_strategy.key}'s underlying. A rejected token is a "
+                    f"401 and this is not one. Treat the credentials as working "
+                    f"and report the probe: {detail[:160]}"
                 )
             else:
                 result["message"] = f"Could not validate against Dhan: {detail[:200]}"
@@ -540,6 +567,63 @@ class SettingsService:
                 f"Credentials are valid. Dhan returned {len(expiries)} expiries."
             )
         return result
+
+    @staticmethod
+    def _probe_target():
+        """A strategy whose underlying can actually be asked for an option chain.
+
+        Preference order, and the reasons matter:
+
+        1. An ENABLED strategy that declares one, so the probe exercises
+           something that is actually running.
+        2. ANY strategy that declares one, enabled or not. The expiry list is a
+           read-only market-data call and this is a CREDENTIAL check, not a
+           strategy operation -- borrowing a switched-off module's underlying to
+           prove a token works is legitimate, and is far better than reporting
+           a working credential as broken.
+        3. None. Said plainly rather than by issuing a request that cannot
+           succeed and blaming the answer on the token.
+        """
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        registry = get_strategy_registry()
+
+        def usable(definition) -> bool:
+            return definition.underlying_scrip is not None
+
+        for candidate in list(registry.enabled()) + list(registry.all()):
+            if usable(candidate):
+                return (
+                    candidate,
+                    candidate.underlying_scrip,
+                    candidate.exchange_segment,
+                )
+        return None
+
+    @staticmethod
+    def _is_authentication_failure(lowered_detail: str) -> bool:
+        """Whether Dhan refused the CREDENTIAL, as against the request.
+
+        The old test was `"invalid" in detail`, which matches Dhan's
+        `Invalid SecurityId` -- a request error -- and so reported a working
+        token as rejected. Authentication failures are specific, and being
+        specific is the whole point: the remedy for one is "regenerate your
+        token", and giving that advice wrongly costs somebody their working
+        session.
+        """
+        if "401" in lowered_detail:
+            return True
+        return any(
+            phrase in lowered_detail
+            for phrase in (
+                "unauthor",
+                "invalid token",
+                "invalid access token",
+                "invalid client",
+                "token expired",
+                "invalid_token",
+            )
+        )
 
     async def resolve_credentials(self) -> tuple[str, str]:
         """The credentials in force (database first, then .env)."""

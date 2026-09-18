@@ -39,6 +39,35 @@ def _quiet_client():
     return client
 
 
+@pytest.fixture
+def market_open(monkeypatch):
+    """Pin the session state, instead of depending on when the suite runs.
+
+    The watchdog deliberately does nothing while every enabled market is shut:
+    silence is what a closed exchange sounds like. That makes "is a market
+    open" a PRECONDITION of every test below, and leaving it to the wall clock
+    made the outcome depend on the time of day -- these passed all afternoon
+    and turned red at 23:30 IST, when MCX crude's session ends, with no code
+    change. Worse, the "left alone" test would then have passed for the wrong
+    reason: suppressed by the clock rather than by the empty subscription set
+    it exists to check.
+
+    `conftest.py` records the same lesson about hardcoded expiry dates. Same
+    rule: a test that depends on the time of day is a test that fails on a
+    morning nobody changed anything.
+    """
+
+    def _set(is_open: bool) -> None:
+        # Patched where it is USED: the client imported the name, so it holds
+        # its own reference and patching market_clock would not be seen.
+        monkeypatch.setattr(
+            "src.market.services.dhan_feed_client.enabled_market_open",
+            lambda *args, **kwargs: is_open,
+        )
+
+    return _set
+
+
 async def _run_one_watchdog_pass(client):
     """Let the watchdog take exactly one look, then stop it."""
     task = asyncio.create_task(client._watchdog())  # noqa: SLF001
@@ -51,8 +80,9 @@ async def _run_one_watchdog_pass(client):
         pass
 
 
-async def test_a_quiet_feed_with_subscriptions_is_reconnected():
+async def test_a_quiet_feed_with_subscriptions_is_reconnected(market_open):
     """The behaviour the watchdog exists for, unchanged."""
+    market_open(True)
     client = _quiet_client()
     client._subscribed = {("MCX_COMM", "565899")}  # noqa: SLF001
 
@@ -61,15 +91,37 @@ async def test_a_quiet_feed_with_subscriptions_is_reconnected():
     assert client._websocket.closed is True, "a dead socket must be dropped"
 
 
-async def test_a_quiet_feed_with_nothing_subscribed_is_left_alone():
+async def test_a_quiet_feed_with_nothing_subscribed_is_left_alone(market_open):
     """Nothing was asked for, so nothing arriving proves nothing.
 
     Without this the watchdog reconnects every 45 seconds for ever, burning
     one of Dhan's five connection slots on a loop and turning the dead-feed
     signal into constant noise.
+
+    The market is pinned OPEN so this passes for its own reason -- the empty
+    subscription set -- rather than being suppressed by the closed-market guard
+    the next test covers.
     """
+    market_open(True)
     client = _quiet_client()
     client._subscribed = set()  # noqa: SLF001
+
+    await _run_one_watchdog_pass(client)
+
+    assert client._websocket.closed is False
+
+
+async def test_a_quiet_feed_is_left_alone_while_every_market_is_shut(market_open):
+    """The second half of the same bug, and it had no test of its own.
+
+    A book held across the close is subscribed and silent for every one of the
+    sixteen hours the exchange is shut, so the subscription check above passes
+    and the watchdog reconnected every 45 seconds until the next open -- the
+    same wasted connection slot and the same noise.
+    """
+    market_open(False)
+    client = _quiet_client()
+    client._subscribed = {("MCX_COMM", "565899")}  # noqa: SLF001
 
     await _run_one_watchdog_pass(client)
 

@@ -339,7 +339,7 @@ function SecretField({ label, value, stored, onChange, helper, placeholder }) {
 }
 
 // --- Dhan -------------------------------------------------------------------
-function DhanDetail({ card, onSaved }) {
+function DhanDetail({ card, onSaved, onRefresh }) {
   const [clientId, setClientId] = useState(card.detail?.clientId ?? '');
   const [accessToken, setAccessToken] = useState('');
   const [busy, setBusy] = useState(false);
@@ -360,8 +360,7 @@ function DhanDetail({ card, onSaved }) {
         },
       });
       setAccessToken('');
-      setResult({ ok: true, message: 'Saved. The market feed was restarted.' });
-      onSaved(saved);
+      onSaved(saved, 'Dhan saved. The market feed was restarted with the new credentials.');
     } catch (saveError) {
       setError(saveError.message);
     } finally {
@@ -378,6 +377,11 @@ function DhanDetail({ card, onSaved }) {
         ...(accessToken.trim() ? { access_token: accessToken.trim() } : {}),
       });
       setResult({ ok: outcome.valid, message: outcome.message });
+      // A check RECORDS its outcome, so the pill and the age are now stale.
+      // Without this the card went on saying "Never checked" immediately after
+      // being checked, which is the page contradicting itself about the one
+      // thing it exists to report.
+      onRefresh(await connectionsApi.get('dhan'));
     } catch (validateError) {
       setResult({ ok: false, message: validateError.message });
     } finally {
@@ -535,7 +539,7 @@ function ListenResult({ result, onUseChat, onMapUser, applying }) {
   );
 }
 
-function TelegramDetail({ card, onSaved }) {
+function TelegramDetail({ card, onSaved, onRefresh }) {
   const detail = card.detail ?? {};
   const [botToken, setBotToken] = useState('');
   const [chatId, setChatId] = useState(detail.chatId ?? '');
@@ -582,8 +586,7 @@ function TelegramDetail({ card, onSaved }) {
         },
       });
       setBotToken('');
-      setResult({ severity: 'success', message: 'Saved.' });
-      onSaved(saved);
+      onSaved(saved, 'Telegram saved.');
     } catch (saveError) {
       setError(saveError.message);
     } finally {
@@ -604,6 +607,8 @@ function TelegramDetail({ card, onSaved }) {
         message: outcome.message,
         detail: outcome.detail,
       });
+      // Same reason as Dhan's: the check just moved lastCheckedAt.
+      onRefresh(await connectionsApi.get('telegram'));
     } catch (validateError) {
       setResult({ severity: 'error', message: validateError.message });
     } finally {
@@ -617,6 +622,8 @@ function TelegramDetail({ card, onSaved }) {
     try {
       const outcome = await connectionsApi.sendTestMessage();
       setResult({ severity: outcome.sent ? 'success' : 'error', message: outcome.message });
+      // Sending records a check as well -- it is the strongest one there is.
+      onRefresh(await connectionsApi.get('telegram'));
     } catch (sendError) {
       setResult({ severity: 'error', message: sendError.message });
     } finally {
@@ -643,7 +650,7 @@ function TelegramDetail({ card, onSaved }) {
     try {
       await usersApi.update(userId, { telegramUserId });
       const refreshed = await connectionsApi.get('telegram');
-      onSaved(refreshed);
+      onRefresh(refreshed);
       setMappingFor(null);
       setResult({
         severity: 'success',
@@ -918,6 +925,7 @@ export default function ConnectionsPage() {
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [now, setNow] = useState(() => Date.now());
 
   // The age ticks locally so a card that has not been re-checked visibly ages,
@@ -946,6 +954,7 @@ export default function ConnectionsPage() {
   const openDetail = async (provider) => {
     setOpen(provider);
     setDetail(null);
+    setNotice(null);
     try {
       setDetail(await connectionsApi.get(provider));
     } catch (detailError) {
@@ -954,9 +963,28 @@ export default function ConnectionsPage() {
     }
   };
 
-  const onSaved = (saved) => {
-    setDetail(saved);
+  /**
+   * A check or a discovery updated the connection: refresh what is on screen
+   * and LEAVE THE DIALOG OPEN. The operator is still working in it.
+   */
+  const onRefresh = (card) => {
+    setDetail(card);
     load();
+  };
+
+  /**
+   * A SAVE succeeded: refresh, close, and say so on the page behind it.
+   *
+   * Closing is the whole difference between this and `onRefresh`. A form that
+   * stays open after a successful save gives the operator nothing to act on --
+   * they cannot tell it worked from it having done nothing, and the usual next
+   * move is to press Save again. The confirmation moves to the page precisely
+   * because the dialog it was written into is gone.
+   */
+  const onSaved = (card, message) => {
+    onRefresh(card);
+    setOpen(null);
+    setNotice(message || `${card.label} saved.`);
   };
 
   if (loading) {
@@ -980,6 +1008,11 @@ export default function ConnectionsPage() {
       </Box>
 
       {error ? <Alert severity="error">{error}</Alert> : null}
+      {notice ? (
+        <Alert severity="success" onClose={() => setNotice(null)}>
+          {notice}
+        </Alert>
+      ) : null}
 
       <Grid container spacing={2}>
         {cards.map((card) => (
@@ -1018,9 +1051,9 @@ export default function ConnectionsPage() {
               <CircularProgress />
             </Box>
           ) : detail.provider === 'dhan' ? (
-            <DhanDetail card={detail} onSaved={onSaved} />
+            <DhanDetail card={detail} onSaved={onSaved} onRefresh={onRefresh} />
           ) : (
-            <TelegramDetail card={detail} onSaved={onSaved} />
+            <TelegramDetail card={detail} onSaved={onSaved} onRefresh={onRefresh} />
           )}
         </DialogContent>
       </Dialog>

@@ -1956,14 +1956,19 @@ not carried over.
 
 ### Connections, alerts and Telegram
 
-* **Nothing here has been proven against a real Telegram bot.** Every failure
-  path was exercised against the live `api.telegram.org` with a deliberately
-  invalid token (bad token, `getUpdates`, `sendMessage` and `getMe` all round
-  trip and classify correctly), and the delivery, de-duplication and command
-  paths are covered by tests with the HTTP call stubbed. What has **not** been
-  seen: a message actually arriving in a channel, an update actually arriving
-  from a DM, and therefore the listen test's happy path end to end. Create a
-  bot, save its token, and press both buttons before relying on any of it.
+* **The OUTBOUND half is proven against a real bot; the INBOUND half is not.**
+  Verified live on 2026-09-18: a test message delivered, and three alerts
+  (two startup announcements and a missed-sessions health alert) written to the
+  outbox and actually SENT — with four earlier ones correctly recorded
+  `SUPPRESSED` because no connection was configured when they were raised.
+  Every failure path was exercised against the live `api.telegram.org` with a
+  deliberately invalid token, and all five classify correctly.
+
+  What has **not** been seen: an update actually arriving from a DM, and
+  therefore the listen test's happy path and the whole command surface end to
+  end. Commands are still switched off and `updatesReceived` is 0. Press
+  "Listen for a test message", DM the bot, and map a user before relying on
+  commands.
 * **UNVERIFIED — one `getUpdates` consumer per bot.** Telegram is widely
   reported to serve one `getUpdates` consumer at a time and to answer a second
   with HTTP 409 ("terminated by other getUpdates request"). **This is not in the

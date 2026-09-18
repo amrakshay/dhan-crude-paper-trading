@@ -560,3 +560,154 @@ def test_the_poller_distinguishes_being_alive_from_consuming():
 
     poller.enabled = True
     assert poller.polling is False, "enabled but not running is not polling"
+
+
+# --- the validate probe, and the misdiagnosis it used to make ---------------
+def test_the_probe_skips_a_strategy_that_has_no_option_chain():
+    """The bug that reported a WORKING token as rejected.
+
+    `validate_credentials` picked the first ENABLED strategy and assumed it
+    could be probed. `nse-swing-momentum` declares no `underlying_scrip` on
+    purpose -- a rotation over five hundred equities has no single underlying --
+    so from the day MCX crude was switched off the probe sent a null security
+    id, Dhan answered `400 Invalid SecurityId`, and the page told the operator
+    to regenerate a credential that was working.
+    """
+    from src.settings.services.settings_service import SettingsService
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    # The exact live configuration that broke it: the equity rotation on, the
+    # only strategy with an option chain off.
+    registry.set_enabled("mcx-crude-options", False)
+    registry.set_enabled("nse-swing-momentum", True)
+    try:
+        probe = SettingsService._probe_target()
+
+        assert probe is not None, "a switched-off module's underlying is still probeable"
+        definition, scrip, segment = probe
+        assert definition.key == "mcx-crude-options"
+        assert scrip is not None, "the probe must never send a null security id"
+        assert segment == "MCX_COMM"
+    finally:
+        registry.set_enabled("mcx-crude-options", True)
+
+
+def test_the_probe_prefers_an_enabled_strategy_that_can_be_probed():
+    """Preference, not indifference: probe what is actually running when it can
+    be probed at all."""
+    from src.settings.services.settings_service import SettingsService
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    registry.set_enabled("mcx-crude-options", True)
+
+    definition, _scrip, _segment = SettingsService._probe_target()
+    assert definition.key == "mcx-crude-options"
+
+
+def test_a_malformed_probe_is_not_reported_as_a_rejected_credential(
+    monkeypatch,
+):
+    """`Invalid SecurityId` is a REQUEST error, and Dhan only sends one after
+    authenticating the caller. A rejected token is a 401.
+
+    The old test was `"invalid" in detail`, which matches `Invalid SecurityId`
+    -- so a working token was reported as rejected. Telling somebody to
+    regenerate a credential that works is the worst answer this check can give.
+    """
+    from src.settings.services.settings_service import SettingsService
+
+    authentication_failures = (
+        'http 401 {"status":"failed"}',
+        "unauthorized",
+        "invalid token",
+        "invalid access token",
+        "token expired",
+    )
+    request_failures = (
+        'http 400 {"data":{"813":"invalid securityid"},"status":"failed"}',
+        'http 400 {"data":{"806":"invalid expiry date"}}',
+        "http 500 internal server error",
+    )
+
+    for detail in authentication_failures:
+        assert SettingsService._is_authentication_failure(detail), detail
+    for detail in request_failures:
+        assert not SettingsService._is_authentication_failure(detail), detail
+
+
+async def test_a_400_from_dhan_says_the_credentials_WORK(auth_client, monkeypatch):
+    """End to end: a structured 400 must not advise regenerating the token."""
+    from src.market.services import dhan_option_chain_client as module
+
+    async def _refuse(self, *args, **kwargs):
+        raise module.OptionChainError(
+            'Option chain request failed: HTTP 400 '
+            '{"data":{"813":"Invalid SecurityId"},"status":"failed"}'
+        )
+
+    monkeypatch.setattr(module.DhanOptionChainClient, "fetch_expiry_list", _refuse)
+
+    await auth_client.put(
+        "/api/settings",
+        json={"syntheticFeed": True, "clientId": "1100123456", "accessToken": _token()},
+    )
+    response = await auth_client.post(
+        "/api/connections/dhan/validate", json={"settings": {}}
+    )
+
+    assert response.status_code == 200, response.text
+    message = response.json()["message"]
+    assert "regenerate" not in message.lower(), (
+        "a 400 must never advise replacing a working token"
+    )
+    assert "rejected these credentials" not in message.lower()
+    assert "accepted" in message.lower()
+
+
+def _token(hours: int = 20) -> str:
+    import time
+
+    import jwt
+
+    return jwt.encode(
+        {"dhanClientId": "1100123456", "exp": int(time.time()) + hours * 3600},
+        "not-the-real-signing-key",
+        algorithm="HS256",
+    )
+
+
+async def test_validating_records_the_check_so_the_pill_stops_saying_never(
+    auth_client, monkeypatch
+):
+    """The other half of the report: the tile still said "Never checked".
+
+    A check RECORDS its outcome, so the pill and the age must move. A page that
+    says "never checked" immediately after checking is contradicting itself
+    about the one thing it exists to report.
+    """
+    from src.market.services import dhan_option_chain_client as module
+
+    async def _ok(self, *args, **kwargs):
+        return ["2026-10-15", "2026-11-17"]
+
+    monkeypatch.setattr(module.DhanOptionChainClient, "fetch_expiry_list", _ok)
+
+    await auth_client.put(
+        "/api/settings",
+        json={"syntheticFeed": True, "clientId": "1100123456", "accessToken": _token()},
+    )
+    before = await auth_client.get("/api/connections/dhan")
+    assert before.json()["status"] == "NEVER_CHECKED"
+    assert before.json()["lastCheckedAt"] is None
+
+    validated = await auth_client.post(
+        "/api/connections/dhan/validate", json={"settings": {}}
+    )
+    assert validated.json()["valid"] is True, validated.text
+
+    after = await auth_client.get("/api/connections/dhan")
+    assert after.json()["lastCheckedAt"] is not None
+    assert after.json()["lastCheckOk"] is True
+    assert after.json()["status"] == "CONNECTED"
