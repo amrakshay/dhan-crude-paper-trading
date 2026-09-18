@@ -8,6 +8,7 @@ from src.core.base_repository import BaseRepository
 from src.strategies.database.db_models.feature_toggle_model import (
     SCOPE_AUTOMATION,
     SCOPE_CAPABILITY,
+    SCOPE_POLICY,
     SCOPE_STRATEGY,
     FeatureToggle,
 )
@@ -32,6 +33,7 @@ class FeatureToggleRepository(BaseRepository[FeatureToggle]):
             SCOPE_STRATEGY: {},
             SCOPE_CAPABILITY: {},
             SCOPE_AUTOMATION: {},
+            SCOPE_POLICY: {},
         }
         for row in rows:
             states.setdefault(row.scope, {})[row.toggle_key] = bool(row.enabled)

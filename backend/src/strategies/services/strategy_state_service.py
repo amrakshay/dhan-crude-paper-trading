@@ -34,6 +34,7 @@ from src.logging_config import get_logger
 from src.strategies.database.db_models.feature_toggle_model import (
     SCOPE_AUTOMATION,
     SCOPE_CAPABILITY,
+    SCOPE_POLICY,
     SCOPE_STRATEGY,
 )
 from src.strategies.database.db_operations.feature_toggle_repository import (
@@ -69,11 +70,13 @@ class StrategyStateService:
             states.get(SCOPE_STRATEGY, {}),
             states.get(SCOPE_CAPABILITY, {}),
             states.get(SCOPE_AUTOMATION, {}),
+            states.get(SCOPE_POLICY, {}),
         )
         return {
             "strategies": registry.strategy_states(),
             "capabilities": registry.capability_states(),
             "armed": registry.armed_states(),
+            "policies": registry.policy_states(),
         }
 
     # --- writing -----------------------------------------------------------
@@ -185,6 +188,102 @@ class StrategyStateService:
 
         rows = await PortfolioRepository(self.session).portfolios_running(strategy_key)
         return [row.name for row in rows]
+
+    async def set_strategy_policy(
+        self,
+        strategy_key: str,
+        policy: str,
+        enforced: bool,
+        user_id: int = None,
+    ) -> Dict[str, Any]:
+        """Enforce, or stop enforcing, one of a strategy's own rules.
+
+        Root `CLAUDE.md` section 3a survives this and this fits inside it: what
+        is being changed is not a PARAMETER of the rule -- the lookbacks, the
+        thresholds, the multiples all stay in the YAML and are editable from
+        nowhere -- but whether the rule is OBEYED. That is the same kind of
+        fact as enabled and armed: runtime state overlaid on a default the YAML
+        declares.
+
+        Nothing about the feed changes, so this deliberately does not resync.
+        What changes is what the NEXT decision does; a run already in flight
+        keeps the policy it started under.
+
+        THE CONTRADICTORY PAIR IS REFUSED HERE, before anything is written --
+        not only in the UI. A stored row, a script or a future caller would
+        walk straight past a check that lived on a page.
+        """
+        registry = get_strategy_registry()
+        definition = registry.get(strategy_key)
+        if definition is None:
+            raise StrategyConfigError(f"Unknown strategy module {strategy_key!r}")
+        if not definition.automation.automated:
+            raise StrategyConfigError(
+                f"{definition.label} declares no automation block, so it has no "
+                f"rules of its own to enforce. Every order in it comes from a "
+                f"person."
+            )
+
+        self._validate_policy(definition, policy, enforced)
+        warnings = self._policy_warnings(definition, policy, enforced)
+
+        registry.set_policy(strategy_key, policy, enforced)
+        await self.repository.set_state(
+            SCOPE_POLICY,
+            f"{strategy_key}/{policy}",
+            enforced,
+            updated_by_user_id=user_id,
+        )
+        await self.session.commit()
+
+        logger.warning(
+            "Strategy %s: policy %s is now %s. It applies at the next decision.",
+            strategy_key, policy, "ENFORCED" if enforced else "NOT ENFORCED",
+        )
+        return {
+            "effect": {"policy": policy, "enforced": bool(enforced)},
+            "warnings": warnings,
+        }
+
+    async def policy_warnings(self, strategy_key: str, policy: str, enforced: bool):
+        """What flipping this switch would do, BEFORE it is flipped."""
+        definition = get_strategy_registry().get(strategy_key)
+        if definition is None or not definition.automation.automated:
+            return []
+        return self._policy_warnings(definition, policy, enforced)
+
+    # A strategy's own module owns both the meaning of its policies and the
+    # prose in front of the switch, because the prose is about the rule rather
+    # than about the framework. Only automated modules have policies and only
+    # one automated module exists; a SECOND one needs a lookup by strategy key
+    # here rather than a second import.
+    @staticmethod
+    def _policy_warnings(definition, policy: str, enforced: bool):
+        from src.swing.services.gate_policy import policy_warnings
+
+        return policy_warnings(definition, policy, enforced)
+
+    @staticmethod
+    def _validate_policy(definition, policy: str, enforced: bool) -> None:
+        from src.swing.services.gate_policy import (
+            GatePolicyError,
+            resolve_gate_policy,
+        )
+
+        registry = get_strategy_registry()
+        overrides = {}
+        from src.strategies.services.strategy_definition import KNOWN_POLICIES
+
+        for known in KNOWN_POLICIES:
+            stored = registry.policy_override(definition.key, known)
+            if stored is not None:
+                overrides[known] = stored
+        overrides[policy] = bool(enforced)
+
+        try:
+            resolve_gate_policy(definition, overrides=overrides)
+        except GatePolicyError as error:
+            raise StrategyConfigError(str(error)) from error
 
     async def set_capability_enabled(
         self, capability: str, enabled: bool, user_id: int = None

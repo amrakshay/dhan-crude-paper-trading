@@ -49,6 +49,57 @@ decision rows are the same down to the reason sentence; `order_id` being null
 is the only difference, so an armed and an unarmed run can be diffed and only
 the orders differ.
 
+## The three enforcement switches
+
+Added 2026-09-18. `gate_policy.py` owns them. They say whether one of this
+strategy's own rules is **obeyed** — they are not, and must never become,
+parameters of the rule.
+
+| Switch | Default (YAML) | `false` means |
+|---|---|---|
+| `regime.enforce` | `regime.enforcement: enforce` | P8/P17 stop gating: no liquidation on a gate flip, entries allowed below the SMA |
+| `regime.enforce_entry_return` | `regime.enforce_entry_return: true` | P9 stops blocking new entries |
+| `off_gate.enabled` | `off_gate.enabled: false` | unchanged in meaning; it just became flippable at runtime |
+
+A fourth `feature_toggles` scope (`POLICY`, key `<strategy_key>/<policy>`)
+rather than a `strategy_settings` table: every one of these is a named boolean
+overlaid on a default, with unknown keys ignored and an audit column, which is
+exactly what that table already is. A dedicated table earns its migration when
+the first NON-boolean policy appears.
+
+Three properties that are load-bearing:
+
+- **`effective_gate()` stays PURE.** It takes a frozen `GatePolicy` as a third
+  argument rather than reaching into the registry, because the tests for it are
+  the entire safety net for trading through the gate and must not need a
+  process-wide singleton.
+- **The policy is read ONCE, when a run starts,** and carried down as a value.
+  A decision taken half under one policy and half under another is not one
+  anybody can audit.
+- **`off_gate.enabled` with a relaxed `regime.enforce` is REFUSED,** naming both
+  switches, in `GatePolicy.__post_init__` — so a stored row, a script or a
+  future caller hits it too, not only the UI.
+
+### What is recorded, and what it is for
+
+Two different needs, easy to conflate:
+
+- **Filtering the numbers afterwards.** `swing_decisions` carries
+  `regime_gate_on`, the index close, its SMA, the 63-session return, the two
+  enforcement booleans and the gate variant — stamped on every row of a run by
+  `SwingJournalService`, including the non-actions.
+  `GET /api/swing/performance` splits its statistics by the regime at entry.
+- **Behaviour now.** `swing_stops` carries `entry_gate_on` and
+  `entry_regime_enforced` **per position**, which `plan_sells` reads to decide
+  whether P17's liquidation reaches that holding. A position keeps the policy it
+  was opened under; a null reads as ENFORCED, so an unknown fails towards the
+  specification rather than towards an exemption nothing can justify.
+
+For the second to be safe a row has to exist for EVERY position, so
+`StopService.open_for_entry` now always writes one and `stop_price` is nullable,
+meaning "no stop yet". The monitor skips a null stop rather than comparing
+against it, and `ratchet_one` sets the first stop as soon as an ATR exists.
+
 ## The rebalance
 
 Sells are planned AND EXECUTED before the buys are planned. The backtest
@@ -160,6 +211,21 @@ be a record of a decision nobody took.
 - **Ranks cover every candidate, not the top ten.** A rotation exit is
   justified by a rank of 16 or of 40, and an operator has to be able to see
   which one.
+
+- **Analysis at any hour; ORDERS only inside continuous trading.** The ranking,
+  the nightly decision, the stop ratchet and the journal run off-market. Every
+  buy and every sell is checked with `market_clock.can_execute_continuously`
+  PER INSTRUMENT immediately before the order, because F&O eligibility moves the
+  close from 15:30 to 15:15 and a run starting at 15:14 can cross it mid-list. A
+  refused order is journalled with its reason and the time and is NOT queued —
+  the next rebalance re-decides from fresh bars. The stop monitor deliberately
+  differs and DOES defer: a triggered stop is a fact that has already happened,
+  not a fresh opinion.
+
+- **A switch says whether a rule is ENFORCED, never what the rule is.** The
+  moment a momentum floor or an ATR multiple becomes editable from a page, the
+  YAML stops being greppable against the specification's own table and root
+  `CLAUDE.md` §3a stops being true.
 
 ## The decision journal
 

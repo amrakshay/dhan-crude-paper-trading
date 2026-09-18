@@ -56,6 +56,19 @@ class SwingStopMonitor:
         self.exits_placed = 0
         self.deferred_to_auction = 0
         self.last_error: Optional[str] = None
+        # What the LAST PASS saw, for the Live tab's status strip. Counted
+        # while the pass is walking rows it has already read, never measured
+        # separately and never on the tick path.
+        #
+        # None is not zero anywhere here: "no pass has run" and "the monitor
+        # ran and is watching nothing" are different states and the page has to
+        # be able to say which.
+        self.last_pass_at: Optional[str] = None
+        self.watching: Optional[int] = None
+        self.unprotected: Optional[int] = None
+        self.unmarked: Optional[int] = None
+        self.nearest_symbol: Optional[str] = None
+        self.nearest_percent: Optional[float] = None
 
     # --- configuration -----------------------------------------------------
     @staticmethod
@@ -148,6 +161,12 @@ class SwingStopMonitor:
                 if await self._place_exit(session, repository, stop, resumed=True):
                     placed += 1
 
+            watching = 0
+            unprotected = 0
+            unmarked = 0
+            nearest_symbol: Optional[str] = None
+            nearest_percent: Optional[float] = None
+
             for stop in await repository.list_active():
                 if not registry.is_enabled(stop.strategy_key):
                     # Not watched while the strategy is off. The level stays in
@@ -157,13 +176,38 @@ class SwingStopMonitor:
                 definition = registry.get(stop.strategy_key)
                 if definition is None:
                     continue
+
+                if stop.stop_price is None:
+                    # Entered on a session with no usable ATR14, so P14 could
+                    # not be applied and there is no level to compare against.
+                    # Counted and reported rather than skipped silently: the
+                    # position is genuinely unprotected until the next nightly
+                    # ratchet sets its first stop.
+                    unprotected += 1
+                    continue
+
+                watching += 1
                 if not market_clock.is_market_open(definition):
                     continue
 
                 price = self._mark(stop.security_id)
                 if price is None:
                     # Never act on an unknown price.
+                    unmarked += 1
                     continue
+
+                # How close the nearest position is to its level, computed off
+                # the mark this pass has already read. None when nothing can be
+                # measured -- a book with no marks does not have a nearest stop
+                # of 0%.
+                if price > 0:
+                    percent = float(
+                        (price - Decimal(str(stop.stop_price))) / price * 100
+                    )
+                    if nearest_percent is None or percent < nearest_percent:
+                        nearest_percent = round(percent, 2)
+                        nearest_symbol = stop.symbol
+
                 if not self._is_hit(stop, price):
                     continue
 
@@ -172,6 +216,15 @@ class SwingStopMonitor:
                 triggered_now += 1
                 if await self._place_exit(session, repository, stop):
                     placed += 1
+
+            from src.core.time_utils import ist_now
+
+            self.last_pass_at = ist_now().isoformat()
+            self.watching = watching
+            self.unprotected = unprotected
+            self.unmarked = unmarked
+            self.nearest_symbol = nearest_symbol
+            self.nearest_percent = nearest_percent
 
             if placed or triggered_now or self.deferred_to_auction:
                 # A trigger is worth committing even when no order followed:
@@ -385,6 +438,17 @@ class SwingStopMonitor:
             "triggered": self.triggers,
             "exitsPlaced": self.exits_placed,
             "deferredToAuction": self.deferred_to_auction,
+            # Everything below is what the LAST pass saw. `running` is whether
+            # the task is alive, which is not the same fact as `enabled` and is
+            # not the same fact as "watching nothing" -- the Live tab renders
+            # the three differently on purpose.
+            "running": self._task is not None and not self._task.done(),
+            "lastPassAtIst": self.last_pass_at,
+            "watching": self.watching,
+            "unprotected": self.unprotected,
+            "unmarked": self.unmarked,
+            "nearestSymbol": self.nearest_symbol,
+            "nearestPercent": self.nearest_percent,
             "error": self.last_error,
         }
 

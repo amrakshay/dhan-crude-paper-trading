@@ -12,12 +12,12 @@ application, against a real depth book, so a fill here is the same pessimistic
 fill a click on the chart gets.
 """
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
 
-from src.core.time_utils import utc_now
+from src.core.time_utils import IST, utc_now
 from src.daily_bars.database.db_operations.daily_bar_repository import (
     DailyBarRepository,
 )
@@ -64,6 +64,23 @@ INDEX_SEGMENT = "IDX_I"
 LAST_SESSION = date.today() - timedelta(days=1)
 # For the one test whose subject IS the staleness refusal.
 STALE_SESSION = date.today() - timedelta(days=90)
+
+# ORDERS ONLY INSIDE CONTINUOUS TRADING. Analysis may run at any hour -- the
+# ranking, the decision, the stop ratchet and the journal are all fine at
+# midnight -- but an order placed outside the session would fill against a
+# depth book holding prices nobody can trade at.
+#
+# Every clock below is a MONDAY, so a weekday-aware guard sees a trading day
+# whatever day the suite is actually run on.
+IN_HOURS = time(11, 30)          # comfortably inside continuous trading
+AFTER_CLOSE = time(22, 0)        # the market has been shut for hours
+IN_AUCTION = time(15, 20)        # after 15:15: F&O names are in the auction
+
+
+def _at(when: time) -> datetime:
+    """A fixed IST moment on a Monday, so the weekday is never the variable."""
+    monday = date(2026, 9, 21)
+    return datetime.combine(monday, when).replace(tzinfo=IST)
 
 # Real Nifty 500 constituents. They have to be real: `submit_paper_order`
 # resolves a contract's owning strategy through `owns_instrument`, which checks
@@ -243,7 +260,9 @@ async def _seed_gate_off(db_session, symbols=SYMBOLS, sessions=280):
     return repository
 
 
-def _service(db_session, definition, symbols=SYMBOLS, book=None):
+def _service(
+    db_session, definition, symbols=SYMBOLS, book=None, clock=None, policy=None
+):
     ranking = RankingService(DailyBarRepository(db_session), definition)
     ranking.universe_symbols = lambda: list(symbols)  # noqa: E731
     journal = SwingJournalService(
@@ -260,6 +279,16 @@ def _service(db_session, definition, symbols=SYMBOLS, book=None):
         stops=stops,
         parameters=parameters,
         book=book if book is not None else get_feed_manager().book,
+        # AN ORDER IS ONLY PLACED INSIDE CONTINUOUS TRADING, so the clock is
+        # frozen inside the session here. Without this the whole file would
+        # pass in the afternoon and fail in the evening -- a suite whose result
+        # depends on the hour is worse than no suite -- and the tests whose
+        # SUBJECT is that guard would have nothing to assert against.
+        clock=clock or (lambda: _at(IN_HOURS)),
+        # None means "resolve the enforcement policy from the registry", which
+        # is what production does. `tests/test_swing_policies.py` passes one
+        # explicitly; everything in this file runs under the shipped default.
+        policy=policy,
     )
 
 

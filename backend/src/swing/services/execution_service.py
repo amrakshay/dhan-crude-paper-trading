@@ -32,6 +32,30 @@ Five rules it exists to keep.
 
 * **Every order carries its reason.** It goes onto the PLACED order event, and
   the journal ties the decision to the order through `SwingDecision.order_id`.
+
+* **ORDERS ONLY INSIDE CONTINUOUS TRADING.** Analysis may run at any hour --
+  ranking, deciding, ratcheting stops and journalling are all fine at midnight.
+  Placing is not: this simulator fills against a depth book, and outside the
+  session that book holds prices nobody can trade at. The check is
+  `market_clock.can_execute_continuously`, made PER INSTRUMENT immediately
+  before each order rather than once for the run, because F&O eligibility
+  changes the answer after 15:15 and a run that starts at 15:14 can cross the
+  boundary mid-list. A refused order is journalled with its reason and the time.
+
+  The intents are NOT queued for the next open. The next rebalance re-decides
+  from fresh bars and a fresh book, and replaying yesterday's intent is how you
+  trade a decision nobody would take today. This deliberately differs from the
+  stop monitor, which DOES defer: a triggered stop is a fact about a position
+  that has already happened, not a fresh opinion, so it waits and fires at the
+  next open.
+
+  The guard lives HERE rather than in `submit_paper_order`. A generic guard
+  would be harder to bypass, but it would change MCX crude and the chart's
+  one-click entry -- neither of which asked for it -- and it could not journal
+  a swing decision, which is the half of this requirement that makes the
+  refusal auditable. If it is ever made generic it must be a per-strategy
+  policy read from the YAML, with the MCX module's behaviour unchanged;
+  `tests/test_swing_does_not_disturb_crude.py` pins exactly that.
 """
 import asyncio
 from dataclasses import dataclass, field
@@ -42,6 +66,7 @@ from typing import Any, Dict, List, Optional
 from src.constants import OrderSide, OrderType
 from src.core.time_utils import utc_now
 from src.logging_config import get_logger
+from src.strategies.services import market_clock
 from src.strategies.services.strategy_definition import StrategyDefinition
 from src.swing.database.db_models.swing_session_model import (
     ACTION_BOUGHT,
@@ -55,6 +80,7 @@ from src.swing.database.db_models.swing_stop_model import (
     EXIT_REGIME,
     EXIT_ROTATION,
 )
+from src.swing.services.gate_policy import GatePolicy, resolve_gate_policy
 from src.swing.services.journal_service import Decision, SessionRecord, SwingJournalService
 from src.swing.services.ranking_service import RankingService, RankingSnapshot
 from src.swing.services.rebalance_planner import (
@@ -82,6 +108,11 @@ class RebalanceOutcome:
     buys_placed: int = 0
     sells_planned: int = 0
     buys_planned: int = 0
+    # Orders an ARMED run decided on and did not place because the market was
+    # not in continuous trading. Counted separately from "planned but not
+    # placed" for any other reason, because the decision was valid and it is
+    # the execution that was not.
+    refused_outside_hours: int = 0
     equity: Optional[Decimal] = None
     notes: List[str] = field(default_factory=list)
 
@@ -97,6 +128,7 @@ class RebalanceOutcome:
             "sellsPlaced": self.sells_placed,
             "buysPlanned": self.buys_planned,
             "buysPlaced": self.buys_placed,
+            "refusedOutsideHours": self.refused_outside_hours,
             "equity": str(self.equity) if self.equity is not None else None,
             "message": self.record.message if self.record else None,
             "notes": list(self.notes),
@@ -115,6 +147,8 @@ class SwingExecutionService:
         stops: StopService,
         parameters: Optional[SwingParameters] = None,
         book=None,
+        policy: Optional[GatePolicy] = None,
+        clock=None,
     ):
         self.session = session
         self.definition = definition
@@ -122,8 +156,20 @@ class SwingExecutionService:
         self.journal = journal
         self.stops = stops
         self.parameters = parameters or SwingParameters.from_definition(definition)
-        self.planner = RebalancePlanner(self.parameters, definition.key)
+        # Which of this strategy's own rules are being enforced, resolved ONCE
+        # when the service is built and carried as a value from here on. Not
+        # re-read mid-run: a rebalance decided half under one policy and half
+        # under another is not one anybody can audit. See `gate_policy.py`.
+        self.policy = policy or resolve_gate_policy(definition, self.parameters)
+        self.planner = RebalancePlanner(
+            self.parameters, definition.key, self.policy
+        )
         self._book = book
+        # What time it is, in IST. Injectable so the market-hours guard below
+        # can be exercised at 22:00 and at 15:20 without waiting for either --
+        # and so the suite does not quietly change behaviour depending on when
+        # it is run. Production passes nothing and gets the wall clock.
+        self._clock = clock
 
     # --- collaborators, reached inside methods (backend/CLAUDE.md section 1) --
     @property
@@ -303,6 +349,10 @@ class SwingExecutionService:
                 return outcome
 
         segment = self._equity_segment()
+        # Resolved ONCE for the whole run, from the policy this service was
+        # built with. Everything below -- the sells, the buys, the journal
+        # stamp and each position's own entry record -- reads this same value.
+        gate = self.planner.gate(snapshot)
         decisions: List[Decision] = []
         holdings = await self._holdings(portfolio_id)
         held_symbols = [holding.symbol for holding in holdings]
@@ -311,6 +361,16 @@ class SwingExecutionService:
         sell_plan = self.planner.plan_sells(snapshot, holdings)
         outcome.sells_planned = len(sell_plan.sells)
         decisions.extend(sell_plan.holds)
+        if sell_plan.exempt:
+            logger.info(
+                "Swing %s: P17's regime exit did NOT reach %s holding(s), "
+                "because they were opened while the gate was not being "
+                "enforced: %s. Each is still subject to the rotation exit and "
+                "its trailing stop, so some of them may be sold below for "
+                "those reasons.",
+                self.definition.key, len(sell_plan.exempt),
+                ", ".join(sell_plan.exempt),
+            )
 
         for intent in sell_plan.sells:
             decision = await self._execute_sell(portfolio_id, intent, outcome)
@@ -390,7 +450,7 @@ class SwingExecutionService:
 
         for intent in buy_plan.buys:
             decision = await self._execute_buy(
-                portfolio_id, intent, session_date, segment, outcome
+                portfolio_id, intent, session_date, segment, outcome, gate
             )
             decisions.append(decision)
 
@@ -406,6 +466,7 @@ class SwingExecutionService:
             message=message,
             started_at=started,
             held_symbols=held_symbols,
+            gate=gate,
         )
         outcome.record = record
 
@@ -423,6 +484,51 @@ class SwingExecutionService:
             "ARMED" if outcome.armed else "NOT ARMED -- nothing was placed",
         )
         return outcome
+
+    # --- may an order be placed for THIS instrument, right now? -------------
+    async def _execution_refusal(self, security_id: str) -> Optional[str]:
+        """Why an order for this instrument cannot be placed now, or None.
+
+        Asked per instrument and immediately before each order. F&O eligibility
+        moves the boundary from 15:30 to 15:15, so one answer for the whole run
+        would be wrong for half the list on any afternoon rebalance.
+        """
+        now = self._now()
+        fno_eligible = await self._is_fno_eligible(security_id)
+        if market_clock.can_execute_continuously(
+            self.definition, fno_eligible, now=now
+        ):
+            return None
+
+        if market_clock.in_closing_auction(self.definition, fno_eligible, now=now):
+            auction = self.definition.market_hours.closing_auction
+            return (
+                f"Not placed at {now.strftime('%H:%M')} IST: continuous cash "
+                f"trading for this F&O-eligible name ended at "
+                f"{auction.continuous_close.strftime('%H:%M')} and the Closing "
+                f"Auction Session runs to "
+                f"{auction.auction_close.strftime('%H:%M')}. An order sent now "
+                f"would land in an auction this simulator does not model. The "
+                f"decision stands; it is not queued -- the next rebalance "
+                f"decides again from fresh bars."
+            )
+        return (
+            f"Not placed at {now.strftime('%H:%M')} IST: outside continuous "
+            f"trading ({self.definition.market_hours.open.strftime('%H:%M')}-"
+            f"{self.definition.market_hours.close.strftime('%H:%M')} IST, "
+            f"Mon-Fri). Filling against the last session's depth book would be "
+            f"a price nobody could have traded at. The decision stands; it is "
+            f"not queued -- the next rebalance decides again from fresh bars."
+        )
+
+    def _now(self):
+        from src.core.time_utils import ist_now
+
+        return self._clock() if self._clock is not None else ist_now()
+
+    async def _is_fno_eligible(self, security_id: str) -> bool:
+        instrument = await self._instruments().get_by_security_id(str(security_id))
+        return bool(instrument is not None and instrument.fno_eligible)
 
     @staticmethod
     def _max_staleness_days() -> int:
@@ -469,6 +575,13 @@ class SwingExecutionService:
             f"sell(s) and {outcome.buys_placed} of {outcome.buys_planned} "
             f"buy(s) placed."
         )
+        if outcome.refused_outside_hours:
+            head = (
+                f"{head} {outcome.refused_outside_hours} order(s) were NOT "
+                f"placed because the market was not in continuous trading; the "
+                f"decision stands and is recorded, and nothing is queued for "
+                f"the next open."
+            )
         if blocked:
             head = f"{head} {blocked}"
         return head[:500]
@@ -488,6 +601,19 @@ class SwingExecutionService:
                 rank=intent.rank,
                 quantity=intent.quantity,
                 reason=intent.reason,
+            )
+
+        refusal = await self._execution_refusal(intent.security_id)
+        if refusal is not None:
+            outcome.refused_outside_hours += 1
+            outcome.notes.append(f"{intent.symbol}: {refusal}")
+            logger.warning("Swing exit for %s not placed. %s", intent.symbol, refusal)
+            return Decision(
+                symbol=intent.symbol,
+                action=ACTION_SKIPPED,
+                rank=intent.rank,
+                quantity=intent.quantity,
+                reason=f"{refusal} ({intent.reason})",
             )
 
         from src.orders.services.order_service import OrderValidationError
@@ -545,6 +671,7 @@ class SwingExecutionService:
         session_date: date,
         segment: str,
         outcome: RebalanceOutcome,
+        gate,
     ) -> Decision:
         if not outcome.armed:
             return Decision(
@@ -555,6 +682,21 @@ class SwingExecutionService:
                 quantity=intent.quantity,
                 reference_price=intent.reference_price,
                 reason=intent.reason,
+            )
+
+        refusal = await self._execution_refusal(intent.security_id)
+        if refusal is not None:
+            outcome.refused_outside_hours += 1
+            outcome.notes.append(f"{intent.symbol}: {refusal}")
+            logger.warning("Swing entry for %s not placed. %s", intent.symbol, refusal)
+            return Decision(
+                symbol=intent.symbol,
+                action=ACTION_SKIPPED,
+                rank=intent.rank,
+                score=intent.score,
+                quantity=intent.quantity,
+                reference_price=intent.reference_price,
+                reason=f"{refusal} ({intent.reason})",
             )
 
         from src.orders.services.order_service import OrderValidationError
@@ -598,13 +740,26 @@ class SwingExecutionService:
                 entry_session=session_date,
                 entry_atr=view.atr14 if view is not None else None,
                 entry_order_id=order.id,
+                # What the regime was doing, and which of its rules were being
+                # obeyed, at the moment this position was opened. Read back per
+                # position by `plan_sells`, which is the whole of "a position
+                # keeps the policy it was opened under".
+                entry_gate_on=gate.gate_on,
+                entry_regime_enforced=gate.enforce_regime,
             )
             stop_note = (
                 f" Chandelier stop set at {stop.stop_price}."
-                if stop is not None
+                if stop.stop_price is not None
                 else " NO STOP SET: ATR14 was not available, so this position is "
-                "unprotected until the next nightly ratchet."
+                "unprotected until the next nightly ratchet computes one."
             )
+            if not gate.enforce_regime:
+                stop_note = (
+                    f"{stop_note} Opened with the regime gate "
+                    f"{'ON' if gate.gate_on else 'OFF'} and NOT enforced; "
+                    f"recorded as such so it can be filtered out of the "
+                    f"numbers later."
+                )
         elif order.filled_quantity == 0:
             stop_note = (
                 " Nothing filled, so no stop was set."
@@ -648,11 +803,27 @@ class SwingExecutionService:
                 # A short cannot exist in this strategy -- it never sells to
                 # open -- and a zero is a closed row that has not been tidied.
                 continue
+            # THE POLICY THIS POSITION WAS OPENED UNDER, from its own stop row,
+            # not the policy in force now. A position opened while the regime
+            # gate was being observed rather than enforced is not liquidated
+            # when enforcement comes back on -- see `plan_sells`.
+            #
+            # A missing row, or a row from before the column existed, reads as
+            # ENFORCED: the exemption has to fail towards the specification's
+            # own behaviour rather than towards carrying a book through a
+            # regime exit on no evidence.
+            stop = await self.stops.stops.get_active(
+                portfolio_id, position.security_id
+            )
+            enforced = True
+            if stop is not None and stop.entry_regime_enforced is not None:
+                enforced = bool(stop.entry_regime_enforced)
             holdings.append(
                 Holding(
                     symbol=position.trading_symbol,
                     security_id=position.security_id,
                     quantity=net,
+                    entry_regime_enforced=enforced,
                 )
             )
         return holdings

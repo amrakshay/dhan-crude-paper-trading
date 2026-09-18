@@ -660,7 +660,35 @@ export default function SwingExplainer({ explain, status }) {
           stretches is the single biggest contributor to the strategy's
           risk profile — more than the stop, more than the stock selection.
         </Alert>
-        {explain.offGate?.enabled ? (
+        {/* WHAT IS ACTUALLY IN FORCE, not what the rule book says.
+            The three enforcement switches are runtime state, so a page that
+            rendered only the configuration file would go on teaching a gate
+            that nothing is obeying. Both are shown: the rule's default, and
+            whether this installation is enforcing it. */}
+        {(explain.policies ?? []).some((policy) => !policy.enforced) ? (
+          <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ my: 1.5 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              On THIS installation, not every rule above is being enforced.
+            </Typography>
+            {explain.policies
+              .filter((policy) => !policy.enforced)
+              .map((policy) => (
+                <Typography key={policy.key} variant="body2">
+                  {policy.label}: NOT enforced (the rule ships{' '}
+                  {policy.default ? 'enforced' : 'not enforced'}).
+                </Typography>
+              ))}
+            <Typography variant="caption" color="text.secondary">
+              The rule itself is unchanged — every number on this page is read
+              from the strategy&apos;s own configuration and none of it is
+              editable from a page. What has been switched off is whether the
+              application acts on it. The gate is still computed and recorded on
+              every session and every trade. Change it under Rules on Strategies
+              &amp; Features.
+            </Typography>
+          </Alert>
+        ) : null}
+        {explain.offGate?.effectiveEnabled ?? explain.offGate?.enabled ? (
           <Alert severity="warning" icon={<WarningAmberIcon />}>
             The V3b off-gate variant is ENABLED on this installation: it holds
             up to {explain.offGate.slots} position(s) while the gate is off.

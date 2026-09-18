@@ -35,7 +35,7 @@ float and stay float; the conversion happens where a price meets a quantity.
 """
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from src.logging_config import get_logger
 from src.swing.database.db_models.swing_session_model import (
@@ -46,6 +46,9 @@ from src.swing.database.db_models.swing_session_model import (
 from src.swing.services.journal_service import Decision
 from src.swing.services.ranking_service import RankingSnapshot
 from src.swing.services.swing_parameters import SwingParameters
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from src.swing.services.gate_policy import GatePolicy
 
 logger = get_logger("swing.rebalance")
 
@@ -70,7 +73,7 @@ VARIANT_OFF_GATE = "v3b-off-gate"
 
 @dataclass(frozen=True)
 class EffectiveGate:
-    """What the regime gate means for THIS session, after V3b is applied.
+    """What the regime gate means for THIS session, after the policy is applied.
 
     The baseline and the V3b off-gate variant disagree about three things once
     the index is below its 200-day SMA, and every one of them has to be
@@ -90,6 +93,10 @@ class EffectiveGate:
     V3b's individual trades are good (61% win, mean +7.81%) and its total is
     still lower, because capital committed to a bear rally is not available at
     the regime flip. Per-trade edge is not portfolio edge.
+
+    `enforced` records which of the three the answer came from, so a session
+    and a trade can say afterwards which rules were being obeyed when it was
+    taken. See `gate_policy.py`.
     """
 
     variant: str
@@ -98,30 +105,88 @@ class EffectiveGate:
     entries_allowed: bool
     slots: Optional[int]
     momentum_floor: float
+    # The policy this was resolved under. Defaulted so that every existing
+    # construction of an EffectiveGate in a test still reads as the
+    # specification's own behaviour.
+    enforce_regime: bool = True
+    enforce_entry_return: bool = True
 
     @property
     def is_off_gate_variant(self) -> bool:
         return self.variant == VARIANT_OFF_GATE
 
+    @property
+    def relaxed(self) -> bool:
+        return not self.enforce_regime or not self.enforce_entry_return
+
 
 def effective_gate(
-    snapshot: RankingSnapshot, parameters: SwingParameters
+    snapshot: RankingSnapshot,
+    parameters: SwingParameters,
+    policy: Optional["GatePolicy"] = None,
 ) -> EffectiveGate:
-    """Resolve the baseline / V3b disagreement once, for every caller."""
+    """Resolve the gate, V3b and the enforcement policy once, for every caller.
+
+    PURE. `policy` is a plain frozen value rather than something read from the
+    registry in here, because the tests for this function are the whole safety
+    net for trading through the gate and they must not need a process-wide
+    singleton. Omitting it means the YAML's defaults, i.e. the specification's
+    own behaviour.
+
+                          | liquidates | entries          | slots   | floor
+      gate on             | no         | P9, if enforced  | breadth | P6
+      gate off, enforced  | YES        | no               | 0       | P6
+      gate off, V3b       | no         | V3b's own answer | V3b's   | V3b's
+      gate off, relaxed   | no         | P9, if enforced  | breadth | P6
+
+    The last row is the deliberate divergence. Note what it does NOT change:
+    breadth still sizes the book, P6 still filters, the rotation exit still
+    fires at rank > 15 and the chandelier stop is untouched. And note that P9
+    is an INDEPENDENT switch -- relaxing the regime gate alone leaves the
+    63-session filter blocking every new entry, which on 2026-09-17's -3.71%
+    would have meant no trades at all.
+    """
+    from src.swing.services.gate_policy import default_policy
+
     regime = snapshot.regime
     off_gate = parameters.off_gate
+    policy = policy or default_policy(parameters)
+
+    def entries_under_p9() -> bool:
+        """P9, if it is being enforced."""
+        if not policy.enforce_entry_return:
+            return True
+        return bool(regime.entries_allowed)
 
     if regime.gate_on:
         return EffectiveGate(
             variant=VARIANT_BASELINE,
             gate_on=True,
             liquidates=False,
-            entries_allowed=regime.entries_allowed,
+            entries_allowed=entries_under_p9(),
             slots=snapshot.slots,
             momentum_floor=parameters.momentum_floor,
+            enforce_regime=policy.enforce_regime,
+            enforce_entry_return=policy.enforce_entry_return,
         )
 
-    if not off_gate.enabled:
+    if not policy.enforce_regime:
+        # The gate is OFF and is not being obeyed. It was still computed and is
+        # still recorded -- on the session, on every decision row and on every
+        # position opened here -- which is the entire reason this is an
+        # acceptable thing to switch on.
+        return EffectiveGate(
+            variant=VARIANT_BASELINE,
+            gate_on=False,
+            liquidates=False,
+            entries_allowed=entries_under_p9(),
+            slots=snapshot.slots,
+            momentum_floor=parameters.momentum_floor,
+            enforce_regime=False,
+            enforce_entry_return=policy.enforce_entry_return,
+        )
+
+    if not policy.off_gate_enabled:
         return EffectiveGate(
             variant=VARIANT_BASELINE,
             gate_on=False,
@@ -129,6 +194,8 @@ def effective_gate(
             entries_allowed=False,
             slots=0,
             momentum_floor=parameters.momentum_floor,
+            enforce_regime=True,
+            enforce_entry_return=policy.enforce_entry_return,
         )
 
     return EffectiveGate(
@@ -136,14 +203,20 @@ def effective_gate(
         gate_on=False,
         liquidates=False,
         # V3b drops the 63-session entry filter by default; `require_entry_return`
-        # puts it back for anyone who wants the variant without that part.
+        # puts it back for anyone who wants the variant without that part. The
+        # P9 policy switch can only RELAX that further, never tighten it: a
+        # variant that was measured without the filter is not improved by an
+        # operator adding one back through a different control.
         entries_allowed=(
-            True if not off_gate.require_entry_return
+            True
+            if not (off_gate.require_entry_return and policy.enforce_entry_return)
             else bool(regime.return_over_window is not None
                       and regime.return_over_window > parameters.regime.entry_return_minimum)
         ),
         slots=off_gate.slots,
         momentum_floor=off_gate.momentum_floor,
+        enforce_regime=True,
+        enforce_entry_return=policy.enforce_entry_return,
     )
 
 
@@ -153,11 +226,24 @@ class Holding:
 
     `quantity` is the whole position. The rotation never sells part of one --
     a name is in the book or it is not.
+
+    `entry_regime_enforced` is THE POLICY THIS POSITION WAS OPENED UNDER, read
+    from its own `swing_stops` row, not the policy in force now. A position
+    opened while the regime gate was being observed rather than enforced keeps
+    that: turning enforcement back on stops new entries, it does not liquidate
+    a book that was opened under the other rule. Those positions leave by
+    rotation (rank > 15) or by their trailing stop like any other.
+
+    It defaults to True -- i.e. NOT exempt -- so a position whose policy cannot
+    be established is liquidated by P17 exactly as the specification says. An
+    exemption that failed open would quietly carry a book through a regime exit
+    on no evidence at all, which is the wrong direction to be wrong in.
     """
 
     symbol: str
     security_id: str
     quantity: int
+    entry_regime_enforced: bool = True
 
 
 @dataclass(frozen=True)
@@ -186,6 +272,11 @@ class BuyIntent:
 class SellPlan:
     sells: List[SellIntent] = field(default_factory=list)
     holds: List[Decision] = field(default_factory=list)
+    # Holdings P17's liquidation did not REACH, because they were opened while
+    # the regime gate was not being enforced. Not the same as "kept": each one
+    # still goes through the rotation exit below, so a name can be here and in
+    # `sells` at once.
+    exempt: List[str] = field(default_factory=list)
 
     @property
     def symbols(self) -> List[str]:
@@ -210,9 +301,21 @@ class BuyPlan:
 class RebalancePlanner:
     """Turns a snapshot plus a book plus money into two lists and the reasons."""
 
-    def __init__(self, parameters: SwingParameters, strategy_key: str):
+    def __init__(
+        self,
+        parameters: SwingParameters,
+        strategy_key: str,
+        policy: Optional["GatePolicy"] = None,
+    ):
         self.parameters = parameters
         self.strategy_key = strategy_key
+        # Read ONCE, by whoever built this planner, and carried as a value. Not
+        # re-read per call and never re-read mid-run: a decision taken half
+        # under one policy and half under another is not one anybody can audit.
+        self.policy = policy
+
+    def gate(self, snapshot: RankingSnapshot) -> "EffectiveGate":
+        return effective_gate(snapshot, self.parameters, self.policy)
 
     # --- sells -------------------------------------------------------------
     def plan_sells(
@@ -225,13 +328,13 @@ class RebalancePlanner:
         this sold".
         """
         parameters = self.parameters
-        gate = effective_gate(snapshot, parameters)
+        gate = self.gate(snapshot)
         plan = SellPlan()
 
         for holding in sorted(holdings, key=lambda one: one.symbol):
             rank = snapshot.rank_of(holding.symbol)
 
-            if gate.liquidates:
+            if gate.liquidates and holding.entry_regime_enforced:
                 # P17. Every holding, regardless of its rank: the gate is the
                 # kill switch and it does not negotiate with a good position.
                 plan.sells.append(
@@ -245,6 +348,15 @@ class RebalancePlanner:
                     )
                 )
                 continue
+
+            if gate.liquidates:
+                # Opened while the gate was being OBSERVED rather than
+                # enforced, so P17 does not reach it. It is not held for ever:
+                # it falls through to the rotation exit and its trailing stop
+                # below, exactly like every other holding. Recorded here so the
+                # reason on the row names the policy rather than leaving a
+                # position that "should have been sold" unexplained.
+                plan.exempt.append(holding.symbol)
 
             if rank is None:
                 plan.sells.append(
@@ -278,16 +390,25 @@ class RebalancePlanner:
                 )
                 continue
 
+            held_reason = (
+                f"Held: rank {rank} is within {parameters.rotation_exit_rank}."
+            )
+            if gate.liquidates:
+                held_reason = (
+                    f"Held through a regime exit: this position was opened "
+                    f"while the regime gate was NOT being enforced, and it "
+                    f"keeps the policy it was opened under. P17 does not reach "
+                    f"it; it leaves by rotation (rank > "
+                    f"{parameters.rotation_exit_rank}) or by its trailing stop. "
+                    f"Rank {rank}."
+                )
             plan.holds.append(
                 Decision(
                     symbol=holding.symbol,
                     action=ACTION_HELD,
                     rank=rank,
                     quantity=holding.quantity,
-                    reason=(
-                        f"Held: rank {rank} is within "
-                        f"{parameters.rotation_exit_rank}."
-                    ),
+                    reason=held_reason,
                 )
             )
 
@@ -326,7 +447,7 @@ class RebalancePlanner:
         is the explanation to record. Nothing is sized in that case.
         """
         parameters = self.parameters
-        gate = effective_gate(snapshot, parameters)
+        gate = self.gate(snapshot)
         plan = BuyPlan(equity=equity)
         held = {holding.symbol for holding in holdings}
 
@@ -532,7 +653,12 @@ class RebalancePlanner:
         parameters = self.parameters
         regime = snapshot.regime
 
-        if not gate.gate_on and not gate.is_off_gate_variant:
+        # `liquidates` rather than "the gate is off": with the gate off and
+        # ENFORCED the book goes to cash, so entries are obviously blocked --
+        # but with the gate off and NOT enforced the ordinary rules apply and
+        # this branch must not swallow the session. The gate state is still
+        # recorded, on the session and on every decision row.
+        if gate.liquidates:
             shortfall = regime.shortfall_percent
             gap = f", needs {shortfall:.1f}% to reclaim it" if shortfall is not None else ""
             close = "unknown" if regime.close is None else f"{regime.close:,.1f}"

@@ -165,6 +165,15 @@ are the ones that only matter once you are editing the code.
   chart-trading or portfolios at module scope -- the app will not start. Those
   imports go inside the functions that need them, the same way `auth` <->
   `users` is handled (section 10).
+- **`feature_toggles` has four scopes**, not three: `STRATEGY`, `CAPABILITY`,
+  `AUTOMATION` and, since 2026-09-18, `POLICY` (`toggle_key` is
+  `<strategy_key>/<policy>`). The registry stores a policy as an OVERRIDE map
+  and deliberately does not learn what any of them mean -- `policy_override`
+  returns `None` when nobody has touched a switch, which is not `False`, and the
+  strategy's own module resolves it against the YAML default
+  (`src/swing/services/gate_policy.py`). A row naming an unknown strategy, an
+  unknown policy, or a module with no `automation` block is ignored on load, the
+  same property `MANAGED_KEYS` gives the settings table.
 - **`get_strategy_registry()` is synchronous and cached.** It is read from code
   that cannot await (the feed's target resolution, `expected_task_names`), which
   is why enabled state is held in memory and refreshed by

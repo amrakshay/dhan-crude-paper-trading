@@ -289,6 +289,33 @@ regime:
   entry_return_sessions: 63
   entry_return_minimum: 0.0
 
+  # -------------------------------------------------------------------------
+  # WHETHER THOSE TWO RULES ARE OBEYED. Read the distinction carefully, because
+  # it is what keeps root CLAUDE.md section 3a true.
+  #
+  # The numbers above ARE the rule: 200 sessions, 63 sessions, above zero. They
+  # were chosen in-sample against the specification's own table and they are not
+  # editable from any page. The two keys below are not parameters of the rule --
+  # they say whether the application ENFORCES it, which is the same kind of fact
+  # as `enabled_by_default` and `automation.armed_by_default`: a DEFAULT here,
+  # overlaid at runtime by a row in `feature_toggles` under the POLICY scope and
+  # flipped from the Strategies & Features page.
+  #
+  # `enforcement: observe` does NOT stop the gate being computed and does not
+  # stop it being recorded -- every session still stores the index close, its
+  # SMA and the gate's own boolean, and every decision row stores the policy it
+  # was taken under. What it stops is the gate ACTING: no liquidation when the
+  # gate flips off (P17), and entries allowed below the SMA (P8).
+  #
+  # Both ship ENFORCED, which is the specification's behaviour, because
+  # section 11 of the specification tested thirteen ways of trading while the
+  # gate is off and not one beat holding cash. A fresh checkout therefore obeys
+  # the rule as written; relaxing it is a deliberate act with a confirmation
+  # dialog in front of it.
+  # -------------------------------------------------------------------------
+  enforcement: "enforce"              # enforce | observe -- P8 and P17
+  enforce_entry_return: true          # P9
+
 schedule:
   # P18 -- the specification's backtest rebalances on the first session of each
   # week; `swing_live.py` rebalances daily, and the owner chose daily

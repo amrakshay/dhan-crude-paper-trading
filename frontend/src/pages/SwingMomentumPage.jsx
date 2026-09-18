@@ -31,7 +31,7 @@ import { swingApi } from '../api/swing';
 import SwingExplainer from '../components/SwingExplainer';
 import { useAuth } from '../auth/AuthContext';
 import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
-import { formatPrice, formatQty } from '../utils/format';
+import { formatCountdownLong, formatPrice, formatQty } from '../utils/format';
 
 const STRATEGY = 'nse-swing-momentum';
 
@@ -95,6 +95,25 @@ function Figure({ label, value, hint, tone }) {
   );
 }
 
+/**
+ * Before the first poll lands we know NOTHING — which is not the same as "off",
+ * "closed" or "zero". Rendering the not-yet-loaded state as a switched-off
+ * strategy in a closed market is exactly the failure §3 is about: it is a
+ * confident answer to a question nobody has asked the server yet.
+ */
+function NotLoadedYet({ children = 'Loading…' }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Stack direction="row" spacing={1.5} alignItems="center">
+        <CircularProgress size={16} />
+        <Typography variant="body2" color="text.secondary">
+          {children}
+        </Typography>
+      </Stack>
+    </Paper>
+  );
+}
+
 function percent(value, digits = 1) {
   if (value === null || value === undefined) return null;
   return `${(Number(value) * 100).toFixed(digits)}%`;
@@ -105,6 +124,9 @@ function GateCard({ status }) {
   const regime = snapshot?.regime;
   const gate = snapshot?.effectiveGate;
 
+  if (!status) {
+    return <NotLoadedYet>Reading the regime, the breadth and the slots…</NotLoadedYet>;
+  }
   if (!status?.enabled) {
     return (
       <Alert severity="info">
@@ -133,9 +155,20 @@ function GateCard({ status }) {
         flexWrap="wrap"
         gap={1}
       >
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          {gateOn ? 'Regime gate ON' : 'Regime gate OFF'}
-        </Typography>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
+            {gateOn ? 'Regime gate ON' : 'Regime gate OFF'}
+          </Typography>
+          {/* A gate that looks on while nothing acts on it is the one thing
+              this card must never show. */}
+          {gate?.enforceRegime === false ? (
+            <Chip
+              size="small"
+              label="NOT ENFORCED"
+              sx={{ bgcolor: 'warning.main', color: 'warning.contrastText', fontWeight: 600 }}
+            />
+          ) : null}
+        </Stack>
         <Typography variant="caption" color="text.secondary">
           session {snapshot.asOf}
         </Typography>
@@ -210,7 +243,11 @@ function GateCard({ status }) {
               gate?.entriesAllowed ? 'allowed' : 'blocked'
             }
             tone={gate?.entriesAllowed ? 'up' : 'down'}
-            hint="The 63-session index return has to be above zero for a NEW entry. It never forces an exit."
+            hint={
+              gate?.enforceEntryReturn === false
+                ? 'The 63-session entry filter is NOT being enforced, so it blocks nothing. It never forced an exit either way.'
+                : 'The 63-session index return has to be above zero for a NEW entry. It never forces an exit.'
+            }
           />
         </Grid>
         <Grid item xs={6} sm={4} md={2}>
@@ -221,6 +258,39 @@ function GateCard({ status }) {
           />
         </Grid>
       </Grid>
+
+      {gate?.relaxed ? (
+        <Alert severity="warning" sx={{ mt: 2 }} icon={<WarningAmberIcon />}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {gate.enforceRegime === false && gate.enforceEntryReturn === false
+              ? 'The regime gate and the 63-session entry filter are NOT being enforced.'
+              : gate.enforceRegime === false
+                ? 'The regime gate is NOT being enforced.'
+                : 'The 63-session entry filter is NOT being enforced.'}
+          </Typography>
+          <Typography variant="body2">
+            The gate is still computed and still recorded — on this session, on
+            every decision row and on every position opened under it — so these
+            trades can be filtered out of the numbers later. Nothing else
+            changes: breadth still sizes the book, the momentum floor still
+            applies, the rotation exit still fires and the trailing stop is
+            untouched.
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            This is a deliberate divergence from the specification, whose own
+            research tested thirteen ways of trading while the gate is off and
+            found none that beat holding cash. Switch it back on under Rules on
+            Strategies &amp; Features — that stops new entries and does NOT sell
+            what is already open.
+          </Typography>
+        </Alert>
+      ) : null}
+
+      {status?.policyContradiction ? (
+        <Alert severity="error" sx={{ mt: 2 }} icon={<WarningAmberIcon />}>
+          {status.policyContradiction}
+        </Alert>
+      ) : null}
 
       {gate?.variant === 'v3b-off-gate' ? (
         <Alert severity="warning" sx={{ mt: 2 }} icon={<WarningAmberIcon />}>
@@ -237,7 +307,305 @@ function GateCard({ status }) {
   );
 }
 
+/**
+ * WHAT THE STRATEGY IS DOING RIGHT NOW.
+ *
+ * The rest of this page is a record of what it DECIDED. This is the other
+ * question — what it is doing, what it will do next and when, and what it last
+ * did — and it is the one an operator actually has at 09:16.
+ *
+ * The countdown ticks LOCALLY off the absolute timestamp the server sends
+ * (the Settings-page trick, frontend/CLAUDE.md §4) rather than re-fetching
+ * every second, so a stalled poll shows up as a clock that keeps running past
+ * a run that never happened.
+ *
+ * §3's honesty rules apply hard here:
+ *  - a countdown that cannot be computed says so; it never shows 00:00;
+ *  - "the scheduler is not running", "idle" and "watching nothing" are three
+ *    different states and read differently;
+ *  - a strategy that is enabled but NOT ARMED says, here, that it will decide
+ *    and place nothing.
+ */
+function ActivityStrip({ status }) {
+  // Hooks must run unconditionally, so the "not loaded" branch lives in the
+  // body rather than in front of it.
+  const theme = useTheme();
+  const scheduler = status?.scheduler ?? {};
+  const monitor = status?.stopMonitor ?? {};
+  const schedule = (scheduler.schedules ?? []).find(
+    (one) => one.strategyKey === status?.strategyKey,
+  );
+  const last = (scheduler.recent ?? [])[0];
+
+  // One local tick a second, so the countdowns move between polls.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const countdown = (iso) => {
+    if (!iso) return null;
+    const target = Date.parse(iso);
+    if (Number.isNaN(target)) return null;
+    return formatCountdownLong((target - now) / 1000);
+  };
+
+  const nextRebalance = countdown(schedule?.nextRebalanceAtIst);
+  const nextNightly = countdown(schedule?.nextNightlyAtIst);
+
+  if (!status) {
+    return (
+      <NotLoadedYet>
+        Reading what the strategy is doing…
+      </NotLoadedYet>
+    );
+  }
+
+  const activity = scheduler.running === false
+    ? 'the scheduler is not running'
+    : scheduler.activity ?? 'idle — waiting for the next scheduled run';
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Stack
+        direction="row"
+        spacing={2}
+        alignItems="center"
+        justifyContent="space-between"
+        flexWrap="wrap"
+        useFlexGap
+      >
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <Chip
+            size="small"
+            label={status?.marketOpen ? 'market OPEN' : 'market closed'}
+            sx={{
+              bgcolor: status?.marketOpen ? theme.market.upSoft : 'action.selected',
+              color: status?.marketOpen ? theme.market.up : 'text.secondary',
+              fontWeight: 600,
+            }}
+          />
+          <Typography variant="body2" className="numeric" color="text.secondary">
+            {scheduler.nowIst
+              ? `${new Date(scheduler.nowIst).toLocaleTimeString()} IST`
+              : 'clock unavailable'}
+          </Typography>
+          {schedule ? (
+            <Typography variant="caption" color="text.disabled">
+              trades {schedule.marketOpensAtIst}–{schedule.marketClosesAtIst} IST
+            </Typography>
+          ) : null}
+        </Stack>
+
+        <Stack direction="row" spacing={1} alignItems="center">
+          {scheduler.activity ? <CircularProgress size={14} /> : null}
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            {activity}
+          </Typography>
+        </Stack>
+      </Stack>
+
+      {/* An enabled strategy that is not armed decides and places nothing.
+          Said here, in the strip, because this is the panel somebody looks at
+          when they are wondering why no order appeared. */}
+      {status?.enabled && !status?.armed ? (
+        <Alert severity="info" icon={<InfoOutlinedIcon />} sx={{ mt: 2 }}>
+          NOT ARMED. It will compute, decide and write a decision record at every
+          scheduled run, and it will place no order at all.
+        </Alert>
+      ) : null}
+      {!status?.enabled ? (
+        <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mt: 2 }}>
+          Switched OFF. Nothing is scheduled, nothing is decided and no trailing
+          stop is recomputed. The record below is unchanged.
+        </Alert>
+      ) : null}
+
+      <Divider sx={{ my: 2 }} />
+
+      <Grid container spacing={2}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Figure
+            label="Next rebalance"
+            value={
+              nextRebalance
+                ? `in ${nextRebalance}`
+                : schedule
+                  ? 'not scheduled'
+                  : '—'
+            }
+            hint={
+              schedule?.nextRebalanceAtIst
+                ? `${new Date(schedule.nextRebalanceAtIst).toLocaleString()} IST. Weekday only — this application has no holiday list, because the trading calendar is the index's own bar dates. On an exchange holiday the countdown runs down and the run records a skipped session.`
+                : 'No next run could be computed.'
+            }
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Figure
+            label="Next nightly"
+            value={nextNightly ? `in ${nextNightly}` : schedule ? 'not scheduled' : '—'}
+            hint={
+              schedule?.nextNightlyAtIst
+                ? `${new Date(schedule.nextNightlyAtIst).toLocaleString()} IST. It refreshes the daily bars, decides, ratchets every trailing stop and journals. It places no order.`
+                : 'No next run could be computed.'
+            }
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Figure
+            label="Last run"
+            value={
+              last
+                ? `${last.kind.toLowerCase()} ${last.ok ? 'ok' : 'FAILED'}`
+                : 'none this session'
+            }
+            tone={last && !last.ok ? 'down' : undefined}
+            hint={
+              last
+                ? `${new Date(last.atIst).toLocaleString()} — ${last.detail || 'no detail'}`
+                : 'This process has run no scheduled job since it started. That is not the same as none having happened: the record below is the history.'
+            }
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Figure
+            label="Stops watched"
+            value={
+              monitor.enabled === false
+                ? 'monitor off'
+                : monitor.running === false
+                  ? 'not running'
+                  : monitor.watching === null || monitor.watching === undefined
+                    ? 'no pass yet'
+                    : monitor.watching
+            }
+            tone={
+              monitor.enabled === false || monitor.running === false
+                ? 'down'
+                : undefined
+            }
+            hint="Active chandelier stops with a level to compare against. A monitor that is not running, one that has not completed a pass, and one watching nothing are three different states."
+          />
+        </Grid>
+      </Grid>
+
+      <Stack
+        direction="row"
+        spacing={2}
+        sx={{ mt: 2 }}
+        flexWrap="wrap"
+        useFlexGap
+      >
+        <Typography variant="caption" color="text.secondary">
+          Nearest stop:{' '}
+          {monitor.nearestPercent === null || monitor.nearestPercent === undefined ? (
+            <Missing hint="Nothing measurable: no stop is being watched, or no watched position has a live mark. A book with no marks does not have a nearest stop of 0%." />
+          ) : (
+            <span className="numeric">
+              {monitor.nearestSymbol} {monitor.nearestPercent.toFixed(2)}% above its
+              level
+            </span>
+          )}
+        </Typography>
+        {monitor.unprotected ? (
+          <Typography variant="caption" color="warning.main">
+            {monitor.unprotected} position(s) have no stop yet — ATR14 was not
+            available at entry, and the next nightly ratchet sets one.
+          </Typography>
+        ) : null}
+        {monitor.deferredToAuction ? (
+          <Typography variant="caption" color="warning.main">
+            {monitor.deferredToAuction} exit(s) deferred to the next open by the
+            closing auction.
+          </Typography>
+        ) : null}
+        {monitor.lastPassAtIst ? (
+          <Typography variant="caption" color="text.disabled">
+            last pass {new Date(monitor.lastPassAtIst).toLocaleTimeString()}
+          </Typography>
+        ) : (
+          <Typography variant="caption" color="text.disabled">
+            the monitor has completed no pass since this process started
+          </Typography>
+        )}
+        {monitor.error ? (
+          <Typography variant="caption" color="error.main">
+            monitor error: {monitor.error}
+          </Typography>
+        ) : null}
+      </Stack>
+    </Paper>
+  );
+}
+
+/**
+ * The last twenty scheduled jobs, newest first.
+ *
+ * A STATUS DICT, not a second journal: it lives in the process and starts empty
+ * after a restart. The real record is `swing_sessions`, below.
+ */
+function ActivityLog({ status }) {
+  const rows = status?.scheduler?.recent ?? [];
+  if (!rows.length) {
+    return (
+      <Alert severity="info">
+        No scheduled job has run since this process started. That is not the same
+        as none having happened — this list lives in memory, and the decision
+        history below is the record.
+      </Alert>
+    );
+  }
+  return (
+    <TableContainer component={Paper} variant="outlined">
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>At (IST)</TableCell>
+            <TableCell>Job</TableCell>
+            <TableCell>Result</TableCell>
+            <TableCell>Detail</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((run, index) => (
+            <TableRow key={`${run.kind}-${run.atIst}-${index}`}>
+              <TableCell className="numeric">
+                {new Date(run.atIst).toLocaleString()}
+              </TableCell>
+              <TableCell>{run.kind}</TableCell>
+              <TableCell>
+                <Chip
+                  size="small"
+                  label={run.ok ? 'ok' : 'FAILED'}
+                  sx={{
+                    bgcolor: run.ok ? 'action.selected' : 'error.main',
+                    color: run.ok ? 'text.secondary' : 'error.contrastText',
+                  }}
+                />
+              </TableCell>
+              <TableCell>
+                <Typography variant="caption" color="text.secondary">
+                  {run.detail || '—'}
+                </Typography>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
 function ArmingCard({ status }) {
+  if (!status) {
+    return <NotLoadedYet>Reading the schedule…</NotLoadedYet>;
+  }
+  return <ArmingCardBody status={status} />;
+}
+
+function ArmingCardBody({ status }) {
   const scheduler = status?.scheduler ?? {};
   const schedule = (scheduler.schedules ?? []).find(
     (one) => one.strategyKey === status?.strategyKey,
@@ -836,6 +1204,7 @@ export default function SwingMomentumPage() {
       ) : null}
       {loading && !status ? <CircularProgress size={22} /> : null}
 
+      <ActivityStrip status={status} />
       <ArmingCard status={status} />
       <GateCard status={status} />
 
@@ -902,6 +1271,20 @@ export default function SwingMomentumPage() {
           ) : (
             <Alert severity="info">Pick a portfolio to see its performance.</Alert>
           )}
+        </Box>
+      </Box>
+
+      <Box>
+        <Typography variant="overline" color="text.secondary">
+          Recent scheduled runs
+        </Typography>
+        <Typography variant="caption" color="text.secondary" display="block">
+          What the clock has done since this process started. It lives in
+          memory, not in the database — the record is the decision history
+          below.
+        </Typography>
+        <Box sx={{ mt: 1 }}>
+          <ActivityLog status={status} />
         </Box>
       </Box>
 

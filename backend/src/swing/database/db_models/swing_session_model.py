@@ -151,6 +151,30 @@ class SwingDecision(TimestampedModel):
     # "Not entered: the 63-day filter blocks new entries".
     reason = Column(String(500), nullable=False)
 
+    # --- the regime, and the policy this decision was taken under ----------
+    #
+    # `orders -> swing_decisions -> swing_sessions` already answers "was the
+    # gate off when this trade was opened?", and the journal is append-only so
+    # that join cannot go stale. These columns are not there because the data
+    # was missing -- they are there because `swing_decisions` is the row that is
+    # ALWAYS written, for every action and every non-action, which makes it the
+    # reliable carrier, and because a two-hop join is not something anybody
+    # writes by hand when they want to split a performance report in two.
+    #
+    # Nullable throughout: every row written before 2026-09-18 has no policy
+    # recorded, and a NULL saying "not recorded" is the honest answer. It is not
+    # false and it is not "enforced".
+    regime_gate_on = Column(Boolean, nullable=True)
+    regime_index_close = Column(Money, nullable=True)
+    regime_index_sma = Column(Money, nullable=True)
+    regime_index_return = Column(Money, nullable=True)
+    # Whether P8/P17 and P9 were being ENFORCED when this was decided -- not
+    # what they are. See src/swing/services/gate_policy.py.
+    regime_enforced = Column(Boolean, nullable=True)
+    entry_return_enforced = Column(Boolean, nullable=True)
+    # baseline | v3b-off-gate
+    gate_variant = Column(String(16), nullable=True)
+
     __table_args__ = (
         Index("ix_swing_decisions_session_symbol", "session_id", "symbol"),
     )

@@ -6,7 +6,7 @@ know which strategies exist to label a row. TOGGLING is admin-only, gated with
 """
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import SessionPrincipal, require_admin, require_session
@@ -15,6 +15,8 @@ from src.database.session import get_async_session
 from src.strategies.api_schemas.strategy_schemas import (
     ArmRequest,
     ArmResponse,
+    PolicyRequest,
+    PolicyToggleResponse,
     StrategyListResponse,
     ToggleRequest,
     ToggleResponse,
@@ -105,6 +107,51 @@ async def set_strategy_armed(
     """
     return await controller.set_strategy_armed(
         strategy_key, request.armed, user_id=principal.user_id
+    )
+
+
+@strategy_router.get("/{strategy_key}/policy-warnings/{policy}")
+async def policy_warnings(
+    strategy_key: str,
+    policy: str,
+    enforced: bool = Query(...),
+    controller: StrategyController = Depends(get_strategy_controller),
+    _: SessionPrincipal = Depends(require_admin),
+) -> Dict[str, Any]:
+    """What flipping this switch would do, and what it would NOT do."""
+    return await controller.policy_warnings(strategy_key, policy, enforced)
+
+
+@strategy_router.put(
+    "/{strategy_key}/policies/{policy}", response_model=PolicyToggleResponse
+)
+async def set_strategy_policy(
+    strategy_key: str,
+    policy: str,
+    request: PolicyRequest,
+    controller: StrategyController = Depends(get_strategy_controller),
+    principal: SessionPrincipal = Depends(require_admin),
+) -> PolicyToggleResponse:
+    """Enforce, or stop enforcing, one of a strategy's own rules.
+
+    Admin-only, like arming, and for the same reason: switching off the
+    enforcement of a regime gate is a decision about whether software may spend
+    money in a market the rule says to stay out of.
+
+    WHAT THIS DOES NOT DO. It does not edit a parameter. P1-P19 -- the
+    lookbacks, the thresholds, the momentum floor, the ATR multiple, the rank
+    cut-off -- live in the strategy's YAML and are editable from nowhere, so
+    that the file stays greppable against the specification's own table (root
+    `CLAUDE.md` section 3a). What this endpoint changes is whether a rule is
+    OBEYED, which is runtime state exactly like enabled and armed.
+
+    It applies at the NEXT decision. A run in flight keeps the policy it
+    started under, and re-enforcing the regime gate does NOT sell an open book:
+    every position keeps the policy it was opened under and leaves by rotation
+    or by its trailing stop.
+    """
+    return await controller.set_strategy_policy(
+        strategy_key, policy, request.enforced, user_id=principal.user_id
     )
 
 

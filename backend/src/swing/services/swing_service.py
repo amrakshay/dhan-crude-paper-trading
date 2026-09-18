@@ -43,6 +43,11 @@ from src.swing.database.db_operations.swing_session_repository import (
     SwingSessionRepository,
 )
 from src.swing.database.db_operations.swing_stop_repository import SwingStopRepository
+from src.swing.services.gate_policy import (
+    GatePolicyError,
+    describe_policies,
+    resolve_gate_policy,
+)
 from src.swing.services.ranking_service import RankingService
 from src.swing.services.rebalance_planner import effective_gate
 from src.swing.services.stop_service import StopService
@@ -128,6 +133,7 @@ class SwingService:
         """The headline: what the rule says right now, and whether it may act."""
         from src.strategies.services.strategy_registry import get_strategy_registry
         from src.swing.services.scheduler import get_swing_scheduler
+        from src.swing.services.stop_monitor import get_swing_stop_monitor
 
         registry = get_strategy_registry()
         enabled = registry.is_enabled(self.definition.key)
@@ -137,12 +143,25 @@ class SwingService:
             self.definition.key, RUN_REBALANCE
         )
 
+        # What is actually being ENFORCED, not what the YAML says. A page that
+        # showed the file would teach a gate that is not being obeyed; one that
+        # showed only the effective value would hide that a switch was moved.
+        # `describe_policies` returns both, per switch.
+        policies = describe_policies(self.definition, self.parameters)
+        try:
+            policy = resolve_gate_policy(self.definition, self.parameters)
+        except GatePolicyError:
+            # Two switches that contradict each other. The page renders the
+            # refusal from `policies['contradiction']`; the snapshot below
+            # falls back to the YAML so the rest of it still reads.
+            policy = None
+
         snapshot_payload: Optional[Dict[str, Any]] = None
         snapshot_error: Optional[str] = None
         if enabled:
             try:
                 snapshot = await self._ranking_service().session_snapshot()
-                gate = effective_gate(snapshot, self.parameters)
+                gate = effective_gate(snapshot, self.parameters, policy)
                 snapshot_payload = snapshot.as_dict(top=15)
                 snapshot_payload["effectiveGate"] = {
                     "variant": gate.variant,
@@ -153,6 +172,12 @@ class SwingService:
                     # none" are different answers.
                     "slots": gate.slots,
                     "momentumFloor": gate.momentum_floor,
+                    # WHICH RULES ARE BEING OBEYED. Surfaced beside the gate's
+                    # own boolean so the page cannot show a gate that looks on
+                    # while nothing is acting on it.
+                    "enforceRegime": gate.enforce_regime,
+                    "enforceEntryReturn": gate.enforce_entry_return,
+                    "relaxed": gate.relaxed,
                 }
             except Exception as error:  # noqa: BLE001 - the page must still render
                 snapshot_error = str(error)
@@ -183,6 +208,9 @@ class SwingService:
             "latestNightly": self._session_payload(latest_nightly),
             "latestRebalance": self._session_payload(latest_rebalance),
             "scheduler": get_swing_scheduler().status(),
+            "stopMonitor": get_swing_stop_monitor().status(),
+            "policies": policies["policies"],
+            "policyContradiction": policies["contradiction"],
             "balance": balance,
             # Said on every payload, deliberately. The specification's 19.9% is
             # a survivorship-biased, in-sample backtest of a rule that has never
@@ -235,6 +263,8 @@ class SwingService:
         schedule = parameters.schedule
         off_gate = parameters.off_gate
         universe = self.definition.universe
+        policies = describe_policies(self.definition, parameters)
+        effective = {row["key"]: row["enforced"] for row in policies["policies"]}
 
         return {
             "strategyKey": self.definition.key,
@@ -269,11 +299,25 @@ class SwingService:
                 "maxLotsPerOrder": self.definition.automation.max_lots_per_order,
             },
             "offGate": {
+                # The YAML's own value, and what is actually in force. Both,
+                # always: the three enforcement switches are runtime state now,
+                # so a page reporting only the file would teach a rule that is
+                # not being obeyed. `policies` below carries the same pairing
+                # for all three.
                 "enabled": off_gate.enabled,
+                "effectiveEnabled": effective.get("off_gate.enabled"),
                 "slots": off_gate.slots,
                 "momentumFloor": off_gate.momentum_floor,
                 "requireEntryReturn": off_gate.require_entry_return,
             },
+            # WHETHER EACH RULE IS ENFORCED -- not what it is. Every number
+            # above is read from the YAML and is editable from nowhere; these
+            # three switches say whether the application obeys P8/P17, P9 and
+            # the V3b variant, and they are runtime state an admin flips on the
+            # Strategies & Features page. See src/swing/services/gate_policy.py
+            # and root CLAUDE.md section 3a.
+            "policies": policies["policies"],
+            "policyContradiction": policies["contradiction"],
             "parameters": [
                 _param("P1", "Universe", universe.name if universe else "—",
                        "Nifty 500 members, refreshed by hand each quarter."),
@@ -305,11 +349,17 @@ class SwingService:
                 _param("P8", "Regime gate",
                        f"{self._index_symbol()} close > "
                        f"SMA{regime.sma_sessions}",
-                       "The hard kill switch. Below it, the book goes to 100% cash."),
+                       "The hard kill switch. Below it, the book goes to 100% cash."
+                       + ("" if effective.get("regime.enforce", True) else
+                          " CURRENTLY NOT ENFORCED: it is still computed and "
+                          "still recorded on every session and every trade, and "
+                          "it stops nothing.")),
                 _param("P9", "Entry filter",
                        f"{self._index_symbol()} {regime.entry_return_sessions}-session "
                        f"return > {regime.entry_return_minimum:.0%}",
-                       "Blocks NEW entries only. It never forces an exit."),
+                       "Blocks NEW entries only. It never forces an exit."
+                       + ("" if effective.get("regime.enforce_entry_return", True)
+                          else " CURRENTLY NOT ENFORCED.")),
                 _param("P10", "Breadth",
                        f"fraction of the liquid universe above its own "
                        f"SMA{parameters.trend_sma_sessions}",
@@ -352,7 +402,12 @@ class SwingService:
                        f"{self._index_symbol()} below its "
                        f"SMA{regime.sma_sessions}",
                        "Sell EVERYTHING at the next open. The gate does not "
-                       "negotiate with a good position."),
+                       "negotiate with a good position."
+                       + ("" if effective.get("regime.enforce", True) else
+                          " CURRENTLY NOT ENFORCED: nothing is liquidated when "
+                          "the gate flips off. A position opened under this "
+                          "policy keeps it -- re-enforcing the gate stops new "
+                          "entries and does NOT sell the book.")),
                 _param("P18", "Rebalance",
                        f"{schedule.rebalance_cadence}",
                        "Daily was chosen deliberately: 23.4% CAGR at -22.2% "
@@ -458,8 +513,16 @@ class SwingService:
                     ),
                     # A position with no stop is a real and visible state, not
                     # an absent field: the ATR was unavailable at entry and the
-                    # next nightly ratchet will set one.
-                    "hasStop": stop is not None,
+                    # next nightly ratchet will set one. Since every entry now
+                    # writes a row, "has a row" and "has a LEVEL" came apart --
+                    # this is the second one, which is what protects anything.
+                    "hasStop": stop is not None and stop.stop_price is not None,
+                    # The policy this position was opened under, which is what
+                    # decides whether a regime exit reaches it.
+                    "entryGateOn": stop.entry_gate_on if stop is not None else None,
+                    "entryRegimeEnforced": (
+                        stop.entry_regime_enforced if stop is not None else None
+                    ),
                 }
             )
 
@@ -600,6 +663,9 @@ class SwingService:
         payload["realisedNet"] = str(report.realised_net)
         payload["equityCurve"] = report.equity_curve
         payload["averageHoldSessions"] = await self._average_hold_sessions(trades)
+        payload["byRegimeAtEntry"] = await self._split_by_regime(
+            metrics_service, trades, portfolio_id
+        )
         payload["trackRecord"] = {
             "live": False,
             "note": (
@@ -609,6 +675,88 @@ class SwingService:
             ),
         }
         return payload
+
+    async def _split_by_regime(
+        self, metrics_service, trades, portfolio_id: Optional[int]
+    ) -> Dict[str, Any]:
+        """The same trade statistics, split by the regime at ENTRY.
+
+        This is the entire payoff of recording the policy per trade. Trading
+        while the regime gate is off is a deliberate divergence from the
+        specification -- section 11 tested thirteen ways of doing it and not
+        one beat holding cash -- and the only thing that makes the divergence
+        reversible is being able to take those trades back out of the numbers
+        afterwards. Without this split the columns are data nobody looks at.
+
+        Attribution is through `swing_stops`, which carries one row per
+        position with the gate state at entry on it. A trade whose row cannot
+        be found is reported as `unattributed` rather than being quietly
+        dropped into one of the buckets -- and a bucket with NO trades reports
+        null, not zero: "no trades were taken with the gate off" and "the
+        trades taken with the gate off averaged nothing" are different
+        statements.
+
+        Curve metrics (CAGR, drawdown, MAR) are deliberately NOT computed per
+        bucket. An equity curve is a property of the whole book over time and
+        cannot be sliced by a subset of its trades without inventing a
+        counterfactual book that never existed.
+        """
+        rows = await self.stops.history(self.definition.key, portfolio_id, limit=5000)
+
+        # symbol -> stop rows, oldest first. The rotation holds a name once at
+        # a time, so matching the nth closed trade of a symbol to the nth stop
+        # row of that symbol is unambiguous while that stays true.
+        by_symbol: Dict[str, List[Any]] = {}
+        for row in sorted(rows, key=lambda one: (one.entry_session, one.id)):
+            by_symbol.setdefault(row.symbol, []).append(row)
+
+        buckets: Dict[str, List[Any]] = {"gateOn": [], "gateOff": []}
+        unattributed = 0
+        cursors: Dict[str, int] = {}
+        for trade in sorted(trades, key=lambda one: one.opened_at):
+            candidates = by_symbol.get(trade.symbol, [])
+            index = cursors.get(trade.symbol, 0)
+            if index >= len(candidates):
+                unattributed += 1
+                continue
+            row = candidates[index]
+            cursors[trade.symbol] = index + 1
+            if row.entry_gate_on is None:
+                # Entered before the column existed. Not guessed at.
+                unattributed += 1
+                continue
+            buckets["gateOn" if row.entry_gate_on else "gateOff"].append(trade)
+
+        def summarise(bucket: List[Any]) -> Optional[Dict[str, Any]]:
+            if not bucket:
+                return None
+            summary = metrics_service.compute(bucket).as_dict()
+            # The curve half is meaningless for a subset; strip it rather than
+            # publishing a CAGR computed from no curve at all.
+            for key in (
+                "startingEquity", "endingEquity", "peakEquity", "daysCovered",
+                "cagr", "maxDrawdown", "maxDrawdownAmount", "maxDrawdownFrom",
+                "maxDrawdownTo", "mar", "curveNote", "cashFlowsAfterFirstTrade",
+            ):
+                summary.pop(key, None)
+            return summary
+
+        return {
+            "gateOn": summarise(buckets["gateOn"]),
+            "gateOff": summarise(buckets["gateOff"]),
+            "unattributed": unattributed,
+            "note": (
+                "Split by what the regime gate was doing when each position was "
+                "OPENED, from that position's own record. Trades opened with "
+                "the gate off were taken because enforcement was switched off "
+                "deliberately -- the specification's own research found no "
+                "variant of trading through the gate that beat holding cash, "
+                "so this is the comparison that matters. CAGR, drawdown and MAR "
+                "are not split: an equity curve is a property of the whole book "
+                "and slicing it by a subset of trades would describe a book "
+                "that never existed."
+            ),
+        }
 
     async def exit_mix(self, portfolio_id: Optional[int] = None) -> Dict[str, Any]:
         """Trail stops against rotations, counted from `swing_stops`.

@@ -43,6 +43,31 @@ class StrategyCostResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class PolicyResponse(BaseModel):
+    """One of a strategy's own rules, and whether it is being ENFORCED.
+
+    `default` is what the YAML declares -- what a fresh installation does --
+    and `enforced` is what is in force now. BOTH are sent, always: a page that
+    showed only the file would teach a rule that is not being obeyed, and one
+    that showed only the effective value would hide that the switch was moved.
+    `overridden` is whether anyone has touched it at all, which is a different
+    fact from its being set to the same value as the default.
+    """
+
+    key: str
+    label: str
+    description: str = ""
+    default: bool
+    enforced: bool
+    overridden: bool = False
+    # What ON and OFF are CALLED for this switch. Two of the three are about
+    # whether a rule is obeyed; the third is about whether a variant is traded.
+    on_label: str = Field("ENFORCED", alias="onLabel")
+    off_label: str = Field("NOT ENFORCED", alias="offLabel")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class StrategyResponse(BaseModel):
     key: str
     label: str
@@ -81,6 +106,13 @@ class StrategyResponse(BaseModel):
     active_capabilities: List[str] = Field(default_factory=list, alias="activeCapabilities")
     pages: List[str] = Field(default_factory=list)
 
+    # Empty for a discretionary module: it has no rules of its own to enforce,
+    # so the page must offer no switch at all.
+    policies: List[PolicyResponse] = Field(default_factory=list)
+    # Two operator-chosen switches that contradict each other, described rather
+    # than silently resolved by a precedence rule nobody would remember.
+    policy_contradiction: Optional[str] = Field(None, alias="policyContradiction")
+
     cost: StrategyCostResponse
 
     model_config = ConfigDict(populate_by_name=True)
@@ -107,6 +139,21 @@ class ArmRequest(BaseModel):
 class ArmResponse(BaseModel):
     key: str
     armed: bool
+    effect: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class PolicyRequest(BaseModel):
+    """Its own request type, like `ArmRequest`, so `enabled` can never be sent
+    by mistake to the endpoint that decides whether a kill switch is obeyed."""
+
+    enforced: bool
+
+
+class PolicyToggleResponse(BaseModel):
+    key: str
+    policy: str
+    enforced: bool
     effect: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
 

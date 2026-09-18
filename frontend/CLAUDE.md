@@ -307,6 +307,26 @@ than anywhere except the health page.
   and the breadth ramp marks where the market actually is. A diagram of the
   rule in the abstract teaches less than the same diagram with this morning's
   market in it.
+- **The Live tab says what it is doing NOW, not only what it decided.** The
+  status strip carries the market state and the IST clock, what the scheduler is
+  doing this second, what it will do next and in how long, what it last did, and
+  the stop monitor's line. The countdown ticks LOCALLY off the absolute
+  timestamp the server sends (the Settings trick, §4) so a stalled poll shows up
+  as a clock running past a run that never happened. §3 applies hard: a
+  countdown that cannot be computed says so rather than showing 00:00; "the
+  monitor is not running", "idle" and "watching nothing" are three states and
+  read differently; and an enabled-but-unarmed strategy says, in the strip, that
+  it will decide and place nothing. The activity log under it is the scheduler's
+  in-memory status dict, not a second journal -- it says so, because it starts
+  empty after a restart while the decision history below does not.
+- **A gate that looks ON must never be shown while nothing obeys it.** The three
+  enforcement switches are runtime state, so the gate card carries `NOT
+  ENFORCED` beside the gate's own boolean, and `SwingExplainer` renders the
+  EFFECTIVE policy beside the YAML default rather than the file alone. The
+  switches themselves live on `StrategiesPage.jsx` beside enabled and armed,
+  are offered only for a module that declares an `automation` block, and each
+  gets a confirmation dialog carrying the server's warnings -- including the one
+  that says re-enforcing the gate does NOT sell the open book.
 - **The tab is in the URL** (`?tab=how-it-works`), so "read this page" is a
   link somebody can send.
 - **The page is NOT gated by the strategy toggle.** `/swing` is deliberately

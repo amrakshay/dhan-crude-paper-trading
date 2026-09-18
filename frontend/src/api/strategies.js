@@ -21,4 +21,15 @@ export const strategiesApi = {
   // decision record; armed means it may submit an order with nobody watching.
   armWarnings: (key) => api.get(`/strategies/${key}/arm-warnings`),
   setStrategyArmed: (key, armed) => api.put(`/strategies/${key}/armed`, { armed }),
+
+  // WHETHER ONE OF A STRATEGY'S OWN RULES IS ENFORCED — not what the rule is.
+  // The lookbacks, thresholds and multiples live in the strategy's YAML and
+  // are editable from nowhere (root CLAUDE.md §3a); these switches say whether
+  // the application obeys them, which is runtime state like enabled and armed.
+  policyWarnings: (key, policy, enforced) =>
+    api.get(
+      `/strategies/${key}/policy-warnings/${policy}?enforced=${enforced ? 'true' : 'false'}`,
+    ),
+  setStrategyPolicy: (key, policy, enforced) =>
+    api.put(`/strategies/${key}/policies/${policy}`, { enforced }),
 };

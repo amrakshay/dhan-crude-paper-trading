@@ -215,12 +215,27 @@ async def test_the_rebalance_runs_after_its_time_and_the_nightly_does_not(
     assert kinds == {RUN_REBALANCE}
 
 
-async def test_both_jobs_have_run_by_the_evening(db_session):
+async def test_the_evening_runs_the_nightly_and_NOT_the_rebalance(db_session):
+    """Changed 2026-09-18, deliberately, and this is why.
+
+    The rebalance trigger is bounded at BOTH ends now. It used to fire on any
+    tick after 09:16, which meant a process started in the evening ran one --
+    and because idempotence is the JOURNAL's, that run wrote a REBALANCE record
+    for the session, so the next morning's real rebalance declined to trade it.
+    A restart at 19:00 quietly consumed the only chance to trade that session.
+
+    It could not have placed anything anyway: an order outside continuous
+    trading is refused per instrument. So the unbounded window bought nothing
+    but a journal entry that blocked a real run.
+
+    The NIGHTLY is deliberately still unbounded. Recording what the stored data
+    says is its whole job and 18:30 is exactly when it should happen.
+    """
     await _seed_portfolio(db_session)
     await _seed_calendar(db_session)
 
     ran = await SwingScheduler().tick(now=AFTER_NIGHTLY)
-    assert {run.kind for run in ran} == {RUN_REBALANCE, RUN_NIGHTLY}
+    assert {run.kind for run in ran} == {RUN_NIGHTLY}
 
 
 async def test_nothing_runs_on_a_day_the_exchange_does_not_trade(db_session):

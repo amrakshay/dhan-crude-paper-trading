@@ -41,6 +41,25 @@ def _integer(section: Dict[str, Any], key: str, where: str) -> int:
         raise SwingConfigError(f"{where}: '{key}' must be an integer, got {value!r}") from exc
 
 
+def _enforcement(regime: Dict[str, Any], source: str) -> bool:
+    """`regime.enforcement` as a boolean, refusing a value nobody meant.
+
+    Spelled as a word rather than a flag because `observe` says what it does:
+    the gate is still computed, still stored and still shown -- it simply stops
+    acting. A typo must not silently disable the specification's kill switch,
+    so anything that is not one of the two words is an error.
+    """
+    value = regime.get("enforcement", ENFORCEMENT_ENFORCE)
+    text = str(value).strip().lower()
+    if text not in ENFORCEMENTS:
+        raise SwingConfigError(
+            f"{source}: regime.enforcement {value!r} is not one of "
+            f"{ENFORCEMENTS}. 'enforce' obeys P8/P17; 'observe' computes and "
+            f"records the gate without letting it stop anything."
+        )
+    return text == ENFORCEMENT_ENFORCE
+
+
 CADENCE_DAILY = "daily"
 CADENCE_WEEKLY = "weekly"
 CADENCES = (CADENCE_DAILY, CADENCE_WEEKLY)
@@ -63,12 +82,30 @@ class OffGatePolicy:
     require_entry_return: bool
 
 
+ENFORCEMENT_ENFORCE = "enforce"
+ENFORCEMENT_OBSERVE = "observe"
+ENFORCEMENTS = (ENFORCEMENT_ENFORCE, ENFORCEMENT_OBSERVE)
+
+
 @dataclass(frozen=True)
 class RegimePolicy:
     index_role: str
     sma_sessions: int              # P8
     entry_return_sessions: int     # P9
     entry_return_minimum: float
+
+    # WHETHER P8/P17 AND P9 ARE OBEYED -- not what they are. The lookbacks and
+    # the threshold above define the rule and are not editable from any page;
+    # these two say whether the application enforces it, which is the same kind
+    # of fact as `enabled_by_default` and `armed_by_default`. They are the
+    # DEFAULTS a fresh installation starts from; the live state is a
+    # `feature_toggles` row under the POLICY scope, resolved in
+    # `src/swing/services/gate_policy.py`.
+    #
+    # `observe` does not stop the gate being computed or recorded. It stops it
+    # acting.
+    enforce_by_default: bool = True
+    enforce_entry_return_by_default: bool = True
 
 
 @dataclass(frozen=True)
@@ -182,6 +219,14 @@ class SwingParameters:
                 ),
                 entry_return_minimum=_number(
                     regime, "entry_return_minimum", f"{source}: regime"
+                ),
+                # Defaulted rather than required, unlike every parameter above.
+                # These are not parameters: a module that says nothing about
+                # enforcement obeys its own regime gate, which is the
+                # specification's behaviour and the only safe silence.
+                enforce_by_default=_enforcement(regime, source),
+                enforce_entry_return_by_default=bool(
+                    regime.get("enforce_entry_return", True)
                 ),
             ),
             schedule=SchedulePolicy(

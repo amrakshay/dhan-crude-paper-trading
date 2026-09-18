@@ -467,6 +467,106 @@ async def test_the_swing_endpoints_never_return_a_secret(auth_client, captured_l
     _assert_clean(captured_logs, token)
 
 
+async def test_the_policy_endpoints_never_return_a_secret(auth_client, captured_logs):
+    """The enforcement switches, added 2026-09-18, get their own assertion.
+
+    Every new endpoint gets one in the same change (root `CLAUDE.md`). These
+    two report which of a strategy's rules are being obeyed and what flipping a
+    switch would do -- configuration, like the rest of Strategies & Features --
+    and must never reach into the Dhan credentials sitting in the same config
+    tree.
+    """
+    import os
+
+    token = _sentinel_token()
+    saved = await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    key = "nse-swing-momentum"
+    responses = [
+        await auth_client.get(
+            f"/api/strategies/{key}/policy-warnings/regime.enforce?enforced=false"
+        ),
+        await auth_client.put(
+            f"/api/strategies/{key}/policies/regime.enforce",
+            json={"enforced": True},
+        ),
+    ]
+    for response in responses:
+        assert response.status_code == 200, response.text
+        assert token not in response.text
+        for part in token.split("."):
+            if len(part) >= 9:
+                assert part not in response.text
+        assert SENTINEL_CLIENT_ID not in response.text
+        for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+            value = os.environ.get(name)
+            if value and len(value) >= 9:
+                assert value not in response.text, f"{name} reached a policy payload"
+        assert "access_token" not in response.text
+    _assert_clean(captured_logs, token)
+
+
+async def test_a_plain_user_cannot_change_an_enforcement_policy(auth_client):
+    """Admin-only at the route, like arming, and for the same reason.
+
+    Switching off the enforcement of a regime gate decides whether software may
+    spend money in a market the rule says to stay out of.
+    """
+    import httpx
+
+    created = await auth_client.post(
+        "/api/users",
+        json={
+            "email": "policy-reader@abc.com",
+            "firstName": "Policy",
+            "lastName": "Reader",
+            "password": "reader-password-123",
+            "role": "ROLE_USER",
+            "mustChangePassword": False,
+        },
+    )
+    assert created.status_code in (200, 201), created.text
+
+    import main
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        login = await client.post(
+            "/api/auth/login",
+            json={"email": "policy-reader@abc.com", "password": "reader-password-123"},
+        )
+        assert login.status_code == 200, login.text
+
+        key = "nse-swing-momentum"
+        refused = await client.put(
+            f"/api/strategies/{key}/policies/regime.enforce",
+            json={"enforced": False},
+        )
+        assert refused.status_code == 403, refused.text
+        refused = await client.get(
+            f"/api/strategies/{key}/policy-warnings/regime.enforce?enforced=false"
+        )
+        assert refused.status_code == 403, refused.text
+
+
+async def test_a_discretionary_module_refuses_a_policy_change(auth_client):
+    """MCX crude has a person in front of every order and nothing to enforce."""
+    refused = await auth_client.put(
+        "/api/strategies/mcx-crude-options/policies/regime.enforce",
+        json={"enforced": False},
+    )
+    assert refused.status_code == 400, refused.text
+    assert "automation" in refused.text
+
+
 async def test_a_plain_user_cannot_trigger_a_swing_run(auth_client):
     """Reading the journal is open; TRIGGERING a rebalance spends money.
 

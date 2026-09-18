@@ -133,6 +133,25 @@ Rules that are not negotiable:
   Enabled state is a `feature_toggles` row, applied at startup and after every
   toggle. Nothing about a strategy's rates, specs or margin model is editable
   from the UI.
+- **Whether a RULE is enforced is runtime state; the rule itself is not.**
+  Added 2026-09-18, and it fits inside the line above rather than bending it.
+  A strategy may declare policies -- `regime.enforce`, `regime.enforce_entry_return`,
+  `off_gate.enabled` -- whose DEFAULT is in its YAML and whose live value is a
+  `feature_toggles` row under the `POLICY` scope, flipped from the Strategies
+  page. What that changes is whether the application OBEYS a rule, which is the
+  same kind of fact as enabled and armed. What it must never change is a
+  PARAMETER of one: P1-P19 -- momentum floor, ATR multiple, breadth ramp, rank
+  cut-off, every lookback -- stay in the YAML and are editable from no page, so
+  the file stays greppable against the specification's own table. If a
+  parameter ever needs to be editable that is its own piece of work with its own
+  decision. Resolved in `src/swing/services/gate_policy.py`, read ONCE when a
+  run starts, and refused outright when two switches contradict each other.
+- **A policy change applies to NEW decisions only.** A position keeps the
+  policy it was opened under -- recorded on its own `swing_stops` row -- so
+  re-enforcing the regime gate stops new entries and does NOT liquidate a book
+  opened while it was relaxed. A position whose policy cannot be established is
+  treated as having been opened under enforcement, so the exemption fails
+  towards the specification.
 - **Off means off.** No instruments on the feed, no greeks poll, no chart
   fetches, no background work, no live pages. And **history never moves**: past
   orders, positions and P&L totals are identical across a toggle, Reports and
@@ -226,6 +245,20 @@ bars that may since have been restated.
 violent day, so the naive formula can LOWER the stop on exactly the session the
 position became more dangerous; the `max()` is the rule. Do not tighten the
 multiple -- the specification measures every tighter variant as worse.
+
+**Analysis may run at any hour; ORDERS may not.** Ranking, the nightly
+decision, the stop ratchet and the journal run off-market quite happily. Every
+buy and every sell is checked against
+`market_clock.can_execute_continuously` **per instrument, immediately before the
+order** -- per instrument because F&O eligibility moves the close from 15:30 to
+15:15. A refused order is decided and journalled with its reason and the time,
+and is NOT queued for the next open: the next rebalance re-decides from fresh
+bars, and replaying yesterday's intent is how you trade a decision nobody would
+take today. The stop monitor deliberately differs and DOES defer -- a triggered
+stop is a fact that has already happened, not a fresh opinion. The guard is in
+`src/swing/`, not in `submit_paper_order`; making it generic would change MCX
+crude and chart trading, which did not ask for it, and could not journal the
+refusal.
 
 **A stop that cannot fill honestly does not fill.** NSE's Closing Auction
 Session (live 3 Aug 2026) ends continuous cash trading at 15:15 for
@@ -332,6 +365,7 @@ backend/src/chart_trading/                         one-click trading from the ch
 backend/src/chart_trading/services/bracket_monitor.py   server-side SL/TP watcher
 backend/src/swing/                 the NSE rotation: ranking, planner, execution,
                                    stops, scheduler, journal -- see its README
+backend/src/swing/services/gate_policy.py          whether a RULE is enforced
 backend/src/swing/services/scheduler.py            the only clock in this app
 backend/src/swing/services/stop_monitor.py         the chandelier stop watcher
 backend/src/reports/services/metrics_service.py    CAGR, drawdown, MAR, concentration

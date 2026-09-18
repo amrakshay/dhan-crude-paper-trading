@@ -91,27 +91,38 @@ class StopService:
         entry_session: date,
         entry_atr: Optional[float],
         entry_order_id: Optional[int] = None,
-    ) -> Optional[SwingStop]:
-        """P14. Returns None, loudly, when the ATR is not available.
+        entry_gate_on: Optional[bool] = None,
+        entry_regime_enforced: Optional[bool] = None,
+    ) -> SwingStop:
+        """P14, and the per-position record every entry now gets.
 
-        A position with no stop is not the same as a position with a stop that
-        happens to be far away, so nothing is invented here: the caller records
-        that the entry has no stop yet and the next nightly ratchet sets one as
-        soon as the ATR is computable. Substituting a percentage of the entry
-        price would be a different rule wearing this one's name.
+        A ROW IS ALWAYS WRITTEN, even when the ATR is unavailable and no stop
+        can be computed. `stop_price` is null in that case and the next nightly
+        ratchet sets the first stop as soon as an ATR exists -- nothing is
+        invented, because substituting a percentage of the entry price would be
+        a different rule wearing this one's name, and a position with no stop is
+        not the same as a position with a stop that happens to be far away.
+
+        Writing the row regardless is what makes this table the rotation's
+        per-position record. `entry_regime_enforced` is read back by
+        `plan_sells` to decide whether P17 reaches this position, and a table
+        that skipped the awkward entries would have silently failed OPEN for
+        exactly those -- exempting from liquidation the positions nobody
+        recorded a policy for.
         """
-        if entry_atr is None or float(entry_atr) <= 0:
+        multiple = Decimal(str(self.parameters.trail_atr_multiple))
+        entry_price = _price(entry_price)
+        usable = entry_atr is not None and float(entry_atr) > 0
+        atr = _price(entry_atr) if usable else None
+        stop_price = _price(entry_price - multiple * atr) if usable else None
+
+        if not usable:
             logger.warning(
                 "No usable ATR14 for %s at entry, so no chandelier stop was set. "
-                "The position is unprotected until the next nightly ratchet.",
+                "The position is recorded and unprotected until the next nightly "
+                "ratchet computes one.",
                 symbol,
             )
-            return None
-
-        multiple = Decimal(str(self.parameters.trail_atr_multiple))
-        atr = _price(entry_atr)
-        entry_price = _price(entry_price)
-        stop_price = _price(entry_price - multiple * atr)
 
         record = await self.stops.create(
             strategy_key=self.strategy_key,
@@ -132,12 +143,15 @@ class StopService:
             last_atr=atr,
             last_ratcheted_session=None,
             status=STOP_ACTIVE,
+            entry_gate_on=entry_gate_on,
+            entry_regime_enforced=entry_regime_enforced,
         )
-        logger.info(
-            "Chandelier stop for %s set at %s (entry %s - %s x ATR14 %s), "
-            "quantity %s",
-            symbol, stop_price, entry_price, multiple, atr, quantity,
-        )
+        if usable:
+            logger.info(
+                "Chandelier stop for %s set at %s (entry %s - %s x ATR14 %s), "
+                "quantity %s",
+                symbol, stop_price, entry_price, multiple, atr, quantity,
+            )
         return record
 
     # --- P15: the nightly ratchet -----------------------------------------
@@ -191,7 +205,12 @@ class StopService:
             )
             return None
 
-        previous_stop = Decimal(str(stop.stop_price))
+        # None means this position has never had a stop: the ATR was
+        # unavailable at entry. It is not a stop of zero, and it must not be
+        # ratcheted "up" from one.
+        previous_stop = (
+            Decimal(str(stop.stop_price)) if stop.stop_price is not None else None
+        )
         previous_high = Decimal(str(stop.highest_close))
         close = _price(view.close)
         atr = _price(view.atr14) if view.atr14 else None
@@ -202,8 +221,25 @@ class StopService:
             if atr is not None
             else previous_stop
         )
-        # THE RATCHET. Never down -- see the module docstring.
-        new_stop = max(previous_stop, candidate)
+        if previous_stop is None:
+            # THE FIRST STOP, set late. P14 measures from the entry price; this
+            # one has to measure from the high-water mark, because the sessions
+            # between entry and now have already happened and P15 would have
+            # ratcheted through them. Using the entry price here would place a
+            # stop lower than the rule has said since entry.
+            if candidate is None:
+                logger.info(
+                    "%s still has no ATR14 on %s, so it still has no stop.",
+                    stop.symbol, session_date.isoformat(),
+                )
+                stop.highest_close = new_high
+                stop.last_ratcheted_session = session_date
+                await self.stops.session.flush()
+                return None
+            new_stop = candidate
+        else:
+            # THE RATCHET. Never down -- see the module docstring.
+            new_stop = max(previous_stop, candidate)
 
         stop.highest_close = new_high
         stop.stop_price = new_stop
@@ -211,6 +247,23 @@ class StopService:
             stop.last_atr = atr
         stop.last_ratcheted_session = session_date
         await self.stops.session.flush()
+
+        if previous_stop is None:
+            distance = close - new_stop
+            percent = (distance / close * 100) if close else Decimal("0")
+            return Decision(
+                symbol=stop.symbol,
+                action=ACTION_STOP_MOVED,
+                quantity=int(stop.quantity),
+                reference_price=new_stop,
+                reason=(
+                    f"First stop set at {new_stop}: this position was entered "
+                    f"without a usable ATR14 and had none until now (highest "
+                    f"close since entry {new_high} - {stop.atr_multiple} x "
+                    f"ATR14 {atr}). Close {close} is {_money(distance)} above "
+                    f"it ({percent:.1f}%)."
+                ),
+            )
 
         wanted_lower = candidate < previous_stop
         if new_stop == previous_stop and not wanted_lower:
@@ -251,7 +304,10 @@ class StopService:
         stop that survives being touched exactly is a stop that did not do its
         job on the one tick that mattered.
         """
-        if price is None:
+        if price is None or stop.stop_price is None:
+            # No stop means no level to cross. A position entered without a
+            # usable ATR14 is unprotected and says so on the page; it is not
+            # protected at zero and it is not stopped out at every price.
             return False
         return Decimal(str(price)) <= Decimal(str(stop.stop_price))
 
@@ -318,10 +374,12 @@ class StopService:
         put a position on the page as though it were sitting exactly on its
         stop, which is the most alarming possible way to say "no price".
         """
-        stop_price = Decimal(str(stop.stop_price))
+        stop_price = (
+            Decimal(str(stop.stop_price)) if stop.stop_price is not None else None
+        )
         distance = None
         distance_percent = None
-        if mark is not None:
+        if mark is not None and stop_price is not None:
             mark = Decimal(str(mark))
             distance = _money(mark - stop_price)
             if mark > 0:
@@ -338,10 +396,15 @@ class StopService:
             "quantity": int(stop.quantity),
             "entrySession": stop.entry_session.isoformat(),
             "entryPrice": str(stop.entry_price),
-            "entryAtr": str(stop.entry_atr),
+            "entryAtr": str(stop.entry_atr) if stop.entry_atr is not None else None,
             "atrMultiple": str(stop.atr_multiple),
             "highestClose": str(stop.highest_close),
-            "stopPrice": str(stop_price),
+            # None, never 0. "No stop yet" and "a stop at zero" are different
+            # states and the page renders them differently.
+            "stopPrice": str(stop_price) if stop_price is not None else None,
+            "hasStop": stop_price is not None,
+            "entryGateOn": stop.entry_gate_on,
+            "entryRegimeEnforced": stop.entry_regime_enforced,
             "lastAtr": str(stop.last_atr) if stop.last_atr is not None else None,
             "lastRatchetedSession": (
                 stop.last_ratcheted_session.isoformat()

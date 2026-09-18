@@ -107,8 +107,16 @@ class SwingJournalService:
         session_date: Optional[date] = None,
         started_at=None,
         held_symbols: Optional[List[str]] = None,
+        gate=None,
     ) -> SessionRecord:
-        """Write one run and its decisions. Never updates an existing row."""
+        """Write one run and its decisions. Never updates an existing row.
+
+        `gate` is the `EffectiveGate` the run resolved at its start. Every
+        decision row is stamped with it here rather than each caller filling
+        the fields in: the policy is read once per run, so one stamp per run is
+        the truthful shape, and a caller that forgot would leave a row that
+        cannot be told apart from one written before the columns existed.
+        """
         decisions = list(decisions or [])
         held_symbols = list(held_symbols or [])
         now = utc_now()
@@ -161,8 +169,9 @@ class SwingJournalService:
 
         record: SwingSession = await self.sessions.create(**fields)
         session_id = record.id
+        stamp = self._regime_stamp(snapshot, gate)
         written = await self.decisions.add_many(
-            [decision.as_row(session_id) for decision in decisions]
+            [{**decision.as_row(session_id), **stamp} for decision in decisions]
         )
 
         logger.info(
@@ -178,6 +187,40 @@ class SwingJournalService:
             decisions=written,
             message=fields.get("message"),
         )
+
+    @staticmethod
+    def _regime_stamp(snapshot: Optional[RankingSnapshot], gate) -> Dict[str, Any]:
+        """What the index said, and which rules were being obeyed.
+
+        Written on EVERY decision row of the run, including the non-actions.
+        Two separate needs are being served and it is easy to conflate them:
+        filtering the numbers afterwards ("was the gate off when this trade was
+        opened?"), which is this; and deciding behaviour now ("must this open
+        position be liquidated?"), which is `swing_stops.entry_regime_enforced`
+        and is read per position, not per session.
+
+        Everything is None when there is no snapshot -- a skipped or failed run
+        saw no index bar, and inventing "gate off" for it would be a record of
+        something nobody observed.
+        """
+        if snapshot is None:
+            return {}
+        regime = snapshot.regime
+        stamp: Dict[str, Any] = {
+            "regime_gate_on": regime.gate_on,
+            "regime_index_close": _money(regime.close),
+            "regime_index_sma": _money(regime.sma200),
+            "regime_index_return": _money(regime.return_over_window),
+        }
+        if gate is not None:
+            stamp.update(
+                {
+                    "regime_enforced": bool(gate.enforce_regime),
+                    "entry_return_enforced": bool(gate.enforce_entry_return),
+                    "gate_variant": gate.variant,
+                }
+            )
+        return stamp
 
     @staticmethod
     def _ranking_payload(

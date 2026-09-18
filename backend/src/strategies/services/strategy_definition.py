@@ -70,6 +70,76 @@ CAPABILITY_DESCRIPTIONS: Dict[str, str] = {
     CAPABILITY_PNL_REPORTS: "Realised P&L slices and the equity curve.",
 }
 
+# ---------------------------------------------------------------------------
+# POLICIES: whether a strategy's own rules are ENFORCED.
+#
+# Read root CLAUDE.md section 3a before adding one. The rule there -- the YAML
+# says what a strategy IS, the database says whether it is ON, and nothing
+# about a strategy's rates, specs or margin model is editable from the UI --
+# survives this, and these fit inside it, because what becomes editable is not
+# a PARAMETER of a rule. It is whether a rule is OBEYED, which is the same kind
+# of fact as enabled and armed: runtime state an operator flips, overlaid on a
+# default the YAML declares.
+#
+# The moment a momentum floor, an ATR multiple or a lookback becomes editable
+# from a page, the YAML stops being greppable against the specification's own
+# table and section 3a stops being true. That is its own piece of work with its
+# own decision, not an extension of this list.
+#
+# The framework knows only the NAMES, so a stored row for something that no
+# longer exists can be ignored on load -- the same property `KNOWN_CAPABILITIES`
+# gives capabilities and `MANAGED_KEYS` gives the settings table. What each one
+# MEANS, and what its default is, belongs to the strategy's own module: see
+# `src/swing/services/gate_policy.py`.
+#
+# They are offered only for a module that declares an `automation` block, the
+# same way the arming switch is. A discretionary module has a person in front of
+# every order and needs no policy switch.
+POLICY_REGIME_ENFORCE = "regime.enforce"
+POLICY_REGIME_ENFORCE_ENTRY_RETURN = "regime.enforce_entry_return"
+POLICY_OFF_GATE_ENABLED = "off_gate.enabled"
+
+KNOWN_POLICIES: Tuple[str, ...] = (
+    POLICY_REGIME_ENFORCE,
+    POLICY_REGIME_ENFORCE_ENTRY_RETURN,
+    POLICY_OFF_GATE_ENABLED,
+)
+
+POLICY_LABELS: Dict[str, str] = {
+    POLICY_REGIME_ENFORCE: "Enforce the regime gate",
+    POLICY_REGIME_ENFORCE_ENTRY_RETURN: "Enforce the entry-return filter",
+    POLICY_OFF_GATE_ENABLED: "Trade the off-gate variant",
+}
+
+# What ON and OFF should be CALLED for each switch. Two of these are about
+# whether a rule is obeyed; the third is about whether a variant is being
+# traded, and calling that one "enforced" would be a word that does not mean
+# what it says.
+POLICY_STATE_LABELS: Dict[str, tuple] = {
+    POLICY_REGIME_ENFORCE: ("ENFORCED", "NOT ENFORCED"),
+    POLICY_REGIME_ENFORCE_ENTRY_RETURN: ("ENFORCED", "NOT ENFORCED"),
+    POLICY_OFF_GATE_ENABLED: ("ENABLED", "DISABLED"),
+}
+
+POLICY_DESCRIPTIONS: Dict[str, str] = {
+    POLICY_REGIME_ENFORCE: (
+        "P8 and P17. On: the book goes to cash when the index loses its "
+        "200-session SMA, and no entry is taken below it. Off: the gate is "
+        "still computed and still recorded on every session and every trade, "
+        "and it stops nothing."
+    ),
+    POLICY_REGIME_ENFORCE_ENTRY_RETURN: (
+        "P9. On: a negative 63-session index return blocks NEW entries. Off: "
+        "it does not. It never forces an exit either way."
+    ),
+    POLICY_OFF_GATE_ENABLED: (
+        "The V3b variant: hold a smaller book at its own momentum floor while "
+        "the gate is off, instead of holding cash. The owner's own research "
+        "tested thirteen such variants and not one beat holding cash."
+    ),
+}
+
+
 # Which page a capability grants, where it grants one. The trading pages that
 # show HISTORY (/orders, /positions) are deliberately absent: a strategy going
 # off must never hide trades that already happened.

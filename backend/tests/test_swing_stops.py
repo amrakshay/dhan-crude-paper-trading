@@ -191,7 +191,15 @@ async def test_the_entry_stop_is_the_entry_price_less_the_atr_multiple(
 async def test_no_atr_means_no_stop_rather_than_an_invented_one(
     db_session, definition
 ):
-    """A position with no stop is not the same as one with a distant stop."""
+    """A position with no stop is not the same as one with a distant stop.
+
+    Changed shape on 2026-09-18 and NOT changed meaning. A row is now written
+    for every position -- the table is the rotation's per-position record and
+    carries the policy the position was opened under, which `plan_sells` reads
+    back to decide whether a regime exit reaches it -- but `stop_price` is
+    NULL, because there is still no level and nothing is invented. A table that
+    skipped these entries would have failed open for exactly them.
+    """
     portfolio_id = await _seed_portfolio(db_session)
     service = _stop_service(db_session, definition)
 
@@ -200,10 +208,18 @@ async def test_no_atr_means_no_stop_rather_than_an_invented_one(
         quantity=100, entry_price=Decimal("500"), entry_session=date(2026, 9, 17),
         entry_atr=None,
     )
-    assert stop is None
-    assert await SwingStopRepository(db_session).get_active(
+    # No level was invented: not a percentage of the entry price, not zero.
+    assert stop.stop_price is None
+    assert stop.entry_atr is None
+    assert stop.status == STOP_ACTIVE
+
+    stored = await SwingStopRepository(db_session).get_active(
         portfolio_id, SECURITY_ID
-    ) is None
+    )
+    assert stored is not None
+    assert stored.stop_price is None
+    # And it can never fire while it has no level.
+    assert StopService.is_hit(stored, Decimal("0.01")) is False
 
 
 async def test_one_holding_cannot_have_two_active_stops(db_session, definition):

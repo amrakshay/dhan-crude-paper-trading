@@ -15,6 +15,8 @@ from src.logging_config import get_logger
 from src.strategies.api_schemas.strategy_schemas import (
     ArmResponse,
     CapabilityResponse,
+    PolicyResponse,
+    PolicyToggleResponse,
     StrategyCostResponse,
     StrategyListResponse,
     StrategyResponse,
@@ -90,6 +92,8 @@ class StrategyController:
                         if registry.capability_active(capability, definition.key)
                     ),
                     pages=definition.pages(registry.enabled_capabilities()),
+                    policies=self._policies_for(definition),
+                    policyContradiction=self._policy_contradiction(definition),
                     cost=await self._cost_for(definition),
                 )
             )
@@ -115,6 +119,35 @@ class StrategyController:
             capabilities=capabilities,
             pages=sorted(registry.feature_pages()),
         )
+
+    @staticmethod
+    def _describe_policies(definition) -> Dict[str, object]:
+        """Whether each of this strategy's own rules is enforced.
+
+        Empty for a discretionary module, so the page offers no control: there
+        is nothing to enforce when a person is in front of every order. Only an
+        automated module has rules it applies by itself.
+        """
+        if not definition.automation.automated:
+            return {"policies": [], "contradiction": None}
+        from src.swing.services.gate_policy import describe_policies
+
+        try:
+            return describe_policies(definition)
+        except Exception:  # noqa: BLE001 - the page must still render
+            logger.exception(
+                "Could not describe the policies for %s", definition.key
+            )
+            return {"policies": [], "contradiction": None}
+
+    def _policies_for(self, definition) -> List[PolicyResponse]:
+        return [
+            PolicyResponse(**row)
+            for row in self._describe_policies(definition)["policies"]
+        ]
+
+    def _policy_contradiction(self, definition) -> Optional[str]:
+        return self._describe_policies(definition)["contradiction"]
 
     @staticmethod
     def _rate_card_version(definition) -> Optional[str]:
@@ -256,6 +289,47 @@ class StrategyController:
             effect=result["effect"],
             warnings=result["warnings"],
         )
+
+    async def set_strategy_policy(
+        self,
+        strategy_key: str,
+        policy: str,
+        enforced: bool,
+        user_id: Optional[int] = None,
+    ) -> PolicyToggleResponse:
+        try:
+            result = await self.service.set_strategy_policy(
+                strategy_key, policy, enforced, user_id
+            )
+        except StrategyConfigError as error:
+            # "Unknown strategy" is a 404. A discretionary module, an unknown
+            # policy name, or the contradictory pair are all 400: the strategy
+            # exists and the request does not apply to it.
+            status = 404 if "Unknown strategy" in str(error) else 400
+            raise HTTPException(status_code=status, detail=str(error)) from error
+
+        return PolicyToggleResponse(
+            key=strategy_key,
+            policy=policy,
+            enforced=bool(enforced),
+            effect=result["effect"],
+            warnings=result["warnings"],
+        )
+
+    async def policy_warnings(
+        self, strategy_key: str, policy: str, enforced: bool
+    ) -> Dict[str, List[str]]:
+        """What flipping this switch would do, BEFORE it is flipped."""
+        definition = get_strategy_registry().get(strategy_key)
+        if definition is None:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown strategy module {strategy_key!r}"
+            )
+        return {
+            "warnings": await self.service.policy_warnings(
+                strategy_key, policy, enforced
+            )
+        }
 
     async def arm_warnings(self, strategy_key: str) -> Dict[str, List[str]]:
         """What arming would let loose, BEFORE it is armed."""

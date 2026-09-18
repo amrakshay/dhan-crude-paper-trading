@@ -25,6 +25,7 @@ not; there is no partial position to stop out, and `SwingStopRepository`
 enforces the single active row rather than leaving it to a convention.
 """
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     ForeignKey,
@@ -55,7 +56,15 @@ EXIT_MANUAL = "MANUAL"
 
 
 class SwingStop(TimestampedModel):
-    """One holding's chandelier stop, with everything it was computed from."""
+    """One holding's chandelier stop, with everything it was computed from.
+
+    Since 2026-09-18 this is written for EVERY position the rotation opens,
+    including one that has no stop yet, which makes it the rotation's
+    per-position record as well as its stop record. `stop_price` is null in
+    that case; the table's name is unchanged and its meaning is documented
+    here rather than renamed, because the rows already written under the old
+    meaning are the same rows.
+    """
 
     __tablename__ = "swing_stops"
 
@@ -79,14 +88,51 @@ class SwingStop(TimestampedModel):
 
     # P14's inputs, kept so the initial stop can be checked rather than
     # believed: entry - atr_multiple x entry_atr.
-    entry_atr = Column(Money, nullable=False)
+    #
+    # `entry_atr` is nullable because a row is now written for EVERY position,
+    # including one entered on a session where ATR14 could not be computed. A
+    # null here and a null `stop_price` are the same fact seen twice: this
+    # position has no stop yet, and the next nightly ratchet will set one.
+    entry_atr = Column(Money, nullable=True)
     atr_multiple = Column(Money, nullable=False)
+
+    # --- what the regime was doing when this position was opened -----------
+    #
+    # `entry_regime_enforced` is load-bearing, not reporting: `plan_sells`
+    # reads it per position to decide whether P17's liquidation reaches it. A
+    # position opened while the regime gate was being OBSERVED keeps that
+    # policy -- turning enforcement back on stops new entries, it does not sell
+    # a book opened under the other rule (it leaves by rotation or by its
+    # trailing stop instead).
+    #
+    # `entry_gate_on` is the gate's own boolean at entry, for reading the
+    # numbers back afterwards. They are different questions: the gate can be ON
+    # while enforcement is off, and both are worth knowing.
+    #
+    # Nullable because rows written before 2026-09-18 recorded neither. A null
+    # `entry_regime_enforced` is treated as ENFORCED by the planner -- the
+    # specification's behaviour -- so an unknown fails towards liquidation
+    # rather than towards an exemption nothing can justify.
+    entry_gate_on = Column(Boolean, nullable=True)
+    entry_regime_enforced = Column(Boolean, nullable=True)
 
     # P15's running state. `highest_close` only ever rises; `stop_price` only
     # ever rises. `last_ratcheted_session` makes the nightly ratchet idempotent
     # -- a restart at 18:20 must not re-apply 18:15's work.
     highest_close = Column(Money, nullable=False)
-    stop_price = Column(Money, nullable=False)
+    # NULL means "this position has no stop yet", which is a real and visible
+    # state rather than an absent row: the ATR was unavailable on the session of
+    # entry, so P14 could not be applied, and `ratchet_one` sets the first stop
+    # as soon as one can be computed. The monitor SKIPS a null stop rather than
+    # comparing against it.
+    #
+    # The table was widened rather than renamed on 2026-09-18. It was already
+    # very nearly the rotation's per-position record -- entry session, entry
+    # price, quantity, entry order -- and the alternative, resolving the entry
+    # policy from `swing_decisions` at read time, depends on every open position
+    # having a BOUGHT row, which is true today and one manual trade away from
+    # not being.
+    stop_price = Column(Money, nullable=True)
     last_atr = Column(Money, nullable=True)
     last_ratcheted_session = Column(Date, nullable=True)
 

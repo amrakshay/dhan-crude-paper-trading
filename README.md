@@ -884,8 +884,19 @@ Two IST-aware jobs on one task (`swing-scheduler`), both restart-safe:
 
 | Job | When | What it does |
 |---|---|---|
-| nightly | `schedule.nightly_at` (18:15) | refresh `daily_bars` from Dhan, recompute the regime, breadth and ranking, ratchet every trailing stop on the session's close, write the decision record |
-| rebalance | `schedule.rebalance_at` (09:16) | sell list, then buy list, through `submit_paper_order` |
+| nightly | `schedule.nightly_at` (18:15) onwards | refresh `daily_bars` from Dhan, recompute the regime, breadth and ranking, ratchet every trailing stop on the session's close, write the decision record |
+| rebalance | `schedule.rebalance_at` (09:16) **to the close** | sell list, then buy list, through `submit_paper_order` |
+
+**The rebalance window is bounded at both ends, and the upper bound matters.**
+It used to fire on any tick after 09:16, so a process started in the evening ran
+one — and because idempotence is the *journal's*, that run wrote a `REBALANCE`
+record for the session, and the next morning's real rebalance then declined to
+trade it. A restart at 19:00 quietly consumed the only chance to trade that
+session. It could not have placed anything anyway, since an order outside
+continuous trading is refused per instrument, so the unbounded window bought
+nothing but a journal entry that blocked a real run. A rebalance that was
+genuinely missed is *reported*, as below. The nightly is deliberately still
+unbounded: recording what the stored data says is its whole job, at any hour.
 
 The times live in the strategy YAML because a different strategy would want
 different ones; how often the clock is *checked* is `swing.scheduler_interval_seconds`.
@@ -1006,6 +1017,91 @@ for weeks and then arm it knowing precisely what it would have done.
 Only a module that declares an `automation` block can be armed at all.
 `mcx-crude-options` declares none: it is discretionary, no arming control is
 offered for it, and a stored arming row for it is ignored on load.
+
+### Whether a rule is enforced — three runtime switches
+
+Added 2026-09-18, at the owner's request, so that the whole machine could be
+exercised against a live market instead of sitting in cash for months.
+
+**Read what this is before assuming what it is not.** The strategy's parameters
+— P1 to P19, the lookbacks, the momentum floor, the ATR multiple, the rank
+cut-off, the breadth ramp — are still **only in the YAML** and are editable from
+no page. What became editable is whether a rule is *enforced*, which is the same
+kind of fact as enabled and armed: runtime state an operator flips, overlaid on
+a default the YAML declares. Root `CLAUDE.md` §3a still reads true.
+
+| Switch | Default (YAML) | What "not enforced" means |
+|---|---|---|
+| `regime.enforce` | `regime.enforcement: enforce` | P8 and P17 stop gating: no liquidation when the gate flips off, entries allowed below the SMA |
+| `regime.enforce_entry_return` | `regime.enforce_entry_return: true` | P9 stops blocking new entries |
+| `off_gate.enabled` | `off_gate.enabled: false` | unchanged in meaning — it just became flippable at runtime like the other two |
+
+They live in `feature_toggles` under a `POLICY` scope with a
+`<strategy_key>/<policy>` key, are offered only for a module that declares an
+`automation` block, are admin-only, and are resolved in one place —
+`backend/src/swing/services/gate_policy.py`, read once when a run starts and
+carried down as a value.
+
+`off_gate.enabled` together with a relaxed `regime.enforce` is **refused**,
+naming both switches: they are two different overrides of the same thing, and a
+silent precedence rule between two switches an operator chose is exactly what
+nobody remembers. It is refused in the service, not only in the UI.
+
+**What relaxing the gate does not change.** The breadth ramp still sizes the
+book, the momentum floor still applies, the rotation exit still fires at rank
+> 15, and the chandelier stop is untouched.
+
+**Every trade records the policy it was opened under.** `swing_decisions`
+carries the gate state, the index close, its SMA, the 63-session return and
+which rules were being enforced; `swing_stops` carries the same per position.
+`GET /api/swing/performance` splits its statistics by the regime at entry, which
+is the entire payoff — the divergence is only reversible if those trades can be
+taken back out of the numbers.
+
+**A policy change applies to NEW decisions only.** A position keeps the policy it
+was opened under: re-enforcing the regime gate stops new entries and does **not**
+liquidate a book opened while it was relaxed. Those positions leave by rotation
+or by their trailing stop like any other. An entry whose policy cannot be
+established is treated as *enforced* — the exemption fails towards the
+specification rather than towards an exemption nothing can justify.
+
+**The cost of relaxing it, stated plainly.** P8 and P17 are the specification's
+hard kill switch, and §9 attributes the strategy's entire drawdown profile to
+them rather than to the stock selection. §11 tested thirteen ways of trading
+while the gate is off and **not one beat holding cash**: the best, V3b, has 38
+trades over 11 years at a 61% win rate and a mean of +7.81% and still ends lower
+than the baseline, because capital committed to a bear rally is not available at
+the regime flip — which is exactly when the best trades fire. Expect this
+configuration to underperform the 19.9% headline by more than the 12–18% the
+specification already predicts for live trading.
+
+### Orders only inside continuous trading
+
+Analysis runs at any hour: the ranking, the nightly decision, the stop ratchet
+and the journal are all fine at midnight. **Orders are not.** Every buy and
+every sell is checked against `market_clock.can_execute_continuously` **per
+instrument, immediately before the order** — per instrument because F&O
+eligibility moves the close from 15:30 to 15:15, and a run that starts at 15:14
+can cross that boundary mid-list.
+
+A rebalance triggered outside the session still **decides and journals**; the
+decision is valid and it is the execution that is not. Each refusal is recorded
+against its own symbol with the time and the reason, exactly as an unarmed run
+records the identical decision with no orders.
+
+**Nothing is queued for the next open.** The next rebalance re-decides from
+fresh bars and a fresh book, and replaying yesterday's intent is how you trade a
+decision nobody would take today. This deliberately differs from the stop
+monitor, which *does* defer — a triggered stop is a fact about a position that
+has already happened, not a fresh opinion.
+
+The guard is in the swing execution path rather than in `submit_paper_order`. A
+generic guard would be harder to bypass, and it would change MCX crude and the
+chart's one-click entry, neither of which asked for it, and it could not journal
+a swing decision — which is the half of the requirement that makes a refusal
+auditable. Making it generic later means a per-strategy policy read from the
+YAML with the MCX module's behaviour unchanged;
+`backend/tests/test_swing_does_not_disturb_crude.py` pins exactly that.
 
 ## Switching SQLite → MySQL
 
@@ -1292,6 +1388,30 @@ not carried over.
   **12–18% CAGR against a 19.9% headline**, because the backtest is
   survivorship-biased and every parameter was chosen in-sample with no
   walk-forward and no holdout.
+* **This installation is trading with the regime gate NOT ENFORCED, which is a
+  deliberate divergence from the specification.** P8 and P17 are its hard kill
+  switch and §11 found no way of trading through them that beat holding cash.
+  The switch is runtime state rather than a rewrite of the rule, and every trade
+  records the regime and the policy it was opened under so those trades can be
+  filtered out — but the numbers this book produces are **not** a test of the
+  specification's strategy, and they should be read against the `gateOff` bucket
+  of `GET /api/swing/performance` rather than against the 19.9% headline.
+* **Whether §11's own conclusions survive clean data has not been checked.**
+  They were computed on the panel with the phantom 2026-09-14 session, the same
+  defect that moves the §13 ordering. The decision to trade through the gate was
+  taken knowing that.
+* **A first trade has never been placed.** As of 2026-09-18 the rotation has
+  placed no order against live NSE quotes. The fill against the touch and the
+  depth, the stop set at entry, the reason on the `PLACED` event and the cash
+  ledger movement are all **unverified in production** and are the first things
+  to check when one appears (specification §14.3).
+* **MySQL is DDL-compile-verified only.** The 2026-09-18 migration that widens
+  `swing_stops` and adds the regime columns has never been executed against a
+  live MySQL server, only against SQLite.
+* **The next-run countdown on the Live tab is weekday-aware, not holiday-aware.**
+  There is deliberately no holiday list anywhere in this application — the
+  trading calendar is the regime index's own bar dates — so on an exchange
+  holiday the countdown runs down and the run records a skipped session.
 * **The universe is survivorship-biased.** `nifty500.csv` is *today's* Nifty 500
   applied backwards. No point-in-time membership history is available without
   paid data. The research project measured the size of this effect once, on a

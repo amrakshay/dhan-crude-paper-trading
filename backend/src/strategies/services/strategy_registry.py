@@ -37,6 +37,7 @@ from src.strategies.services.strategy_definition import (
     CAPABILITY_LIVE_PAGES,
     CAPABILITY_PAGES,
     KNOWN_CAPABILITIES,
+    KNOWN_POLICIES,
     STRATEGY_LIVE_PAGES,
     StrategyConfigError,
     StrategyDefinition,
@@ -67,6 +68,12 @@ class StrategyRegistry:
         # scheduler and the execution service read it from code that cannot
         # await, and `StrategyStateService` refreshes it.
         self._strategy_armed: Dict[str, bool] = {}
+        # Whether one of a strategy's own RULES is enforced. Held as an
+        # OVERRIDE map rather than a resolved value: a missing entry means "the
+        # operator has not said", and only the strategy's own module knows what
+        # its YAML declares as the default. The registry deliberately does not
+        # learn what a regime gate is.
+        self._policy_overrides: Dict[str, Dict[str, bool]] = {}
         self._capability_enabled: Dict[str, bool] = {}
         self._lock = threading.RLock()
         self._loaded = False
@@ -128,6 +135,7 @@ class StrategyRegistry:
                       and definition.automation.armed_by_default)
                 for key, definition in definitions.items()
             }
+            self._policy_overrides = {}
             self._capability_enabled = {
                 capability: self._capability_default(capability)
                 for capability in KNOWN_CAPABILITIES
@@ -196,6 +204,7 @@ class StrategyRegistry:
         strategy_states: Dict[str, bool],
         capability_states: Dict[str, bool],
         automation_states: Optional[Dict[str, bool]] = None,
+        policy_states: Optional[Dict[str, bool]] = None,
     ) -> None:
         """Overlay stored state on the defaults. Called at startup and on save.
 
@@ -236,9 +245,18 @@ class StrategyRegistry:
                     )
                 else:
                     self._strategy_armed[key] = bool(armed)
+            self._policy_overrides = {}
+            for toggle_key, enforced in (policy_states or {}).items():
+                parsed = self._parse_policy_key(toggle_key)
+                if parsed is None:
+                    continue
+                key, policy = parsed
+                self._policy_overrides.setdefault(key, {})[policy] = bool(enforced)
         logger.info(
-            "Strategy state applied: strategies=%s capabilities=%s armed=%s",
+            "Strategy state applied: strategies=%s capabilities=%s armed=%s "
+            "policies=%s",
             self._strategy_enabled, self._capability_enabled, self._strategy_armed,
+            self._policy_overrides,
         )
 
     def is_enabled(self, key: str) -> bool:
@@ -320,6 +338,74 @@ class StrategyRegistry:
             for definition in self.all()
             if definition.automation.automated
         ]
+
+    # --- policies ----------------------------------------------------------
+    def _parse_policy_key(self, toggle_key: str) -> Optional[tuple]:
+        """"<strategy>/<policy>" -> (strategy, policy), or None if it names
+        nothing real.
+
+        Ignored rather than trusted, the same way an unknown strategy or
+        capability row is: a stale row must never start influencing
+        configuration, and a policy row for a discretionary module must never
+        start governing one.
+        """
+        text = str(toggle_key)
+        key, separator, policy = text.partition("/")
+        if not separator:
+            logger.warning(
+                "Ignoring stored policy row %r: the key is "
+                "'<strategy_key>/<policy>'.", text,
+            )
+            return None
+        definition = self._definitions.get(key)
+        if definition is None:
+            logger.warning("Ignoring stored policy %r for unknown strategy %r",
+                           policy, key)
+            return None
+        if not definition.automation.automated:
+            logger.warning(
+                "Ignoring stored policy %r for %r: it declares no automation "
+                "block, so it has no rules of its own to enforce -- every "
+                "order in it comes from a person.", policy, key,
+            )
+            return None
+        if policy not in KNOWN_POLICIES:
+            logger.warning("Ignoring stored state for unknown policy %r", text)
+            return None
+        return key, policy
+
+    def policy_override(self, key: str, policy: str) -> Optional[bool]:
+        """What the operator said, or None if they have said nothing.
+
+        None is not False. "Nobody has touched this switch" means the YAML's
+        default applies, and collapsing the two would make a fresh installation
+        behave like one whose operator had deliberately relaxed a rule.
+        """
+        self._ensure()
+        return self._policy_overrides.get(str(key), {}).get(str(policy))
+
+    def set_policy(self, key: str, policy: str, enforced: bool) -> None:
+        self._ensure()
+        definition = self.require(key)
+        if not definition.automation.automated:
+            raise StrategyConfigError(
+                f"Strategy {key!r} declares no automation block, so it has no "
+                f"rules of its own to enforce. Every order in it comes from a "
+                f"person."
+            )
+        if policy not in KNOWN_POLICIES:
+            raise StrategyConfigError(
+                f"Unknown policy {policy!r}. Known: {', '.join(KNOWN_POLICIES)}."
+            )
+        with self._lock:
+            self._policy_overrides.setdefault(str(key), {})[str(policy)] = bool(
+                enforced
+            )
+
+    def policy_states(self) -> Dict[str, Dict[str, bool]]:
+        """Every stored override, per strategy. Absent means "not set"."""
+        self._ensure()
+        return {key: dict(value) for key, value in self._policy_overrides.items()}
 
     # --- capabilities ------------------------------------------------------
     def is_capability_enabled(self, capability: str) -> bool:

@@ -106,6 +106,12 @@ class SwingScheduler:
         # (strategy_key, kind, IST date) -> when it was last attempted.
         self._attempted: Dict[tuple, datetime] = {}
         self._warmed: Dict[tuple, bool] = {}
+        # WHAT IT IS DOING RIGHT NOW, as a state rather than a log line. The
+        # scheduler is the only thing that knows, and a page that says nothing
+        # while a 746-second bar refresh runs looks broken rather than busy.
+        # None means idle -- which is a real answer, not a missing one.
+        self.activity: Optional[str] = None
+        self.activity_since: Optional[datetime] = None
 
     # --- configuration -----------------------------------------------------
     @staticmethod
@@ -221,8 +227,26 @@ class SwingScheduler:
                 await self._warm(definition)
 
         # --- the rebalance --------------------------------------------------
-        if now.time() >= rebalance_at and self._may_attempt(
-            definition.key, RUN_REBALANCE, today, now
+        #
+        # BOUNDED AT BOTH ENDS, and the upper bound is load-bearing. The lower
+        # one is the schedule; without the upper one, any restart later in the
+        # day fires a rebalance -- and because idempotence is the JOURNAL's, that
+        # run writes a REBALANCE record for the session and the next morning's
+        # real rebalance then declines to trade it. A process restarted at 19:00
+        # would quietly consume the next session's only chance to trade.
+        #
+        # It is also the honest reading of the rule: P19 executes at the OPEN.
+        # A rebalance at 19:00 could place nothing anyway -- the per-instrument
+        # guard in the execution service refuses it -- so the only thing the
+        # unbounded window bought was a journal entry that blocked a real run.
+        #
+        # A rebalance that was genuinely missed is REPORTED by the missed-run
+        # detector and never silently re-decided days later, which is the same
+        # rule the nightly follows. The nightly has no upper bound on purpose:
+        # recording what the stored data says is exactly its job, at any hour.
+        if (
+            rebalance_at <= now.time() <= definition.market_hours.close
+            and self._may_attempt(definition.key, RUN_REBALANCE, today, now)
         ):
             ran.append(await self._run_rebalance(definition, now))
 
@@ -233,6 +257,42 @@ class SwingScheduler:
             ran.append(await self._run_nightly(definition, now))
 
         return ran
+
+    @staticmethod
+    def next_occurrence(
+        at: time, trading_days, now: Optional[datetime] = None
+    ) -> Optional[datetime]:
+        """The next IST moment this job is due, as an absolute timestamp.
+
+        Absolute rather than "18:15" so the page can count down LOCALLY instead
+        of re-fetching every second (frontend/CLAUDE.md section 4). The
+        scheduler knows the times and never computed the next occurrence, which
+        is why the Live tab could say when a job runs but not when it next
+        runs.
+
+        NOT HOLIDAY-AWARE, and the payload says so. There is deliberately no
+        holiday list anywhere in this application -- the trading calendar is the
+        regime index's own bar dates -- so this answers the narrower question
+        of the next trading WEEKDAY at that time. On an exchange holiday the
+        countdown runs down and the job records a skipped session, which is the
+        cheap failure; inventing a holiday list to avoid it would be a second
+        calendar to go stale.
+
+        None when the strategy trades on no weekday at all, which is a
+        configuration nobody meant rather than a countdown of zero.
+        """
+        now = now or ist_now()
+        days = {int(day) for day in trading_days}
+        if not days:
+            return None
+        for offset in range(0, 8):
+            candidate = datetime.combine(
+                (now + timedelta(days=offset)).date(), at
+            ).replace(tzinfo=now.tzinfo)
+            if candidate <= now or candidate.weekday() not in days:
+                continue
+            return candidate
+        return None
 
     @staticmethod
     def _minus_minutes(value: time, minutes: int) -> time:
@@ -257,9 +317,19 @@ class SwingScheduler:
     def _mark_attempted(self, strategy_key: str, kind: str, now: datetime) -> None:
         self._attempted[(strategy_key, kind, now.date())] = now
 
+    def _begin(self, activity: str) -> None:
+        self.activity = activity
+        self.activity_since = ist_now()
+        logger.debug("Swing scheduler: %s", activity)
+
+    def _idle(self) -> None:
+        self.activity = None
+        self.activity_since = None
+
     # --- the jobs -----------------------------------------------------------
     async def _warm(self, definition: StrategyDefinition) -> None:
         """Subscribe the names the rebalance might trade, ahead of the open."""
+        self._begin(f"warming the book for {definition.label}")
         try:
             async with session_scope() as session:
                 service, _ = await self._build(session, definition)
@@ -275,12 +345,15 @@ class SwingScheduler:
                 "with no depth will be skipped with a recorded reason.",
                 definition.key, exc,
             )
+        finally:
+            self._idle()
 
     async def _run_rebalance(
         self, definition: StrategyDefinition, now: datetime
     ) -> JobRun:
         run = JobRun(strategy_key=definition.key, kind=RUN_REBALANCE, at=now)
         self._mark_attempted(definition.key, RUN_REBALANCE, now)
+        self._begin(f"rebalancing {definition.label}")
         try:
             portfolios = await self._portfolios(definition.key)
             if not portfolios:
@@ -305,6 +378,8 @@ class SwingScheduler:
             run.detail = f"{type(exc).__name__}: {exc}"
             self.last_error = run.detail
             logger.exception("Swing rebalance for %s failed", definition.key)
+        finally:
+            self._idle()
         return self._record(run)
 
     async def _run_nightly(
@@ -319,6 +394,7 @@ class SwingScheduler:
         """
         run = JobRun(strategy_key=definition.key, kind=RUN_NIGHTLY, at=now)
         self._mark_attempted(definition.key, RUN_NIGHTLY, now)
+        self._begin(f"running the nightly decision for {definition.label}")
         try:
             refreshed = await self._refresh_bars(definition)
             if refreshed is not None:
@@ -353,6 +429,8 @@ class SwingScheduler:
             run.detail = f"{type(exc).__name__}: {exc}"
             self.last_error = run.detail
             logger.exception("Swing nightly for %s failed", definition.key)
+        finally:
+            self._idle()
         return self._record(run)
 
     async def _refresh_bars(self, definition: StrategyDefinition) -> Optional[str]:
@@ -375,6 +453,7 @@ class SwingScheduler:
             InstrumentRepository,
         )
 
+        self._begin(f"refreshing daily bars for {definition.label}")
         try:
             async with session_scope() as session:
                 result = await DailyBarRefreshService(
@@ -397,6 +476,10 @@ class SwingScheduler:
         except Exception as exc:  # noqa: BLE001
             logger.exception("Nightly bar refresh for %s failed", definition.key)
             return f"Bars: refresh failed ({type(exc).__name__}: {exc})."
+        finally:
+            # The nightly job sets its own activity again immediately after
+            # this returns; clearing here would blink "idle" for one poll.
+            self._begin(f"running the nightly decision for {definition.label}")
 
     # --- missed runs --------------------------------------------------------
     async def detect_missed_runs(self) -> List[MissedRun]:
@@ -566,6 +649,13 @@ class SwingScheduler:
                 parameters = SwingParameters.from_definition(definition)
             except Exception:  # noqa: BLE001
                 continue
+            trading_days = definition.market_hours.trading_days
+            next_nightly = self.next_occurrence(
+                parse_hhmm(parameters.schedule.nightly_at), trading_days
+            )
+            next_rebalance = self.next_occurrence(
+                parse_hhmm(parameters.schedule.rebalance_at), trading_days
+            )
             schedules.append(
                 {
                     "strategyKey": definition.key,
@@ -574,8 +664,26 @@ class SwingScheduler:
                     "armed": registry.is_armed(definition.key),
                     "nightlyAtIst": parameters.schedule.nightly_at,
                     "rebalanceAtIst": parameters.schedule.rebalance_at,
+                    # Absolute, so the page counts down locally rather than
+                    # polling once a second. Null when it cannot be computed --
+                    # a countdown that cannot be worked out says so rather than
+                    # showing 00:00.
+                    "nextNightlyAtIst": (
+                        next_nightly.isoformat() if next_nightly else None
+                    ),
+                    "nextRebalanceAtIst": (
+                        next_rebalance.isoformat() if next_rebalance else None
+                    ),
+                    # Weekday only. See `next_occurrence`.
+                    "nextRunHolidayAware": False,
                     "cadence": parameters.schedule.rebalance_cadence,
                     "marketOpen": market_clock.is_market_open(definition),
+                    "marketOpensAtIst": (
+                        definition.market_hours.open.strftime("%H:%M")
+                    ),
+                    "marketClosesAtIst": (
+                        definition.market_hours.close.strftime("%H:%M")
+                    ),
                 }
             )
 
@@ -585,6 +693,14 @@ class SwingScheduler:
             "warmupMinutes": self._warmup_minutes(),
             "runs": self.runs,
             "nowIst": ist_now().isoformat(),
+            # What it is doing RIGHT NOW. None means idle, which is a real
+            # state: "idle" and "the scheduler is not running" are different
+            # answers and the page renders them differently.
+            "running": self._task is not None and not self._task.done(),
+            "activity": self.activity,
+            "activitySinceIst": (
+                self.activity_since.isoformat() if self.activity_since else None
+            ),
             "schedules": schedules,
             "recent": [run.as_dict() for run in reversed(self.history)],
             # Reported, never repaired. See `detect_missed_runs`.

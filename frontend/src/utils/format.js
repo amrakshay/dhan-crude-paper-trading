@@ -85,6 +85,27 @@ export function formatCountdown(seconds) {
   return `${secs}s`;
 }
 
+/**
+ * A countdown that may be days away, for the swing scheduler's next run.
+ *
+ * `formatCountdown` deliberately never shows days, because the thing it counts
+ * down to — a token expiry — is hours away at most. The next rebalance after a
+ * Friday close is on Monday, and "66h 30m" is a worse answer than "2d 18h".
+ *
+ * Null in, null out: a countdown that cannot be computed says so rather than
+ * showing 00:00.
+ */
+export function formatCountdownLong(seconds) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return null;
+  if (seconds <= 0) return 'due now';
+  const days = Math.floor(seconds / 86400);
+  if (days >= 1) {
+    const hours = Math.floor((seconds % 86400) / 3600);
+    return `${days}d ${hours}h`;
+  }
+  return formatCountdown(seconds);
+}
+
 /** Resident memory and similar byte counts, in the unit a human would pick. */
 export function formatBytes(value, fallback = '—') {
   if (value === null || value === undefined || Number.isNaN(value)) return fallback;

@@ -36,6 +36,7 @@ from src.swing.database.db_models.swing_session_model import (
     STATUS_COMPLETED,
     STATUS_SKIPPED,
 )
+from src.swing.services.gate_policy import GatePolicy, resolve_gate_policy
 from src.swing.services.journal_service import Decision, SessionRecord, SwingJournalService
 from src.swing.services.ranking_service import RankingService, RankingSnapshot
 from src.swing.services.rebalance_planner import (
@@ -69,11 +70,18 @@ class SwingRunner:
         definition: StrategyDefinition,
         parameters: Optional[SwingParameters] = None,
         stops: Optional["StopService"] = None,
+        policy: Optional[GatePolicy] = None,
     ):
         self.ranking = ranking
         self.journal = journal
         self.definition = definition
         self.parameters = parameters or SwingParameters.from_definition(definition)
+        # Which of this strategy's rules are being enforced. Resolved ONCE,
+        # when the runner is built, and carried down as a value -- see
+        # `gate_policy.py`. The nightly run records it on every decision it
+        # writes, so a session can be read back against the policy it was
+        # decided under rather than the policy in force when someone reads it.
+        self.policy = policy or resolve_gate_policy(definition, self.parameters)
         # P15's nightly ratchet. Optional so the decision half of this runner
         # can be exercised without a stop table; the scheduler always supplies
         # one, because a nightly run that decides and does not move the stops
@@ -160,6 +168,7 @@ class SwingRunner:
             status=STATUS_COMPLETED,
             started_at=started,
             held_symbols=held_symbols,
+            gate=effective_gate(snapshot, self.parameters, self.policy),
         )
 
     # --- the decision itself ----------------------------------------------
@@ -176,8 +185,8 @@ class SwingRunner:
         quantities to the rebalance, where a price exists.
         """
         parameters = self.parameters
-        gate = effective_gate(snapshot, parameters)
-        planner = RebalancePlanner(parameters, self.definition.key)
+        planner = RebalancePlanner(parameters, self.definition.key, self.policy)
+        gate = planner.gate(snapshot)
         held = {holding.symbol: holding for holding in holdings}
         decisions: List[Decision] = []
 

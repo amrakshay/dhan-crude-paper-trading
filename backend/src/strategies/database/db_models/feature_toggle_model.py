@@ -28,6 +28,19 @@ SCOPE_CAPABILITY = "CAPABILITY"
 # makes it compute, decide and journal; arming is what lets it spend money.
 SCOPE_AUTOMATION = "AUTOMATION"
 
+# Whether one of a strategy's own RULES is enforced. `toggle_key` is
+# "<strategy_key>/<policy>" -- see KNOWN_POLICIES in strategy_definition.py for
+# what a policy is and, just as importantly, what it is not.
+#
+# A fourth scope rather than a `strategy_settings` table, because every one of
+# these is a named boolean, per scope, overlaid on a default at startup and
+# after every change, with unknown keys ignored and an audit column -- which is
+# precisely what this table already is. A dedicated table becomes worth its
+# migration the moment the FIRST NON-BOOLEAN policy appears (a threshold, a
+# mode with three values); until then it would be a second copy of this
+# machinery.
+SCOPE_POLICY = "POLICY"
+
 
 class FeatureToggle(TimestampedModel):
     __tablename__ = "feature_toggles"
