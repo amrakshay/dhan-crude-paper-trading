@@ -87,6 +87,22 @@ dhan:
   # on save -- the UI wins. See src/settings/services/settings_service.py.
   client_id: "${DHAN_CLIENT_ID:}"
   access_token: "${DHAN_ACCESS_TOKEN:}"
+
+  # KEEP THE TOKEN ALIVE. A Dhan access token lasts 24 hours; when it lapses
+  # the feed, the chart, the option chain and the overnight bar refresh all
+  # stop, quietly, until something asks for a price. POST /v2/RenewToken
+  # exchanges an ACTIVE token for a fresh one and is the only non-market-data
+  # Dhan endpoint this application can reach -- it sends the token already
+  # held and nothing else, so it can extend a session but never start one.
+  #
+  # A token that has FULLY lapsed cannot be renewed by anyone, and this
+  # application deliberately cannot mint a replacement: that would mean
+  # reaching auth.dhan.co with the operator's PIN and TOTP secret, which was
+  # considered and declined on 2026-09-18. Generate one on Dhan Web instead.
+  auto_renew_token: "${DHAN_AUTO_RENEW_TOKEN:true}"
+  # Renew once less than this many hours remain. Six of twenty-four leaves
+  # room for a sleeping machine, a Dhan outage and several retries.
+  renew_token_before_hours: 6
   api_base_url: "https://api.dhan.co/v2"
   feed_ws_url: "wss://api-feed.dhan.co"
   # 35 MB CSV, refreshed daily by Dhan. Re-fetched at runtime because security

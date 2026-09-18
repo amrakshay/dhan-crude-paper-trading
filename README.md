@@ -193,6 +193,36 @@ picks them up. The page shows where each value came from (`saved here` /
 Saving restarts the market feed in place so changes take effect immediately;
 connected browser tabs keep their WebSocket.
 
+### The access token renews itself
+
+A Dhan access token lasts **24 hours**. When it lapses the live feed stops, the
+chart stops, the option chain stops and the swing rotation's overnight bar
+refresh fails — quietly, until something asks for a price. For a strategy that
+trades unattended at 09:16 that is the difference between working and not.
+
+The application now renews it on its own. `dhan.auto_renew_token` (default
+`true`) starts a `dhan-token-refresh` task that reads the token's **own expiry**
+— Dhan issues JWTs and the `exp` claim is readable locally — and calls
+`POST /v2/RenewToken` when under `dhan.renew_token_before_hours` (6) remain.
+Reading the token rather than running on a clock makes it self-correcting: a
+token pasted in at an odd hour is renewed relative to itself, and a restart
+picks up wherever the token actually is.
+
+**What it cannot do, on purpose.** Renewal extends a session; it cannot start
+one. The only credential it sends is the token already stored. Dhan's other
+route — `auth.dhan.co/app/generateAccessToken`, which mints a token from your
+client id, six-digit PIN and a TOTP — is deliberately unreachable from this
+codebase and is not on the safety allowlist, because it would mean storing your
+PIN. The cost of that choice: a token allowed to lapse **completely** cannot be
+renewed by anyone, so generate a fresh one on Dhan Web and save it on the
+Settings page. The log and the health page say exactly that when it happens.
+
+**Why not the API Key option** you see on Dhan's site: it is an OAuth flow whose
+second step is a browser login with 2FA, every time. The key and secret last 12
+months but the access token they produce still expires in 24 hours, so it adds
+steps rather than removing them. It exists for platforms logging *other people*
+in.
+
 ### The synthetic feed
 
 `DHAN_SYNTHETIC_FEED=true` is the default so the stack runs with no credentials
@@ -1560,6 +1590,13 @@ not carried over.
   depth, the stop set at entry, the reason on the `PLACED` event and the cash
   ledger movement are all **unverified in production** and are the first things
   to check when one appears (specification §14.3).
+* **Token renewal has never been seen to succeed against Dhan.** As of
+  2026-09-18 the refresher has been exercised end to end against a live token
+  only to the point of correctly deciding *not* to renew (12.5 hours left,
+  threshold 6). The actual `POST /v2/RenewToken` call — its response shape, and
+  Dhan's documented refusal to renew a token that did not come from Dhan Web —
+  is **unverified in production** and is the first thing to check the morning
+  after it first fires.
 * **There is no audit HISTORY of the switches.** `feature_toggles` and
   `strategy_settings` carry the CURRENT value of each switch with whoever last
   set it and when — nothing more. "The gate was relaxed at 15:19 and

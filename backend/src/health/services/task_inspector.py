@@ -38,6 +38,10 @@ TASK_DESCRIPTIONS = {
     "swing-scheduler": (
         "Runs the rotation's nightly decision and its rebalance on an IST clock"
     ),
+    "dhan-token-refresh": (
+        "Renews the Dhan access token before its 24 hours run out, so the feed "
+        "does not stop overnight"
+    ),
 }
 
 
@@ -163,6 +167,15 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
 
     if config_utils.get_property_value_boolean("trading.matcher_enabled", True):
         expected.add("order-matcher")
+
+    # Renewing the token is pointless when the prices are generated locally --
+    # there is no token in play -- so it is expected only for a live feed.
+    if config_utils.get_property_value_boolean(
+        "dhan.auto_renew_token", True
+    ) and not config_utils.get_property_value_boolean(
+        "market_feed.synthetic_feed", False
+    ):
+        expected.add("dhan-token-refresh")
     if _chart_trading_expected():
         expected.add("bracket-monitor")
 

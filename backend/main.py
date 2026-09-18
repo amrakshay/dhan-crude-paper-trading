@@ -248,6 +248,13 @@ async def lifespan(app: FastAPI):
         get_swing_stop_monitor,
         shutdown_swing_stop_monitor,
     )
+    # A Dhan access token lasts 24 hours. When it lapses the feed, the chart
+    # and the overnight bar refresh all stop quietly, which for a strategy that
+    # trades unattended at 09:16 is the difference between working and not.
+    from src.settings.services.token_refresh_service import (
+        get_token_refresh_monitor,
+        shutdown_token_refresh_monitor,
+    )
 
     try:
         await get_feed_manager().start()
@@ -283,12 +290,21 @@ async def lifespan(app: FastAPI):
             "rebalance will NOT run on their own"
         )
 
+    try:
+        await get_token_refresh_monitor().start()
+    except Exception:
+        logger.exception(
+            "Dhan token refresh failed to start; the access token will NOT be "
+            "renewed automatically and the feed will stop when it expires"
+        )
+
     logger.info("Startup complete; the API is accepting requests")
 
     yield
 
     logger.info("Crude paper-trading backend shutting down")
     try:
+        await shutdown_token_refresh_monitor()
         await shutdown_swing_scheduler()
         await shutdown_swing_stop_monitor()
         await shutdown_bracket_monitor()

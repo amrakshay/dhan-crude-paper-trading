@@ -29,13 +29,35 @@ Python file's AST and fails the build on:
 Comments and docstrings are exempt — documentation may name the endpoints it is
 refusing to call. Everything else is in scope.
 
-The URL allowlist has grown exactly once, on 2026-09-16, when the price chart
-added `https://api.dhan.co/v2/charts/historical` and
-`https://api.dhan.co/v2/charts/intraday`. That is the sanctioned way to extend
-it: add the exact read-only market-data URL, keep the constants in a single
-client module, and leave the matching logic alone. **Never loosen the pattern,
-the endpoint list or the scanner** — a regex that accepts a family of URLs is
-not the same guarantee as a set of five you can read in one glance.
+The URL allowlist has grown twice. On 2026-09-16 the price chart added
+`https://api.dhan.co/v2/charts/historical` and `.../charts/intraday`. That is
+the sanctioned way to extend it: add the exact read-only market-data URL, keep
+the constants in a single client module, and leave the matching logic alone.
+**Never loosen the pattern, the endpoint list or the scanner** — a regex that
+accepts a family of URLs is not the same guarantee as a set you can read in one
+glance.
+
+On 2026-09-18 it gained `https://api.dhan.co/v2/RenewToken`, which is **not
+market data** and is the only entry that is not. It exchanges the access token
+this application already holds for a fresh 24-hour one. It was an explicit
+decision, because the alternative is a token pasted in by hand every day and an
+expired token silently stops the feed, the chart and the overnight bar refresh.
+What makes it acceptable is that it sends nothing the application did not
+already have: it can extend a session the operator started, never start one.
+
+**`auth.dhan.co` is deliberately absent and must stay absent.** That host turns
+a client id, a six-digit PIN and a TOTP into a token —
+`/app/generateAccessToken` — and `/app/generate-consent` begins an OAuth login.
+Either would let this application authenticate AS the operator and would mean
+storing their PIN. Considered the same day and declined; the cost is that a
+token allowed to lapse entirely must be replaced by hand.
+
+The scanner's host pattern was widened in the same change. It used to name
+`api.dhan.co`, `api-feed.dhan.co` and `images.dhan.co`, so a call to
+`auth.dhan.co` would have passed without a word — a closed set of hosts is only
+a guarantee if it is closed against the hosts nobody thought of. It now matches
+`dhan.co` and every subdomain, so a new Dhan host fails the build until someone
+allowlists it on purpose.
 
 **Consequences for naming.** Local order operations are deliberately called
 `submit_paper_order` and `cancel_paper_order`, never `place_order` /
@@ -359,6 +381,18 @@ bug until 2026-09-17, found by the system health page. `tests/
 test_startup_applies_stored_settings.py` asserts both that the overlay happens
 and that it happens before the feed starts — moving the call after the feed
 would reintroduce the bug in a form the behavioural test alone would miss.
+
+**The access token renews itself, and cannot mint itself.**
+`src/settings/services/token_refresh_service.py` watches the token's OWN expiry
+— `inspect_token()` reads the `exp` claim locally — and renews when under six
+hours remain, rather than running on a clock it could get wrong. The renewed
+token is saved through `SettingsService.save()` so it lands encrypted, is
+registered with the log redactor and is overlaid onto the running config, and
+the feed is then `reconfigure()`d so the process is not left holding a fresh
+token while using the old one. Three outcomes are kept apart: renewed, could
+not renew yet (retry), and will never renew — a token that has fully lapsed
+needs a human, and saying so once beats asking Dhan every fifteen minutes for
+something that cannot succeed.
 
 **The Dhan access token is encrypted at rest and never leaves the server.**
 Responses carry a mask and decoded JWT metadata only. If you add a settings

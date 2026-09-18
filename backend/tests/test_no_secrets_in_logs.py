@@ -467,6 +467,97 @@ async def test_the_swing_endpoints_never_return_a_secret(auth_client, captured_l
     _assert_clean(captured_logs, token)
 
 
+async def test_renewing_the_token_never_logs_either_token(captured_logs, monkeypatch):
+    """The renewal handles TWO secrets at once, which is new here.
+
+    Every other path in this application receives a token from a human or
+    reads one from the database. This one sends the old token to Dhan and
+    receives a new one, so a careless log line -- or an httpx exception
+    carrying a request URL -- could leak either. Both are asserted.
+    """
+    from src.market.services import dhan_token_client
+
+    old = _sentinel_token()
+    new = _sentinel_token()
+
+    client = dhan_token_client.DhanTokenClient()
+    monkeypatch.setattr(
+        dhan_token_client.DhanTokenClient,
+        "_credentials",
+        staticmethod(lambda: (SENTINEL_CLIENT_ID, old)),
+    )
+
+    class _Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"accessToken": new, "expiryTime": "2026-09-19T21:00:00"}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return _Response()
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Client)
+
+    payload = await client.renew()
+    assert payload["accessToken"] == new
+
+    _assert_clean(captured_logs, old)
+    _assert_clean(captured_logs, new)
+    _assert_clean(captured_logs, SENTINEL_CLIENT_ID)
+
+
+async def test_a_failed_renewal_does_not_log_the_url_it_called(
+    captured_logs, monkeypatch
+):
+    """An httpx error can carry the request; the request can carry a token.
+
+    Dhan's own docs show tokens as QUERY PARAMETERS on other endpoints, so a
+    handler that interpolated an exception's text into a log line would be one
+    API change away from leaking one. Only the exception TYPE is reported.
+    """
+    from src.market.services import dhan_token_client
+
+    token = _sentinel_token()
+    monkeypatch.setattr(
+        dhan_token_client.DhanTokenClient,
+        "_credentials",
+        staticmethod(lambda: (SENTINEL_CLIENT_ID, token)),
+    )
+
+    class _Exploding:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            raise RuntimeError(f"connection failed for access-token={token}")
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Exploding)
+
+    client = dhan_token_client.DhanTokenClient()
+    with pytest.raises(dhan_token_client.TokenRenewalError):
+        await client.renew()
+
+    _assert_clean(captured_logs, token)
+    assert token not in (client.last_error or ""), "the token reached last_error"
+
+
 async def test_the_swing_health_endpoint_never_returns_a_secret(
     auth_client, captured_logs
 ):

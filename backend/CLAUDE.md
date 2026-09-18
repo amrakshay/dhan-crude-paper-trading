@@ -263,6 +263,18 @@ by-expiry / by-strike slices and the equity curve possible at all.
 - `inspect_token()` decodes the JWT **without verifying the signature** — Dhan
   signed it with a key we do not hold, and we are reading metadata, not trusting
   it. Do not "fix" this by verifying.
+- **`dhan_token_client.py` is the third Dhan client and the only one that is
+  not market data.** One endpoint, `/RenewToken`, named in that file and
+  nowhere else (asserted). It reads the token from the live configuration
+  rather than taking one as an argument, so no caller has to hold a token to
+  use it. Its failure modes are two types, not one: `TokenExpiredError` means
+  stop and tell a person, `TokenRenewalError` means try again later.
+- **A renewal handles two secrets at once**, which nothing else here does — the
+  old token goes out and a new one comes back. Neither is ever logged, and an
+  httpx exception's MESSAGE is deliberately not interpolated into the log or
+  into `last_error`, because Dhan's own docs put tokens in query strings on
+  other endpoints and an error can carry the request. Only the exception type
+  is reported. Both are asserted in `tests/test_no_secrets_in_logs.py`.
 - Changing credentials or the synthetic toggle requires
   `FeedManager.reconfigure()`. It rebuilds the feed client, book and greeks
   poller but deliberately **keeps the broadcaster**, so connected browser tabs
