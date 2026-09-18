@@ -293,6 +293,22 @@ than anywhere except the health page.
 - **A withheld CAGR says why.** When money moved into or out of the portfolio
   after the first trade, CAGR, drawdown and MAR come back null with a note -- a
   deposit is not a gain and a withdrawal is not a drawdown.
+- **The "How it works" tab restates no number.** `SwingExplainer.jsx` renders
+  `GET /api/swing/explain`, which reads every threshold, multiple and lookback
+  out of the strategy's own YAML. Hardcoding "3.5 × ATR" in JSX would be a
+  second source of truth (root `CLAUDE.md` §7) and it would go on saying 3.5
+  for as long as it took someone to notice the configuration had changed. The
+  prose explains WHY a rule exists; the values always come from the payload.
+- **Its diagrams are inline SVG in theme tokens**, not a charting dependency
+  and not a hardcoded hex — five static pictures do not justify a library, and
+  `theme.palette.*` / `theme.market.*` is what makes them legible in both
+  modes without a second set of assets. Where the live snapshot is available
+  they are drawn with TODAY's numbers: the funnel shows the real filter census
+  and the breadth ramp marks where the market actually is. A diagram of the
+  rule in the abstract teaches less than the same diagram with this morning's
+  market in it.
+- **The tab is in the URL** (`?tab=how-it-works`), so "read this page" is a
+  link somebody can send.
 - **The page is NOT gated by the strategy toggle.** `/swing` is deliberately
   outside `gated_pages()`: a journal is history, and switching the strategy off
   must not hide the record of what it did. Reading it is open to any signed-in

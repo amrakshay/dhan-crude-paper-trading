@@ -63,6 +63,10 @@ class SwingController:
     ) -> Dict[str, Any]:
         return await self._service(strategy_key).performance(portfolio_id)
 
+    def explain(self, strategy_key: str) -> Dict[str, Any]:
+        """The rule as configured -- what the "How it works" page renders."""
+        return self._service(strategy_key).explain()
+
     async def stops(
         self, strategy_key: str, portfolio_id: Optional[int], limit: int
     ) -> Dict[str, Any]:

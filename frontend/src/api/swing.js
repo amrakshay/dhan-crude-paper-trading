@@ -38,6 +38,12 @@ export const swingApi = {
   performance: (strategyKey, portfolioId) =>
     api.get(`/swing/performance${toQuery({ strategyKey, portfolioId })}`),
 
+  // The rule as CONFIGURED — every threshold, multiple and lookback read out
+  // of the strategy's own YAML. The "How it works" page renders this rather
+  // than restating the numbers in JavaScript, which would be a second source
+  // of truth that goes stale silently.
+  explain: (strategyKey) => api.get(`/swing/explain${toQuery({ strategyKey })}`),
+
   // Both obey the same gates as the scheduled runs. The nightly never places
   // an order at all; the rebalance places one only when the strategy is ARMED.
   runNightly: (strategyKey, portfolioId, force = false) =>

@@ -925,6 +925,24 @@ Admins get two buttons: *Run nightly now* (which never places an order) and
 *Run rebalance now* (which places one only if the strategy is armed). Both obey
 exactly the same gates as the scheduled runs.
 
+A second tab, **How it works** (`/swing?tab=how-it-works`), explains the rule
+step by step for someone who has never seen it: the shape of the trading day,
+the filters as a funnel, why the score divides by volatility, how breadth
+decides the size of the book, the two exits, and the costs — with the P1–P19
+table at the bottom. Five inline SVG diagrams carry it, drawn in theme tokens
+so they work in both light and dark, and **drawn with today's real numbers**
+where the live snapshot has them: the funnel shows this session's actual filter
+census and the breadth ramp marks where the market actually is.
+
+Nothing on that tab is typed in by hand. Every threshold, multiple and lookback
+comes from `GET /api/swing/explain`, which reads them out of
+`conf/strategies/nse-swing-momentum.yaml` — a page that restated "3.5 × ATR" in
+JavaScript would be a second source of truth and would go on saying 3.5 for as
+long as it took someone to notice the configuration had changed. The caveats
+are on the page too, in the same weight as the rules: it is a backtest, the
+universe is survivorship-biased, the parameters were chosen in-sample, and the
+returns are concentrated.
+
 The page is deliberately **not** hidden when the strategy is switched off. A
 journal is history, and history does not go away with a toggle.
 

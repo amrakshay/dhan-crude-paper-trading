@@ -613,6 +613,54 @@ async def test_the_swing_module_ships_enabled_but_not_armed(definition):
     assert definition.automation.armed_by_default is False
 
 
+# --- the rule, as configured --------------------------------------------------
+
+
+async def test_the_explainer_reads_every_parameter_out_of_the_yaml(
+    db_session, definition, parameters
+):
+    """The "How it works" page renders this; it restates nothing.
+
+    A page that hardcoded "3.5 x ATR" would be a second source of truth and
+    would go on saying 3.5 for as long as it took someone to notice the YAML
+    had changed (root CLAUDE.md section 7). So every value the page prints has
+    to be derived here, from the same `SwingParameters` the strategy trades on.
+    """
+    from src.swing.services.swing_service import SwingService
+
+    payload = SwingService.for_strategy(db_session, STRATEGY).explain()
+    by_code = {row["code"]: row for row in payload["parameters"]}
+
+    # Every parameter the specification names, P1 through P19.
+    assert [f"P{index}" for index in range(1, 20)] == [
+        code for code in by_code if code.startswith("P")
+    ]
+    assert str(parameters.trail_atr_multiple) in by_code["P14"]["value"]
+    assert str(parameters.rotation_exit_rank) in by_code["P16"]["value"]
+    assert str(parameters.position_size_divisor) in by_code["P13"]["value"]
+    assert str(parameters.max_positions) == by_code["P12"]["value"]
+    assert f"{parameters.momentum_floor:.0%}" in by_code["P6"]["value"]
+    assert payload["schedule"]["nightlyAtIst"] == parameters.schedule.nightly_at
+    assert payload["offGate"]["enabled"] is parameters.off_gate.enabled
+
+    # The regime index is read, never traded -- it is deliberately not a row in
+    # `instruments`, because Dhan's ids are unique per segment and id 13 is
+    # NIFTY in IDX_I and ABB in NSE_EQ.
+    assert payload["regimeIndex"]["traded"] is False
+
+    # And the limits are stated in the same breath as the rule.
+    assert any("BACKTEST" in caveat for caveat in payload["caveats"])
+    assert any("survivorship" in caveat for caveat in payload["caveats"])
+
+
+async def test_a_discretionary_module_has_no_explainer(db_session):
+    """MCX crude takes no decisions of its own, so there is nothing to explain."""
+    from src.swing.services.swing_service import SwingService, SwingServiceError
+
+    with pytest.raises(SwingServiceError):
+        SwingService.for_strategy(db_session, "mcx-crude-options")
+
+
 # --- ordering ----------------------------------------------------------------
 
 

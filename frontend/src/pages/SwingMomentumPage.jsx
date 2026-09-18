@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -17,6 +18,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tab,
+  Tabs,
   Tooltip,
   Typography,
 } from '@mui/material';
@@ -25,6 +28,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { swingApi } from '../api/swing';
+import SwingExplainer from '../components/SwingExplainer';
 import { useAuth } from '../auth/AuthContext';
 import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 import { formatPrice, formatQty } from '../utils/format';
@@ -706,8 +710,13 @@ export default function SwingMomentumPage() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [explain, setExplain] = useState(null);
   const [busy, setBusy] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // The tab lives in the URL so "read this page" is a link somebody can send.
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'how-it-works' ? 'how-it-works' : 'live';
 
   const load = useCallback(async () => {
     try {
@@ -738,6 +747,23 @@ export default function SwingMomentumPage() {
     const timer = setInterval(load, POLL_MS);
     return () => clearInterval(timer);
   }, [load]);
+
+  // The rule as configured. Fetched once: it changes when someone edits the
+  // strategy YAML and restarts, not every ten seconds.
+  useEffect(() => {
+    let cancelled = false;
+    swingApi
+      .explain(STRATEGY)
+      .then((payload) => {
+        if (!cancelled) setExplain(payload);
+      })
+      .catch(() => {
+        // The live tab must still work if this fails; the explainer says so.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const openDetail = async (sessionId) => {
     if (openSession === sessionId) {
@@ -785,6 +811,22 @@ export default function SwingMomentumPage() {
         {status?.trackRecord?.note ??
           'No live track record. Every figure here comes from paper orders in this database.'}
       </Alert>
+
+      <Tabs
+        value={tab}
+        onChange={(event, next) =>
+          setParams(next === 'live' ? {} : { tab: next }, { replace: true })
+        }
+        sx={{ borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab value="live" label="Live" />
+        <Tab value="how-it-works" label="How it works" />
+      </Tabs>
+
+      {tab === 'how-it-works' ? (
+        <SwingExplainer explain={explain} status={status} />
+      ) : (
+        <>
 
       {error ? <Alert severity="error" onClose={() => setError(null)}>{error}</Alert> : null}
       {notice ? (
@@ -911,6 +953,8 @@ export default function SwingMomentumPage() {
           </Table>
         </TableContainer>
       </Box>
+        </>
+      )}
     </Stack>
   );
 }

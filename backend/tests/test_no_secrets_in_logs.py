@@ -445,6 +445,7 @@ async def test_the_swing_endpoints_never_return_a_secret(auth_client, captured_l
         await auth_client.get(f"/api/swing/status?portfolioId={portfolio_id}"),
         await auth_client.get(f"/api/swing/book?portfolioId={portfolio_id}"),
         await auth_client.get("/api/swing/history"),
+        await auth_client.get("/api/swing/explain"),
         await auth_client.get("/api/swing/stops"),
         await auth_client.get(f"/api/swing/performance?portfolioId={portfolio_id}"),
     ]

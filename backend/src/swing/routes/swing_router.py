@@ -120,6 +120,22 @@ async def get_performance(
     return await controller.performance(strategy_key, portfolio_id)
 
 
+@swing_router.get("/explain")
+async def explain(
+    strategy_key: str = Query(DEFAULT_STRATEGY, alias="strategyKey"),
+    controller: SwingController = Depends(get_swing_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> Dict[str, Any]:
+    """Every number that defines this strategy, read from its own YAML.
+
+    The "How it works" page renders this rather than restating the values in
+    JavaScript: no number that affects a trade is written twice (root
+    `CLAUDE.md` section 7). Each entry carries the specification's own
+    parameter code so the page and the handoff can be read side by side.
+    """
+    return controller.explain(strategy_key)
+
+
 @swing_router.post("/runs/nightly")
 async def run_nightly(
     request: RunRequest,

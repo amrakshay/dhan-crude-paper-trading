@@ -217,6 +217,198 @@ class SwingService:
             ),
         }
 
+    # --- the rule, as configured --------------------------------------------
+    def explain(self) -> Dict[str, Any]:
+        """Every number that defines this strategy, read from its own YAML.
+
+        The "How it works" page renders this rather than restating the values
+        in JavaScript. Root `CLAUDE.md` section 7 is why: no number that
+        affects a trade is written twice. A page that hardcoded "3.5 x ATR"
+        would be a second source of truth, and it would go on saying 3.5 for
+        as long as it took someone to notice the YAML had changed.
+
+        Each entry carries the specification's own parameter code, so the page
+        and `SWING_MOMENTUM_HANDOFF.md` can be read side by side.
+        """
+        parameters = self.parameters
+        regime = parameters.regime
+        schedule = parameters.schedule
+        off_gate = parameters.off_gate
+        universe = self.definition.universe
+
+        return {
+            "strategyKey": self.definition.key,
+            "label": self.definition.label,
+            "description": self.definition.description,
+            "specification": (
+                "~/Workarea/local/pullback/backend/intrday_test_strategy/"
+                "research2/SWING_MOMENTUM_HANDOFF.md"
+            ),
+            "universe": {
+                "name": universe.name if universe else None,
+                "size": len(universe) if universe else None,
+                "file": f"conf/universes/{universe.name}.csv" if universe else None,
+                "segment": self._equity_segment(),
+            },
+            "regimeIndex": self._reference_payload(),
+            "chargesRateCard": self.definition.charges_rate_card,
+            "marketHours": {
+                "open": self.definition.market_hours.open.strftime("%H:%M"),
+                "close": self.definition.market_hours.close.strftime("%H:%M"),
+                "timezone": self.definition.market_hours.timezone,
+                "closingAuction": self._closing_auction_payload(),
+            },
+            "schedule": {
+                "nightlyAtIst": schedule.nightly_at,
+                "rebalanceAtIst": schedule.rebalance_at,
+                "cadence": schedule.rebalance_cadence,
+            },
+            "automation": {
+                "automated": self.definition.automation.automated,
+                "armedByDefault": self.definition.automation.armed_by_default,
+                "maxLotsPerOrder": self.definition.automation.max_lots_per_order,
+            },
+            "offGate": {
+                "enabled": off_gate.enabled,
+                "slots": off_gate.slots,
+                "momentumFloor": off_gate.momentum_floor,
+                "requireEntryReturn": off_gate.require_entry_return,
+            },
+            "parameters": [
+                _param("P1", "Universe", universe.name if universe else "—",
+                       "Nifty 500 members, refreshed by hand each quarter."),
+                _param("P2", "Liquidity floor",
+                       f"ADV20 >= Rs {parameters.liquidity_floor_rupees:,.0f}",
+                       f"Mean of close x volume over "
+                       f"{parameters.liquidity_window_sessions} sessions. RUPEE "
+                       f"turnover, not share volume."),
+                _param("P3", "Price floor", f"close >= Rs {parameters.price_floor:,.0f}",
+                       "Keeps penny stocks out of a book sized in tenths."),
+                _param("P4", "Trend qualifier",
+                       f"close > SMA{parameters.trend_sma_sessions}",
+                       "The stock's OWN moving average, not the index's."),
+                _param("P5", "Momentum",
+                       f"close[t-{parameters.momentum_skip_sessions}] / "
+                       f"close[t-{parameters.momentum_lookback_sessions}] - 1",
+                       f"Six months, with the most recent "
+                       f"{parameters.momentum_skip_sessions} sessions skipped so a "
+                       f"one-week spike cannot buy its way in."),
+                _param("P6", "Momentum floor",
+                       f"> {parameters.momentum_floor:.0%}",
+                       "An absolute filter: a name must be going up, not merely "
+                       "going up faster than the rest."),
+                _param("P7", "Rank score",
+                       f"momentum / (ATR{parameters.atr_sessions} / close)",
+                       "THE differentiating idea. Dividing by ATR% penalises "
+                       "momentum bought with volatility. Removing it measures "
+                       "29% CAGR at an unacceptable -31% drawdown."),
+                _param("P8", "Regime gate",
+                       f"{self._index_symbol()} close > "
+                       f"SMA{regime.sma_sessions}",
+                       "The hard kill switch. Below it, the book goes to 100% cash."),
+                _param("P9", "Entry filter",
+                       f"{self._index_symbol()} {regime.entry_return_sessions}-session "
+                       f"return > {regime.entry_return_minimum:.0%}",
+                       "Blocks NEW entries only. It never forces an exit."),
+                _param("P10", "Breadth",
+                       f"fraction of the liquid universe above its own "
+                       f"SMA{parameters.trend_sma_sessions}",
+                       "Measured over the names that passed P2 and P3 AND have a "
+                       "defined SMA200 -- a name too young for one is in neither "
+                       "the numerator nor the denominator."),
+                _param("P11", "Slots allowed",
+                       f"round({parameters.max_positions} x clamp((breadth - "
+                       f"{parameters.breadth_lower}) / {parameters.breadth_span}, 0, 1))",
+                       f"{parameters.breadth_lower:.0%} of the liquid universe buys "
+                       f"nothing; "
+                       f"{parameters.breadth_lower + parameters.breadth_span:.0%} buys "
+                       f"the full book. The SPAN is configured rather than derived, "
+                       f"because 0.65 - 0.35 is not 0.30 in IEEE-754 and the "
+                       f"difference is a whole slot."),
+                _param("P12", "Max positions", str(parameters.max_positions),
+                       "The loss cap: one name down 20% is 2% of equity."),
+                _param("P13", "Position size",
+                       f"total equity / {parameters.position_size_divisor}",
+                       f"Whole shares, floored. Deliberately separate from P12, so "
+                       f"a narrow market holds cash rather than concentrating: "
+                       f"sizing stays at "
+                       f"{1 / parameters.position_size_divisor:.0%} of equity even "
+                       f"when breadth allows only four slots."),
+                _param("P14", "Initial stop",
+                       f"entry - {parameters.trail_atr_multiple} x "
+                       f"ATR{parameters.atr_sessions}",
+                       "Set on the session of entry."),
+                _param("P15", "Trailing stop",
+                       f"max(stop, highest close since entry - "
+                       f"{parameters.trail_atr_multiple} x ATR{parameters.atr_sessions})",
+                       "Ratchets UP only. Never down -- ATR widens after a violent "
+                       "day, and the naive formula would lower the stop on exactly "
+                       "the session the position became more dangerous."),
+                _param("P16", "Rotation exit",
+                       f"rank > {parameters.rotation_exit_rank}",
+                       "Sold at the next open. A holding that decays off the "
+                       "leadership board leaves, whether or not it is losing money."),
+                _param("P17", "Regime exit",
+                       f"{self._index_symbol()} below its "
+                       f"SMA{regime.sma_sessions}",
+                       "Sell EVERYTHING at the next open. The gate does not "
+                       "negotiate with a good position."),
+                _param("P18", "Rebalance",
+                       f"{schedule.rebalance_cadence}",
+                       "Daily was chosen deliberately: 23.4% CAGR at -22.2% "
+                       "drawdown against weekly's 19.9% and -18.3%. Weekly has the "
+                       "better MAR. Changing this one value switches it."),
+                _param("P19", "Execution", "market orders at the next open",
+                       "Through this application's own pessimistic fill simulator, "
+                       "not the backtest's 0.05%-per-side model."),
+                _param("—", "Warm-up",
+                       f"{parameters.minimum_sessions} sessions minimum",
+                       "A symbol with less history is excluded from the universe "
+                       "entirely, exactly as the backtest's loader excludes it."),
+            ],
+            # Said here as well as on the live tab. A page that teaches the rule
+            # must teach its limits in the same breath.
+            "caveats": [
+                "This is a BACKTEST, not a track record. No capital has traded "
+                "this rule anywhere.",
+                "The universe is today's Nifty 500 looked at backwards, so the "
+                "backtest is survivorship-biased. The specification's own author "
+                "expects 12-18% live against the 19.9% headline.",
+                "Every parameter above was chosen in-sample on the full period, "
+                "with no walk-forward and no holdout. They are not knobs to turn "
+                "until the numbers improve.",
+                "Returns are concentrated: the top 10 of 672 backtested trades "
+                "were 55% of the summed return. Miss them and roughly half the "
+                "result disappears.",
+                "Long underwater stretches are inherent -- about two and a half "
+                "years within -16% between 2018 and mid-2020. Abandoning the "
+                "system mid-drawdown is the main way it loses money.",
+                "Returns are pre-tax. STCG applies to holds under twelve months.",
+            ],
+        }
+
+    def _index_symbol(self) -> str:
+        reference = self.definition.reference_instrument(
+            self.parameters.regime.index_role
+        )
+        return reference.label if reference else "the index"
+
+    def _reference_payload(self) -> Optional[Dict[str, Any]]:
+        reference = self.definition.reference_instrument(
+            self.parameters.regime.index_role
+        )
+        if reference is None:
+            return None
+        return {
+            "symbol": reference.symbol,
+            "label": reference.label,
+            "exchangeSegment": reference.exchange_segment,
+            # Read, never traded, and deliberately not a row in `instruments`:
+            # Dhan's security ids are unique per SEGMENT, and id 13 is NIFTY in
+            # IDX_I and ABB in NSE_EQ -- and ABB is in this universe.
+            "traded": False,
+        }
+
     # --- the open book ------------------------------------------------------
     async def book_for(self, portfolio_id: int) -> Dict[str, Any]:
         """Every open position, with its stop and the distance to it."""
@@ -524,6 +716,11 @@ def _nearest(index: Dict[date, int], dates: List[date], value: date) -> Optional
         else:
             break
     return position
+
+
+def _param(code: str, name: str, value: str, note: str) -> Dict[str, str]:
+    """One row of the parameter table, carrying the specification's own code."""
+    return {"code": code, "name": name, "value": value, "note": note}
 
 
 def _load_json(value) -> Any:
