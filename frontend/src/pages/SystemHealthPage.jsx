@@ -5,6 +5,8 @@ import {
   Box,
   Button,
   Card,
+  Tab,
+  Tabs,
   CardContent,
   Chip,
   CircularProgress,
@@ -27,7 +29,10 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ScienceIcon from '@mui/icons-material/Science';
 import { useTheme } from '@mui/material/styles';
+import { useSearchParams } from 'react-router-dom';
 import { healthApi } from '../api/health';
+import { connectionsApi } from '../api/connections';
+import AlertsPanel from '../components/AlertsPanel';
 import SyntheticBanner from '../components/SyntheticBanner';
 import {
   formatAge,
@@ -201,6 +206,42 @@ export default function SystemHealthPage() {
 
   const asOfMs = fetchedAt ? now - fetchedAt : null;
 
+  // The tab lives in the URL so "read this page" is a link somebody can send,
+  // the same way the Swing Momentum page does it.
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'alerts' ? 'alerts' : 'process';
+
+  // The catalogue is fetched on the SAME poll as the rest of the page rather
+  // than on a second timer. A page that reports on load must not be a load
+  // source (frontend/CLAUDE.md §5c), and its failure is kept off the page's
+  // `error` state so a hiccup here cannot blank the process view.
+  const [catalogue, setCatalogue] = useState(null);
+  const [catalogueError, setCatalogueError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const read = () => {
+      connectionsApi
+        .catalogue()
+        .then((next) => {
+          if (!cancelled) {
+            setCatalogue(next);
+            setCatalogueError(null);
+          }
+        })
+        .catch((readError) => {
+          if (!cancelled) setCatalogueError(readError.message);
+        });
+    };
+    read();
+    if (!autoRefresh) return () => { cancelled = true; };
+    const timer = window.setInterval(read, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [autoRefresh]);
+
   const summary = health?.summary;
   const process = health?.process;
   const tasks = health?.tasks;
@@ -266,6 +307,26 @@ export default function SystemHealthPage() {
           {error}
         </Alert>
       ) : null}
+
+      <Tabs
+        value={tab}
+        onChange={(event, next) =>
+          setParams(next === 'process' ? {} : { tab: next }, { replace: true })
+        }
+        sx={{ borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab value="process" label="Process" />
+        <Tab value="alerts" label="Alerts" />
+      </Tabs>
+
+      {tab === 'alerts' ? (
+        <AlertsPanel
+          catalogue={catalogue}
+          error={catalogueError}
+          loading={loading}
+        />
+      ) : (
+        <>
 
       {summary ? (
         <Alert
@@ -872,6 +933,8 @@ export default function SystemHealthPage() {
           </CardContent>
         </Card>
       ) : null}
+        </>
+      )}
     </Stack>
   );
 }

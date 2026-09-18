@@ -192,25 +192,28 @@ async def _announce_startup() -> None:
     rather than from the watcher because "started" is an event, not a condition
     a poll could notice.
     """
-    from src.connections.database.db_models.alert_model import (
-        KIND_HEALTH,
-        SEVERITY_INFO,
-    )
+    from src.connections.database.db_models.alert_model import SEVERITY_INFO
+    from src.connections.services.alert_catalogue import EVENT_APP_STARTED
     from src.connections.services.alert_service import AlertService
     from src.core.time_utils import ist_now
     from src.database.session import session_scope
 
     try:
         async with session_scope() as session:
-            await AlertService(session).raise_alert(
-                kind=KIND_HEALTH,
-                severity=SEVERITY_INFO,
+            # Through `record_health` so it carries a dedupe key like every
+            # other health event: a process that is CRASH-LOOPING would
+            # otherwise send one message per restart, which is the flood this
+            # design exists to prevent, arriving from the one component whose
+            # job is to report trouble.
+            await AlertService(session).record_health(
+                event=EVENT_APP_STARTED,
                 title="Dhan Paper Trading started",
                 body=(
                     f"The application started at "
                     f"{ist_now().strftime('%H:%M IST, %d %b %Y')}.\n"
                     f"If you did not restart it, something else did."
                 ),
+                severity=SEVERITY_INFO,
             )
             await session.commit()
     except Exception:

@@ -778,6 +778,47 @@ De-duplication here is keyed on the **event**, because a health condition
 persists — a dead task stays dead, and keying on the message would send the same
 sentence every minute until somebody fixed it.
 
+### The Alerts tab
+
+Two places, one component. **System Health → Alerts** lists every rule this
+build has; **Swing Momentum → Alerts** lists the ones about that strategy. Both
+are admin-only and both render `src/components/AlertsPanel.jsx`, so they cannot
+drift into describing the same rule differently.
+
+**It is READ-ONLY, deliberately.** No edit, no delete. What gets alerted is a
+property of the build, decided in code and reviewed like code — not a
+preference. The panel says so on the page rather than leaving somebody hunting
+for a switch that does not exist. If a rule should become switchable, that is
+its own piece of work with its own decision, exactly as root `CLAUDE.md` §3a
+says about a strategy's parameters.
+
+Each rule shows what makes it fire, why it is worth a message at all, how
+repeats are collapsed, anything worth knowing about it, and **when it last
+fired** with the status that occurrence ended in.
+
+The catalogue lives in `src/connections/services/alert_catalogue.py` and the
+watcher raises its event NAMES from there, which is what makes
+`test_the_watcher_and_the_catalogue_cannot_drift` assertable at all — the same
+mechanism `TASK_DESCRIPTIONS` uses to decide what a known task is.
+
+Three honesty rules it is built on:
+
+- **Never fired is not zero.** A rule with no stored row says "never", not a
+  timestamp and not a count of nothing.
+- **Recorded is not delivered.** The banner reports the two separately: a page
+  that conflated them would show a healthy list while every message was being
+  dropped on the floor.
+- **A collapsed flood says how many it stood for**, because a repeat that
+  arrives as one line looks like a single event. A dropped record — which only
+  happens during a flood — gets its own warning.
+
+**Scope decides which page shows a rule.** A process-wide rule (a dead task,
+the feed, the Dhan token) is deliberately NOT repeated onto a strategy's page:
+the System Health page owns it, and duplicating it would make two pages that
+disagree the moment one changed. That is why `alerts.strategy_key` is a
+**column** — resolved once when the row is written, never by matching English
+in the body, the same argument `orders` and `positions` already make.
+
 **Deliberately not alerted on**: anything WARNING-level and routine, the
 synthetic feed being on (every screen already says so, permanently), or a
 strategy switched off by somebody looking at the screen at the time.

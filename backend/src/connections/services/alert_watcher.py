@@ -43,6 +43,16 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 from src import config_utils
+from src.connections.services.alert_catalogue import (
+    EVENT_DEFERRED_STOPS,
+    EVENT_FEED_DOWN,
+    EVENT_FEED_STALE,
+    EVENT_MISSED_SESSIONS,
+    EVENT_MISSING_TASKS,
+    EVENT_STALE_BARS,
+    EVENT_TOKEN_LAPSED,
+    EVENT_TOKEN_RENEWAL_FAILED,
+)
 from src.connections.database.db_models.alert_model import (
     SEVERITY_CRITICAL,
     SEVERITY_INFO,
@@ -193,12 +203,12 @@ class AlertWatcher:
                 "trades while a scheduler is dead.",
             ]
         await service.record_health(
-            event=f"missing-tasks|{','.join(sorted(missing))}",
+            event=f"{EVENT_MISSING_TASKS}|{','.join(sorted(missing))}",
             title=f"{len(missing)} background task(s) are not running",
             body="\n".join(body),
             severity=severity,
         )
-        return "missing-tasks"
+        return EVENT_MISSING_TASKS
 
     @staticmethod
     def _armed_strategies() -> List[str]:
@@ -235,7 +245,7 @@ class AlertWatcher:
             # The one that needs a human. Dhan renews only an ACTIVE token, so
             # nothing this process can do will recover from here.
             await service.record_health(
-                event="token-lapsed",
+                event=EVENT_TOKEN_LAPSED,
                 title="The Dhan access token has expired",
                 body=(
                     "The stored Dhan access token expired at "
@@ -249,7 +259,7 @@ class AlertWatcher:
                 ),
                 severity=SEVERITY_CRITICAL,
             )
-            return "token-lapsed"
+            return EVENT_TOKEN_LAPSED
 
         from src.settings.services.token_refresh_service import (
             get_token_refresh_monitor,
@@ -258,7 +268,7 @@ class AlertWatcher:
         status = get_token_refresh_monitor().status()
         if status.get("lastError"):
             await service.record_health(
-                event="token-renewal-failed",
+                event=EVENT_TOKEN_RENEWAL_FAILED,
                 title="Dhan token renewal is failing",
                 body=(
                     f"The renewal task reported: {status['lastError']}\n"
@@ -267,7 +277,7 @@ class AlertWatcher:
                 ),
                 severity=SEVERITY_WARNING,
             )
-            return "token-renewal-failed"
+            return EVENT_TOKEN_RENEWAL_FAILED
         return None
 
     # --- 3. a stale feed while a market is open ----------------------------
@@ -294,7 +304,7 @@ class AlertWatcher:
 
         if state in (None, "DISCONNECTED", "ERROR", "DISABLED"):
             await service.record_health(
-                event="feed-down",
+                event=EVENT_FEED_DOWN,
                 title="The market feed is not connected while a market is open",
                 body=(
                     f"Feed state: {state}. Prices are not arriving, and anything "
@@ -302,11 +312,11 @@ class AlertWatcher:
                 ),
                 severity=SEVERITY_CRITICAL,
             )
-            return "feed-down"
+            return EVENT_FEED_DOWN
 
         if age is not None and age > FEED_STALE_SECONDS:
             await service.record_health(
-                event="feed-stale",
+                event=EVENT_FEED_STALE,
                 title="The market feed has gone quiet while a market is open",
                 body=(
                     f"No message for {age:.0f} seconds (Dhan drops a "
@@ -316,7 +326,7 @@ class AlertWatcher:
                 ),
                 severity=SEVERITY_WARNING,
             )
-            return "feed-stale"
+            return EVENT_FEED_STALE
         return None
 
     # --- 4. a missed scheduled session -------------------------------------
@@ -326,25 +336,40 @@ class AlertWatcher:
         missed = get_swing_scheduler().missed or []
         if not missed:
             return None
-        lines = [
-            "The decision journal has no record for these sessions:",
-            *(
-                f"  {one.strategy_key} {one.kind}: "
-                f"{', '.join(session.isoformat() for session in one.sessions)}"
-                for one in missed
-            ),
-            "",
-            "Nothing is re-decided days later on bars that may since have been "
-            "restated -- the next scheduled run decides from fresh bars.",
-        ]
-        await service.record_health(
-            event="missed-sessions|"
-            + ",".join(sorted(one.strategy_key + one.kind for one in missed)),
-            title=f"{len(missed)} scheduled session(s) were missed",
-            body="\n".join(lines),
-            severity=SEVERITY_WARNING,
-        )
-        return "missed-sessions"
+
+        # One alert PER STRATEGY, not one combined row. The strategy's own
+        # Alerts tab filters on `strategy_key`, and a row covering two
+        # strategies could be attributed to neither.
+        by_strategy: Dict[str, List[Any]] = {}
+        for one in missed:
+            by_strategy.setdefault(one.strategy_key, []).append(one)
+
+        for strategy_key, entries in sorted(by_strategy.items()):
+            lines = [
+                f"{strategy_key} has no record in the decision journal for "
+                f"these sessions:",
+                *(
+                    f"  {one.kind}: "
+                    f"{', '.join(session.isoformat() for session in one.sessions)}"
+                    for one in entries
+                ),
+                "",
+                "Nothing is re-decided days later on bars that may since have "
+                "been restated -- the next scheduled run decides from fresh "
+                "bars.",
+            ]
+            await service.record_health(
+                event=f"{EVENT_MISSED_SESSIONS}|{strategy_key}|"
+                + ",".join(sorted(one.kind for one in entries)),
+                title=(
+                    f"{len(entries)} scheduled session group(s) missed for "
+                    f"{strategy_key}"
+                ),
+                body="\n".join(lines),
+                severity=SEVERITY_WARNING,
+                strategy_key=strategy_key,
+            )
+        return EVENT_MISSED_SESSIONS
 
     # --- 5. daily bars too stale to trade on -------------------------------
     async def _check_bar_staleness(self, service) -> Optional[str]:
@@ -380,14 +405,15 @@ class AlertWatcher:
             if reason is None:
                 continue
             await service.record_health(
-                event=f"stale-bars|{definition.key}",
+                event=f"{EVENT_STALE_BARS}|{definition.key}",
                 title=f"{definition.key}: the stored daily bars are too old to trade on",
                 body=reason
                 + "\n\nSent now rather than at the next order window, so there "
                 "is still time to fix it.",
                 severity=SEVERITY_WARNING,
+                strategy_key=definition.key,
             )
-            return "stale-bars"
+            return EVENT_STALE_BARS
         return None
 
     # --- 6. a stop that triggered but deferred -----------------------------
@@ -399,26 +425,34 @@ class AlertWatcher:
         triggered = await SwingStopRepository(service.session).list_triggered()
         if not triggered:
             return None
-        lines = [
-            "These trailing stops have fired and their exit is waiting for the "
-            "next session's open:",
-            *(
-                f"  {stop.symbol} -- stop {stop.stop_price}"
-                for stop in triggered
-            ),
-            "",
-            "NSE's Closing Auction Session ends continuous trading at 15:15 for "
-            "F&O-eligible names, and this simulator has no model of a call "
-            "auction, so a stop that fires after it is recorded as triggered "
-            "and fills at the next open.",
-        ]
-        await service.record_health(
-            event="deferred-stops|" + ",".join(sorted(stop.symbol for stop in triggered)),
-            title=f"{len(triggered)} triggered stop(s) are waiting for the next open",
-            body="\n".join(lines),
-            severity=SEVERITY_INFO,
-        )
-        return "deferred-stops"
+
+        by_strategy: Dict[str, List[Any]] = {}
+        for stop in triggered:
+            by_strategy.setdefault(stop.strategy_key, []).append(stop)
+
+        for strategy_key, stops in sorted(by_strategy.items()):
+            lines = [
+                "These trailing stops have fired and their exit is waiting for "
+                "the next session's open:",
+                *(f"  {stop.symbol} -- stop {stop.stop_price}" for stop in stops),
+                "",
+                "NSE's Closing Auction Session ends continuous trading at 15:15 "
+                "for F&O-eligible names, and this simulator has no model of a "
+                "call auction, so a stop that fires after it is recorded as "
+                "triggered and fills at the next open.",
+            ]
+            await service.record_health(
+                event=f"{EVENT_DEFERRED_STOPS}|{strategy_key}|"
+                + ",".join(sorted(stop.symbol for stop in stops)),
+                title=(
+                    f"{len(stops)} triggered stop(s) waiting for the next open "
+                    f"({strategy_key})"
+                ),
+                body="\n".join(lines),
+                severity=SEVERITY_INFO,
+                strategy_key=strategy_key,
+            )
+        return EVENT_DEFERRED_STOPS
 
     def status(self) -> Dict[str, Any]:
         return {

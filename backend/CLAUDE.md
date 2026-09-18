@@ -339,6 +339,24 @@ the code.
   the `description` because it is the only thing separating "the bot is not in
   that channel" from "that channel does not exist", and those have different
   fixes. Do not collapse them.
+- **`alert_catalogue.py` is the list, and the watcher raises ITS names.** The
+  Alerts tab is documentation an operator reads, so it has to come from one
+  place or it drifts from the code that raises the alerts --
+  `test_the_watcher_and_the_catalogue_cannot_drift` is assertable only because
+  the event names are shared rather than spelled twice. It holds no logic and
+  does no I/O: what a rule DOES lives in the watcher and the service.
+- **`alerts.strategy_key` is a COLUMN, not a match on the body.** A strategy's
+  Alerts tab filters on it. Reading the strategy back out of the message would
+  be parsing English, which is what `swing_stops.exit_kind` exists to avoid and
+  what root `CLAUDE.md` section 3a forbids for `orders` and `positions`. NULL
+  means process-wide, and a dead task is nobody's strategy.
+- **A health event's dedupe key carries a SUFFIX**, so the catalogue matches on
+  the prefix. `missing-tasks|swing-scheduler` and `missing-tasks|order-matcher`
+  are the same rule; matching the whole key would make every combination look
+  like a rule that had never fired.
+- **`stats_by_key()` is one grouped query**, not one per catalogue rule. The
+  alternative walks the table to find the newest of each kind, which is free
+  for a month and then is not.
 - **Secrets: see the root `CLAUDE.md`.** Every new endpoint gets its assertion
   in `tests/test_no_secrets_in_logs.py` in the same change.
 

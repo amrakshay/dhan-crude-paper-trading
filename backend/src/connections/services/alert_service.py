@@ -93,6 +93,7 @@ class AlertService:
         title: str,
         body: str,
         dedupe_key: Optional[str] = None,
+        strategy_key: Optional[str] = None,
     ) -> Optional[Alert]:
         """Record something worth telling somebody about.
 
@@ -133,6 +134,7 @@ class AlertService:
                 connection_id=connection.id if connection is not None else None,
                 dedupe_key=dedupe_key,
                 last_error=reason,
+                strategy_key=strategy_key,
             )
             return row
         except Exception:  # noqa: BLE001 - an alert must never break its caller
@@ -198,6 +200,7 @@ class AlertService:
                 severity=SEVERITY_INFO,
                 title=f"Bought {trading_symbol}",
                 body="\n".join(lines),
+                strategy_key=strategy_key,
             )
 
         if realized is not None:
@@ -236,6 +239,7 @@ class AlertService:
             severity=SEVERITY_INFO,
             title=f"Sold {trading_symbol}",
             body="\n".join(lines),
+            strategy_key=strategy_key,
         )
 
     # --- errors ------------------------------------------------------------
@@ -258,6 +262,7 @@ class AlertService:
         title: str,
         body: str,
         severity: str = SEVERITY_WARNING,
+        strategy_key: Optional[str] = None,
     ) -> Optional[Alert]:
         """One of the seven watched conditions. Keyed on the EVENT, not the text.
 
@@ -272,6 +277,7 @@ class AlertService:
             title=title,
             body=body,
             dedupe_key=f"health|{event}",
+            strategy_key=strategy_key,
         )
 
     # --- commands ----------------------------------------------------------

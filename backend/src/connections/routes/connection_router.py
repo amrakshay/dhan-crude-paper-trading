@@ -9,11 +9,14 @@ a 403.
 These endpoints reach credentials, a bot token and the list of people who may
 issue a command from a chat app. There is no read-only half worth opening up.
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import SessionPrincipal, require_admin
 from src.connections.api_schemas.connection_schemas import (
+    AlertCatalogueResponse,
     AlertListResponse,
     ConnectionCard,
     ConnectionListResponse,
@@ -61,6 +64,30 @@ async def list_alerts(
 ) -> AlertListResponse:
     """The outbox: what was raised, what was sent, and what was suppressed."""
     return await controller.alerts(limit=limit)
+
+
+@connection_router.get("/alerts/catalogue", response_model=AlertCatalogueResponse)
+async def alert_catalogue(
+    strategyKey: Optional[str] = Query(None),  # noqa: N803 - camelCase on the wire
+    controller: ConnectionController = Depends(get_connection_controller),
+    _: SessionPrincipal = Depends(require_admin),
+) -> AlertCatalogueResponse:
+    """Every alert rule this build has, with when it last fired.
+
+    READ-ONLY. There is deliberately no edit and no delete: what gets alerted is
+    a property of the build, decided in code and reviewed like code.
+
+    `strategyKey` narrows it to the rules ABOUT that strategy, which is what a
+    strategy's own page shows. Process-wide rules -- a dead task, the feed, the
+    Dhan token -- are deliberately NOT repeated onto a strategy's page; the
+    System Health page owns them, and duplicating them would make two pages that
+    disagree the moment one changes.
+
+    **Admin-only, like the rest of this router.** It serves alert bodies, and a
+    body can carry whatever a developer interpolated into a log line -- the same
+    exposure `/api/healthcheck/problems` and the swing Health tab are gated for.
+    """
+    return await controller.alert_catalogue(strategyKey)
 
 
 @connection_router.post("/telegram/test-message", response_model=TestMessageResponse)

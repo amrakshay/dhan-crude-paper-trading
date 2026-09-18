@@ -180,6 +180,33 @@ Both pages are admin-only, and `/connections` is deliberately NOT strategy-gated
 - The token expiry countdown ticks locally off the absolute `expiresAt`, rather
   than re-fetching every second.
 
+## 4a. The Alerts tab
+
+`src/components/AlertsPanel.jsx` is rendered by BOTH the System Health page and
+the Swing Momentum page, the same way `JobProgress.jsx` is shared by two tabs
+and for the same reason: they are the same list filtered, and two components
+would drift into describing the same rule differently.
+
+- **Read-only, and it says so.** No edit, no delete. What gets alerted is a
+  property of the build. The panel states that rather than leaving somebody
+  hunting for a switch that does not exist.
+- **Never fired is not zero.** A rule with no stored row renders "never", not a
+  timestamp and not a count. The age ticks locally off the absolute timestamp
+  (the Settings countdown trick) so a rule that has not fired again visibly
+  ages.
+- **Recorded is not delivered.** The banner reports them separately, because a
+  panel that conflated them would look healthy while every message was being
+  dropped.
+- **Scope decides the page.** A strategy's tab shows only rules about that
+  strategy; process-wide ones stay on System Health. Do not repeat one onto
+  both -- the server filters on `alerts.strategy_key` and the two pages would
+  disagree the moment one changed.
+- Both tabs are **admin-only** and fetch on their page's EXISTING poll rather
+  than adding one. Their failure is kept off the page's `error` state, so a
+  hiccup on an admin-only read cannot blank the tab beside it.
+
+---
+
 ## 5. Roles in the UI
 
 - **The sidebar is not the whole route table.** `/profile` is a real route

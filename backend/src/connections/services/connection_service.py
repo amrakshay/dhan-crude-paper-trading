@@ -166,6 +166,143 @@ class ConnectionService:
         )
         return await self.detail(spec.key)
 
+    # --- the alert catalogue -----------------------------------------------
+    async def alert_catalogue(
+        self, strategy_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Every alert rule this build has, with when it last fired.
+
+        READ-ONLY, on both surfaces. What gets alerted is a property of the
+        build, decided in code and reviewed like code -- there is deliberately
+        no edit and no delete.
+
+        **Never fired is not zero.** A rule with no stored row reports
+        `lastFiredAt: null`, which the page renders as "never" rather than as a
+        timestamp or a count of nothing. That is the same rule the connection
+        pill follows and the same one the swing Health tab follows.
+        """
+        from src.connections.database.db_operations.alert_repository import (
+            AlertRepository,
+        )
+        from src.connections.services import alert_catalogue
+        from src.connections.services.alert_dispatcher import get_alert_dispatcher
+        from src.connections.services.alert_watcher import get_alert_watcher
+        from src.connections.services.telegram_service import TelegramService
+
+        repository = AlertRepository(self.session)
+        stats = await repository.stats_by_key(strategy_key=strategy_key)
+        last_rows = await repository.by_ids([row["lastId"] for row in stats])
+
+        rules: List[Dict[str, Any]] = []
+        for rule in alert_catalogue.rules_for(strategy_key):
+            matched = [row for row in stats if self._matches(rule, row)]
+            payload = rule.as_dict()
+            if not matched:
+                # Three states, and only one of them is "working": never
+                # fired, fired and delivered, fired and not delivered.
+                payload.update(
+                    {
+                        "lastFiredAt": None,
+                        "lastStatus": None,
+                        "lastTitle": None,
+                        "timesFired": 0,
+                        "timesCollapsed": 0,
+                    }
+                )
+            else:
+                newest_id = max(row["lastId"] for row in matched)
+                newest = last_rows.get(newest_id)
+                payload.update(
+                    {
+                        "lastFiredAt": _iso_ist(
+                            newest.created_at if newest is not None else None
+                        ),
+                        "lastStatus": newest.status if newest is not None else None,
+                        "lastTitle": newest.title if newest is not None else None,
+                        "timesFired": sum(row["total"] for row in matched),
+                        "timesCollapsed": sum(row["collapsed"] for row in matched),
+                    }
+                )
+            rules.append(payload)
+
+        config = await TelegramService(self.session).config()
+        dispatcher = get_alert_dispatcher().status()
+        watcher = get_alert_watcher().status()
+
+        return {
+            "strategyKey": strategy_key,
+            "rules": rules,
+            # Recording and DELIVERING are different things, and a page that
+            # conflated them would show a healthy list while every message was
+            # being dropped on the floor.
+            "delivery": {
+                "recording": True,
+                "delivering": bool(config.can_send and dispatcher.get("enabled")),
+                "telegramConfigured": bool(config.bot_token and config.chat_id),
+                "telegramEnabled": bool(config.enabled),
+                "channel": config.chat_title or config.chat_id or None,
+                "dispatcherRunning": bool(dispatcher.get("running")),
+                "watcherRunning": bool(watcher.get("running")),
+                "lastDispatchAt": dispatcher.get("lastPassAt"),
+                "lastWatchAt": watcher.get("lastPassAt"),
+                "sink": dispatcher.get("sink"),
+            },
+            "counts": await repository.counts_by_status(),
+            "recent": [
+                {
+                    "id": row.id,
+                    "kind": row.kind,
+                    "severity": row.severity,
+                    "title": row.title,
+                    "body": row.body,
+                    "status": row.status,
+                    "strategyKey": row.strategy_key,
+                    "suppressedCount": int(row.suppressed_count or 0),
+                    "lastError": row.last_error,
+                    "createdAt": _iso_ist(row.created_at),
+                    "sentAt": _iso_ist(row.sent_at),
+                }
+                for row in await repository.recent(
+                    limit=30, strategy_key=strategy_key
+                )
+            ],
+            "notes": self._catalogue_notes(strategy_key),
+        }
+
+    @staticmethod
+    def _matches(rule, row: Dict[str, Any]) -> bool:
+        """Whether a stored row belongs to a catalogue rule.
+
+        A health event's dedupe key is `health|<event>` and may carry a suffix
+        -- the task names, the sessions, the strategy -- so it is matched on the
+        PREFIX. Everything else is identified by its kind alone.
+        """
+        if row["kind"] != rule.kind:
+            return False
+        if rule.dedupe_prefix is None:
+            return True
+        return str(row.get("dedupeKey") or "").startswith(rule.dedupe_prefix)
+
+    @staticmethod
+    def _catalogue_notes(strategy_key: Optional[str]) -> List[str]:
+        """What this page cannot tell you, said rather than implied away."""
+        notes = [
+            "This list is read-only. What gets alerted is a property of the "
+            "build, decided in code and reviewed like code -- not a preference.",
+            "\"Last fired\" is when the alert was RECORDED. Whether it was "
+            "delivered is its status, which is a separate thing: a fact is "
+            "recorded even when nothing is configured to carry it.",
+            "Counts are for the whole history in this database, not a window. "
+            "The status totals beside them cover the last 24 hours.",
+        ]
+        if strategy_key is not None:
+            notes.append(
+                "Only alerts ABOUT this strategy are shown. Process-wide ones "
+                "-- a dead task, the feed, the Dhan token -- live on the System "
+                "Health page, because they are not this strategy's business."
+            )
+        return notes
+
     # --- status ------------------------------------------------------------
     @staticmethod
     def _is_configured(spec: providers.ProviderSpec, values: Dict[str, str]) -> bool:

@@ -67,6 +67,14 @@ class Alert(TimestampedModel):
     kind = Column(String(32), nullable=False, index=True)
     severity = Column(String(16), nullable=False, index=True)
 
+    # Which strategy this is ABOUT, when it is about one. STORED rather than
+    # derived, for the same reason `orders` and `positions` store it (root
+    # CLAUDE.md section 3a): reading it back out of the body at query time
+    # would mean parsing English, which is exactly what `swing_stops.exit_kind`
+    # exists to avoid. NULL means the alert is process-wide -- a dead task, the
+    # feed, the token -- and those are not a strategy's business.
+    strategy_key = Column(String(64), nullable=True, index=True)
+
     title = Column(String(200), nullable=False)
     body = Column(Text, nullable=False)
 

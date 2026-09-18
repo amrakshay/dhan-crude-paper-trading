@@ -1,6 +1,6 @@
 """The alert outbox's queries."""
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,11 +27,13 @@ class AlertRepository(BaseRepository[Alert]):
         connection_id: Optional[int] = None,
         dedupe_key: Optional[str] = None,
         last_error: Optional[str] = None,
+        strategy_key: Optional[str] = None,
     ) -> Alert:
         alert = Alert(
             connection_id=connection_id,
             kind=kind,
             severity=severity,
+            strategy_key=strategy_key,
             title=title[:200],
             body=body,
             status=status,
@@ -54,11 +56,56 @@ class AlertRepository(BaseRepository[Alert]):
         )
         return list(result.scalars().all())
 
-    async def recent(self, limit: int = 50) -> List[Alert]:
+    async def recent(
+        self, limit: int = 50, strategy_key: Optional[str] = None
+    ) -> List[Alert]:
+        query = select(Alert)
+        if strategy_key is not None:
+            query = query.where(Alert.strategy_key == strategy_key)
         result = await self.session.execute(
-            select(Alert).order_by(Alert.id.desc()).limit(limit)
+            query.order_by(Alert.id.desc()).limit(limit)
         )
         return list(result.scalars().all())
+
+    async def stats_by_key(
+        self, strategy_key: Optional[str] = None
+    ) -> List[dict]:
+        """Per (kind, dedupe_key): how many, and which row was the last one.
+
+        ONE grouped query rather than a query per catalogue rule, and it stays
+        one as the table grows -- the alternative walks every row to find the
+        newest of each kind, which is the sort of thing that is free for a
+        month and then is not.
+        """
+        query = select(
+            Alert.kind,
+            Alert.dedupe_key,
+            func.count(Alert.id).label("total"),
+            func.max(Alert.id).label("last_id"),
+            func.coalesce(func.sum(Alert.suppressed_count), 0).label("collapsed"),
+        )
+        if strategy_key is not None:
+            query = query.where(Alert.strategy_key == strategy_key)
+        result = await self.session.execute(
+            query.group_by(Alert.kind, Alert.dedupe_key)
+        )
+        return [
+            {
+                "kind": row.kind,
+                "dedupeKey": row.dedupe_key,
+                "total": int(row.total or 0),
+                "lastId": int(row.last_id),
+                "collapsed": int(row.collapsed or 0),
+            }
+            for row in result.all()
+        ]
+
+    async def by_ids(self, ids: List[int]) -> Dict[int, Alert]:
+        """The named rows, in one query. Pairs with `stats_by_key`."""
+        if not ids:
+            return {}
+        result = await self.session.execute(select(Alert).where(Alert.id.in_(ids)))
+        return {alert.id: alert for alert in result.scalars().all()}
 
     async def latest_open_for_dedupe(
         self, dedupe_key: str, since: datetime

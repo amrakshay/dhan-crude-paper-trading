@@ -1159,6 +1159,10 @@ async def test_the_connections_endpoints_never_return_the_bot_token(
         await auth_client.get("/api/connections/telegram"),
         await auth_client.get("/api/connections/dhan"),
         await auth_client.get("/api/connections/alerts"),
+        await auth_client.get("/api/connections/alerts/catalogue"),
+        await auth_client.get(
+            "/api/connections/alerts/catalogue?strategyKey=nse-swing-momentum"
+        ),
     ]
 
     for response in responses:

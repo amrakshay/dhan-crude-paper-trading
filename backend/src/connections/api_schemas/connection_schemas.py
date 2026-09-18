@@ -136,3 +136,44 @@ class AlertListResponse(BaseModel):
     watcher: Dict[str, Any] = {}
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class AlertRuleRow(BaseModel):
+    """One catalogue rule, with what it has actually done.
+
+    `lastFiredAt` is null when it has NEVER fired. That is a third state
+    alongside fired-and-delivered and fired-and-suppressed, and the page renders
+    it as "never" rather than as a timestamp or a zero.
+    """
+
+    key: str
+    title: str
+    trigger: str
+    why: str
+    severity: str
+    category: str
+    category_label: str = Field(alias="categoryLabel")
+    kind: str
+    strategy_scoped: bool = Field(False, alias="strategyScoped")
+    collapsing: str = ""
+    caveat: str = ""
+    last_fired_at: Optional[str] = Field(None, alias="lastFiredAt")
+    last_status: Optional[str] = Field(None, alias="lastStatus")
+    last_title: Optional[str] = Field(None, alias="lastTitle")
+    times_fired: int = Field(0, alias="timesFired")
+    times_collapsed: int = Field(0, alias="timesCollapsed")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AlertCatalogueResponse(BaseModel):
+    strategy_key: Optional[str] = Field(None, alias="strategyKey")
+    rules: List[AlertRuleRow]
+    # Recording and DELIVERING are different things. A page that conflated them
+    # would show a healthy list while every message was dropped on the floor.
+    delivery: Dict[str, Any] = {}
+    counts: Dict[str, int] = {}
+    recent: List[Dict[str, Any]] = []
+    notes: List[str] = []
+
+    model_config = ConfigDict(populate_by_name=True)

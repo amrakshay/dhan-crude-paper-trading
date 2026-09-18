@@ -5,8 +5,10 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.connections.api_schemas.connection_schemas import (
+    AlertCatalogueResponse,
     AlertListResponse,
     AlertRow,
+    AlertRuleRow,
     ConnectionCard,
     ConnectionListResponse,
     ListenResponse,
@@ -207,6 +209,19 @@ class ConnectionController:
             counts=await repository.counts_by_status(),
             dispatcher=get_alert_dispatcher().status(),
             watcher=get_alert_watcher().status(),
+        )
+
+    async def alert_catalogue(
+        self, strategy_key: Optional[str] = None
+    ) -> AlertCatalogueResponse:
+        payload = await self.service.alert_catalogue(strategy_key)
+        return AlertCatalogueResponse(
+            strategyKey=payload["strategyKey"],
+            rules=[AlertRuleRow(**rule) for rule in payload["rules"]],
+            delivery=payload["delivery"],
+            counts=payload["counts"],
+            recent=payload["recent"],
+            notes=payload["notes"],
         )
 
     # --- helpers -----------------------------------------------------------

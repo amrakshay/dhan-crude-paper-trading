@@ -29,8 +29,10 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { swingApi } from '../api/swing';
+import { connectionsApi } from '../api/connections';
 import SwingConfiguration from '../components/SwingConfiguration';
 import SwingHealth from '../components/SwingHealth';
+import AlertsPanel from '../components/AlertsPanel';
 import JobProgress from '../components/JobProgress';
 import SwingExplainer from '../components/SwingExplainer';
 import { useAuth } from '../auth/AuthContext';
@@ -1029,6 +1031,8 @@ export default function SwingMomentumPage() {
   const [status, setStatus] = useState(null);
   const [health, setHealth] = useState(null);
   const [healthError, setHealthError] = useState(null);
+  const [catalogue, setCatalogue] = useState(null);
+  const [catalogueError, setCatalogueError] = useState(null);
   const [book, setBook] = useState(null);
   const [history, setHistory] = useState(null);
   const [performance, setPerformance] = useState(null);
@@ -1049,7 +1053,7 @@ export default function SwingMomentumPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab');
   const availableTabs = isAdmin
-    ? ['how-it-works', 'configuration', 'health']
+    ? ['how-it-works', 'configuration', 'health', 'alerts']
     : ['how-it-works', 'configuration'];
   const tab = availableTabs.includes(requested) ? requested : 'live';
 
@@ -1085,6 +1089,21 @@ export default function SwingMomentumPage() {
       setHealthError(null);
     } catch (problem) {
       setHealthError(problem.message);
+    }
+
+    // The alert catalogue, filtered to THIS strategy: only rules about the
+    // rotation appear here. Process-wide ones -- a dead task, the feed, the
+    // Dhan token -- live on the System Health page, because they are not this
+    // strategy's business and two pages showing the same rule would disagree
+    // the moment one changed.
+    //
+    // Same cadence again, and its failure is kept off `error` for the same
+    // reason the health payload's is.
+    try {
+      setCatalogue(await connectionsApi.catalogue(STRATEGY));
+      setCatalogueError(null);
+    } catch (problem) {
+      setCatalogueError(problem.message);
     }
   }, [portfolioId, isAdmin]);
 
@@ -1168,6 +1187,7 @@ export default function SwingMomentumPage() {
         <Tab value="live" label="Live" />
         <Tab value="configuration" label="Configuration" />
         {isAdmin ? <Tab value="health" label="Health" /> : null}
+        {isAdmin ? <Tab value="alerts" label="Alerts" /> : null}
         <Tab value="how-it-works" label="How it works" />
       </Tabs>
 
@@ -1177,6 +1197,13 @@ export default function SwingMomentumPage() {
         <SwingConfiguration status={status} isAdmin={isAdmin} onChanged={load} />
       ) : tab === 'health' ? (
         <SwingHealth health={health} error={healthError} isAdmin={isAdmin} />
+      ) : tab === 'alerts' ? (
+        <AlertsPanel
+          catalogue={catalogue}
+          error={catalogueError}
+          loading={loading}
+          strategyKey={STRATEGY}
+        />
       ) : (
         <>
 

@@ -20,4 +20,17 @@ export const connectionsApi = {
   sendTestMessage: () => api.post('/connections/telegram/test-message', {}),
   listen: (seconds = 60) => api.post('/connections/telegram/listen', { seconds }),
   alerts: (limit = 50) => api.get(`/connections/alerts?limit=${limit}`),
+
+  /**
+   * Every alert rule this build has, with when each last fired.
+   *
+   * `strategyKey` narrows it to the rules ABOUT that strategy, which is what a
+   * strategy's own page shows. Omit it for the system view, which shows all.
+   */
+  catalogue: (strategyKey) =>
+    api.get(
+      `/connections/alerts/catalogue${
+        strategyKey ? `?strategyKey=${encodeURIComponent(strategyKey)}` : ''
+      }`,
+    ),
 };
