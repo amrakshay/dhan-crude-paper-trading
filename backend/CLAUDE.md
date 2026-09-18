@@ -498,6 +498,16 @@ tick accumulation that rule forbids; read that before touching this.
   held in one session's identity map that is enough pending ORM objects to take
   the process down. It also means a failure half-way through leaves the symbols
   already done.
+- **A flat zero-volume bar is a session that never happened, and is dropped.**
+  `is_phantom_bar`: all four prices identical with volume exactly 0. NSE never
+  produces that -- a suspended stock has no bar, a circuit-locked one still has
+  volume -- but a vendor filling a calendar will, and the research project's
+  spliced panel does for 395 equities on an NSE holiday. It matters far more
+  than the row count suggests because **every lookback in the strategy is
+  positional**: `shift(5)`, `shift(126)`, the ATR EWM and the ADV20 window all
+  count rows rather than days, so one phantom row shifts every one of them.
+  The guard is on both the import and the refresh paths. A MISSING volume is
+  not a zero and is not the artefact.
 
 ---
 
@@ -544,6 +554,15 @@ list; these are the ones that will bite a future change.
 - `tests/conftest.py` sets env vars **before** anything imports the app, and
   points `DATABASE_URL` at a temp SQLite file. Fixtures: `db_session`,
   `api_client`, `auth_client`, `sample_master_csv`.
+- **The temp database and log directory are named after the process id**, and
+  `pytest_sessionfinish` removes them. They used to have fixed names, so two
+  concurrent runs shared one SQLite file — the second run's schema setup tears
+  down tables the first is mid-query on. That does not merely produce wrong
+  results: it twice took the interpreter down with a fatal error whose
+  traceback points into SQLAlchemy and says nothing about the real cause, and
+  it reads exactly like a broken baseline. If you ever see a suite "failure"
+  that disappears on a second run, check whether something else was running
+  pytest at the same time.
 - Name tests for the behaviour, not the method
   (`test_a_resting_buy_does_not_fill_when_the_ask_merely_touches_it`).
 - When a test fails, check whether the *expectation* is wrong before changing

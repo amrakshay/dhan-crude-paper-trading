@@ -12,7 +12,13 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
-_TEST_DB_PATH = os.path.join(tempfile.gettempdir(), "dcpt_test.db")
+# Per PROCESS, not a fixed name. Two pytest runs at once used to share one
+# SQLite file: the second run's schema setup tears down tables the first is
+# mid-query on, which does not merely produce wrong results -- it has twice
+# taken the interpreter down with a fatal error whose traceback points into
+# SQLAlchemy and says nothing about the real cause. Diagnosing that as "the
+# baseline is broken" cost an hour on 2026-09-18.
+_TEST_DB_PATH = os.path.join(tempfile.gettempdir(), f"dcpt_test_{os.getpid()}.db")
 
 # The seeded administrator, as every test knows it.
 SEED_ADMIN_EMAIL = "trader@abc.com"
@@ -20,7 +26,10 @@ SEED_ADMIN_PASSWORD = "seed-admin-password"
 # Log files go to a temp directory, not backend/logs, so a test run does not
 # leave artefacts in the working tree. tests/test_no_secrets_in_logs.py reads
 # app.log back out of here.
-TEST_LOG_DIR = os.path.join(tempfile.gettempdir(), "dcpt_test_logs")
+# Also per process, for the same reason: tests/test_no_secrets_in_logs.py reads
+# app.log back out of here, and a concurrent run writing the same file would
+# make that assertion read another run's output.
+TEST_LOG_DIR = os.path.join(tempfile.gettempdir(), f"dcpt_test_logs_{os.getpid()}")
 
 os.environ.setdefault("CONFIG_PATH", str(BACKEND_ROOT / "conf"))
 os.environ.setdefault("LOG_DIR", TEST_LOG_DIR)
@@ -226,3 +235,24 @@ def sample_master_csv(tmp_path):
     path = tmp_path / "mini-master.csv"
     path.write_text("\n".join([header, *rows]) + "\n", encoding="utf-8")
     return str(path)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove this run's own database and log directory.
+
+    Both are named after the process id so that two concurrent runs cannot
+    share them (see the comments at the top of this file). That makes cleanup
+    this hook's job -- without it every run would leave a file behind in the
+    temp directory for ever.
+
+    Never raises: a failure to tidy up must not change a run's exit status.
+    """
+    import glob
+    import shutil
+
+    for path in glob.glob(f"{_TEST_DB_PATH}*"):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    shutil.rmtree(TEST_LOG_DIR, ignore_errors=True)
