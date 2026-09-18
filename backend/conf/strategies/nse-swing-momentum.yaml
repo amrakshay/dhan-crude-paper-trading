@@ -169,3 +169,134 @@ capabilities:
   - "price-chart"
   - "trade-notes"
   - "pnl-reports"
+
+# ---------------------------------------------------------------------------
+# STRATEGY PARAMETERS -- P1 to P19 of the specification.
+#
+# Root CLAUDE.md section 7: no number that affects a trade is hardcoded in
+# Python. Every parameter the specification names is here, under the name the
+# specification gives it, so the two can be grepped against each other.
+#
+# These blocks mean nothing to the framework. They travel to the strategy's own
+# module through `StrategyDefinition.module_config` and are validated there.
+#
+# WARNING. These were all chosen IN-SAMPLE, on the full backtest period, with
+# no walk-forward and no holdout (specification section 15.3). They are not
+# knobs to turn until the numbers improve; turning them is choosing a different
+# strategy from the one that was measured.
+# ---------------------------------------------------------------------------
+parameters:
+  # P2 -- liquidity floor. ADV20 measured as RUPEE TURNOVER, not share volume:
+  # mean(close x volume, 20 sessions) >= Rs 10 crore.
+  liquidity_floor_rupees: 100000000
+  liquidity_window_sessions: 20
+
+  # P3 -- price floor, rupees.
+  price_floor: 50.0
+
+  # P4 / P10 -- the trend qualifier, and the same line breadth is measured
+  # against: the stock's own 200-session SMA of closes.
+  trend_sma_sessions: 200
+
+  # P5 -- momentum: close[t-skip] / close[t-lookback] - 1. Six months, with the
+  # most recent week skipped so a one-week spike cannot buy its way in.
+  momentum_lookback_sessions: 126
+  momentum_skip_sessions: 5
+
+  # P6 -- absolute momentum floor.
+  momentum_floor: 0.10
+
+  # P7 -- the rank score is momentum divided by ATR%. This divisor is the
+  # differentiating idea: it penalises momentum bought with volatility.
+  # Removing it measured 29% CAGR at an unacceptable -31% drawdown.
+  volatility_adjusted_score: true
+  atr_sessions: 14
+
+  # P11 -- breadth to slots:
+  #   round(max_positions x clamp((breadth - breadth_lower) / breadth_span, 0, 1))
+  # 35% of the liquid universe above its own SMA200 buys nothing; 65% (i.e.
+  # breadth_lower + breadth_span) buys the full book.
+  #
+  # The SPAN is configured rather than derived from an upper bound, and that is
+  # not pedantry: 0.65 - 0.35 is 0.30000000000000004 in IEEE-754, not 0.30, and
+  # the backtest divides by the literal 0.30. The difference is one slot at
+  # several reachable breadth values -- 0.425 resolves to 3 slots against the
+  # engine and 2 against a derived span. Configuring the span is what makes the
+  # two the same arithmetic.
+  breadth_lower: 0.35
+  breadth_span: 0.30
+
+  # P12 -- the most positions that may be open at once.
+  max_positions: 10
+
+  # P13 -- position size is total equity divided by this, whole shares, floored.
+  # Kept separate from max_positions: sizing stays at a tenth of equity even
+  # when breadth allows only four slots, so a narrow market holds cash rather
+  # than concentrating.
+  position_size_divisor: 10
+
+  # P14 / P15 -- the chandelier stop, set at entry and ratcheted up on each
+  # daily close, never down. Specification section 10 measures every tighter
+  # variant as worse: it converts shakeouts into realised losses and ejects the
+  # positions that produce the fat right tail. Do not tighten it.
+  trail_atr_multiple: 3.5
+
+  # P16 -- a holding whose rank falls below this is sold at the next open.
+  rotation_exit_rank: 15
+
+  # Warm-up. A symbol with fewer sessions than this is excluded from the
+  # universe entirely, exactly as the backtest's loader excludes it -- which is
+  # the whole difference between its 480-symbol and 485-symbol reproductions.
+  minimum_sessions: 260
+
+regime:
+  # P8 -- the hard gate: the index's close above its own 200-session SMA.
+  # P9 -- the entry filter: the index's 63-session return above zero. This
+  # blocks NEW ENTRIES only; it never forces an exit.
+  index_role: "regime_index"
+  sma_sessions: 200
+  entry_return_sessions: 63
+  entry_return_minimum: 0.0
+
+schedule:
+  # P18 -- the specification's backtest rebalances on the first session of each
+  # week; `swing_live.py` rebalances daily, and the owner chose daily
+  # deliberately: 23.4% CAGR at -22.2% drawdown against weekly's 19.9% and
+  # -18.3% (specification section 9.2). Weekly has the better MAR.
+  #
+  # Changing this value is the only change needed to switch.
+  rebalance_cadence: "daily"        # daily | weekly
+
+  # IST. The nightly job runs after Dhan's end-of-day data settles; the
+  # rebalance runs just after the open, because P19 is a market order at the
+  # next session's open.
+  nightly_at: "18:15"
+  rebalance_at: "09:16"
+
+off_gate:
+  # ---------------------------------------------------------------------------
+  # V3b -- what to do while the index is BELOW its 200-day SMA.
+  #
+  # DISABLED, and it should stay that way. The owner's own research tested 13
+  # variants on the extended panel and NOT ONE beat holding cash on return.
+  # V3b's individual trades are genuinely good -- 38 trades over 11 years, 61%
+  # win rate, mean +7.81% -- and it still ends LOWER than the baseline, because
+  # capital committed to a bear rally is not available at the regime flip,
+  # which is exactly when the best trades fire. Per-trade edge is not portfolio
+  # edge.
+  #
+  # Enabling this is an informed choice against that finding.
+  # ---------------------------------------------------------------------------
+  enabled: false
+  slots: 3
+  momentum_floor: 0.10
+  # V3b drops the 63-day entry filter while the gate is off.
+  require_entry_return: false
+
+automation:
+  # The separate arming switch. Enabling the strategy makes it compute, decide
+  # and record; ARMING is what lets it submit an order. Two switches, because
+  # this is the first thing in the application that trades with nobody
+  # watching, and watching it decide for a while before it can spend anything
+  # is the cheapest possible safeguard.
+  armed_by_default: false

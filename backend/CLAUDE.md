@@ -463,6 +463,81 @@ buffer cannot under-report, and never raises out of `emit`.
 
 ---
 
+## 10d. Daily bars
+
+`src/daily_bars/` owns one table and two jobs: a bootstrap import and a nightly
+refresh. Root `CLAUDE.md` section 4 explains why a stored daily bar is not the
+tick accumulation that rule forbids; read that before touching this.
+
+- **Nothing here reads the feed.** Every bar is fetched whole from
+  `/charts/historical` through `DhanChartsClient` -- the same market-data client
+  the chart uses, with the same closed endpoint set. If you find yourself
+  writing `daily_bars` rows from `MarketBook`, stop.
+- **The series is keyed on `(exchange_segment, symbol, bar_date)`, not on the
+  security id.** Dhan's ids move -- the universe file's own ids for HEG and
+  HFCL no longer match the master -- and keying a price series on one would
+  silently start a second copy of a symbol's history the day its id changed.
+  The id is stored as data, because it is what the next fetch is made with.
+- **An existing bar is UPDATED, not skipped.** Dhan restates a series after a
+  corporate action; a split that failed to propagate would leave a price
+  history that no longer describes the instrument.
+- **The refresh paces itself.** `DhanChartsClient` throttles per security id,
+  which throttles a loop over 500 different ids not at all.
+  `daily_bars.request_delay_seconds` is the real limiter, and 0.6 s is the
+  interval the research project measured as safe. Lowering it chooses a ban
+  over a slow overnight job.
+- **One symbol failing does not end the run.** 499 refreshed and one error is a
+  reportable state; an exception that abandons the other 498 is not.
+- **No credentials means no bars.** There is no synthetic fallback on this path
+  at all -- unlike the chart, where a fabricated bar is labelled and looked at.
+  Here it would go straight into a trading decision.
+- **The trading calendar is the regime index's own bar dates.** A date NSE
+  published a bar for is a date NSE traded, which is why there is no holiday
+  list to maintain and no second source to go stale.
+- **The importer commits per symbol.** The ten-year panel is 1.09 million rows;
+  held in one session's identity map that is enough pending ORM objects to take
+  the process down. It also means a failure half-way through leaves the symbols
+  already done.
+
+---
+
+## 10e. The swing rotation
+
+`src/swing/` is the strategy-specific half of
+`conf/strategies/nse-swing-momentum.yaml`. Its own `README.md` has the full
+list; these are the ones that will bite a future change.
+
+- **`StrategyDefinition.module_config` is how a strategy's rules stay
+  configuration.** Blocks of a strategy YAML the framework does not interpret
+  travel to the module unchanged and are validated there. P1-P19 are numbers
+  that change what is traded, so root `CLAUDE.md` section 7 applies, but
+  teaching the registry what a momentum lookback is would make the framework
+  specific to one module.
+- **`SwingParameters` has no defaults.** A missing key names the file and the
+  key. A value that quietly fell back to something reasonable is a silently
+  different strategy, and the whole point of the YAML is that its numbers can
+  be checked against the specification's own table.
+- **Indicators are float, money is `Decimal`,** and the conversion happens at
+  the boundary in `ranking_service`. Do not "improve" the indicators to
+  `Decimal`: the parity test compares them against numbers pandas produced.
+- **The breadth ramp divides by a configured SPAN.** `0.65 - 0.35` is
+  `0.30000000000000004` and the backtest divides by the literal `0.30`. The
+  difference is a whole slot at reachable breadth values.
+- **A symbol with no bar on the session is skipped, never forward-filled.**
+  The session is the regime index's own date. Without this a delisted name
+  stays rankable on its last close for ever -- JBCHEPHARM did exactly that in a
+  first draft, two months after it stopped trading.
+- **Undefined is not zero.** Indicators return `None` where undefined,
+  `slots_for_breadth(None)` is `None`, and a gate that cannot be evaluated
+  reports that rather than defaulting either way.
+- **`tests/test_swing_parity.py` is the guarantee that not adding pandas was
+  safe.** Golden values come from the backtest's own expressions. Two pandas
+  behaviours are load-bearing and asserted first: `max(axis=1)` skips the NaNs
+  in the first true range, and `ewm(adjust=False)` seeds on the first
+  observation.
+
+---
+
 ## 11. Tests
 
 - `pytest.ini` sets `asyncio_mode = auto` — async tests need no decorator.

@@ -239,3 +239,31 @@ trading:
   # its own database session.
   matcher_enabled: true
   matcher_interval_ms: 250
+
+daily_bars:
+  # Stored daily OHLCV, one row per symbol per session.
+  #
+  # This is NOT the tick accumulation root CLAUDE.md section 4 prohibits. That
+  # rule forbids writing TICKS to back a chart -- database I/O on the hot path,
+  # and rebuilding from a stream what Dhan already serves correctly. These bars
+  # are fetched whole from /charts/historical by a background job, once per
+  # symbol per day, after the close. No tick reaches the table and the feed
+  # does not know it exists.
+  #
+  # It exists because a momentum rotation needs 260+ sessions for ~500 symbols
+  # available instantly at 09:15, and re-fetching that takes five minutes at
+  # Dhan's rate limits -- which is comfortable overnight and impossible between
+  # waking up and the open.
+
+  # Seconds between SYMBOLS during a refresh. DhanChartsClient throttles per
+  # security id, which throttles a loop over 500 different ids not at all.
+  # 0.6 s is the interval the research project's own downloader used against
+  # this endpoint without being rate limited, so a 500-symbol pull is ~5 min.
+  # Lower this and you are choosing a ban over a slow overnight job.
+  request_delay_seconds: 0.6
+
+  # How far back to fetch for a symbol with no stored history. The strategy
+  # needs 260 sessions of warm-up; this is deliberately far more, so a symbol
+  # added mid-life is not permanently short of history and therefore
+  # permanently unrankable.
+  bootstrap_days: 3650

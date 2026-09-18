@@ -33,6 +33,25 @@ class InstrumentRepository(BaseRepository[Instrument]):
         )
         return list(result.scalars().all())
 
+    async def list_by_symbols(
+        self, underlying_symbols: Sequence[str], exchange_segment: Optional[str] = None
+    ) -> List[Instrument]:
+        """Every row for these underlyings, in one query.
+
+        The rotation resolves 500 symbols to security ids before a bar refresh;
+        a query per symbol would be 500 round trips.
+        """
+        symbols = list(dict.fromkeys(underlying_symbols))
+        if not symbols:
+            return []
+        query = select(Instrument).where(Instrument.underlying_symbol.in_(symbols))
+        if exchange_segment is not None:
+            query = query.where(Instrument.exchange_segment == exchange_segment)
+        result = await self.session.execute(
+            query.order_by(Instrument.underlying_symbol.asc())
+        )
+        return list(result.scalars().all())
+
     async def list_expiries(
         self, underlying_symbol: str, instrument_type: str, on_or_after: Optional[date] = None
     ) -> List[date]:

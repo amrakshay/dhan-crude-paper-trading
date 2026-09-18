@@ -289,6 +289,20 @@ class StrategyDefinition:
     # ReferenceInstrument for why these are not rows in `instruments`.
     reference_instruments: Dict[str, ReferenceInstrument] = field(default_factory=dict)
 
+    # Blocks of the YAML the FRAMEWORK does not interpret, handed to the
+    # strategy's own module unchanged.
+    #
+    # This is how a strategy's rules live in configuration without the registry
+    # having to learn them. The rotation's P1-P19 parameters are numbers that
+    # change what it trades, and root CLAUDE.md section 7 is absolute that no
+    # such number may be hardcoded in Python -- but they mean nothing to any
+    # other strategy, and teaching `StrategyDefinition` about momentum
+    # lookbacks would make the framework specific to one module.
+    #
+    # Nothing here is validated on load. The module that reads a block is the
+    # only thing that knows what it should contain, and it validates it.
+    module_config: Dict[str, Any] = field(default_factory=dict)
+
     # --- derived ----------------------------------------------------------
     def supports(self, capability: str) -> bool:
         return capability in self.capabilities
@@ -325,6 +339,11 @@ class StrategyDefinition:
             instrument_set.exchange_segment
             for instrument_set in self.instrument_sets
         ) or frozenset({self.exchange_segment})
+
+    def module_section(self, name: str) -> Dict[str, Any]:
+        """One uninterpreted block, or an empty mapping."""
+        section = self.module_config.get(str(name))
+        return dict(section) if isinstance(section, dict) else {}
 
     def reference_instrument(self, role: str) -> Optional[ReferenceInstrument]:
         return self.reference_instruments.get(str(role))
@@ -391,6 +410,28 @@ def _parse_hhmm(value: Any, source: str, key: str) -> time:
             f"{source}: '{key}' must be HH:MM, got {value!r}"
         ) from exc
 
+
+# Top-level YAML keys the framework itself reads. Anything else is a block the
+# strategy's own module owns, and travels to it through `module_config`.
+FRAMEWORK_KEYS = frozenset(
+    {
+        "key",
+        "label",
+        "description",
+        "enabled_by_default",
+        "underlying",
+        "universe",
+        "instrument_sets",
+        "reference_instruments",
+        "contract_specs",
+        "market_hours",
+        "subscription",
+        "greeks",
+        "charges",
+        "margin",
+        "capabilities",
+    }
+)
 
 UNIVERSES_DIRNAME = "universes"
 
@@ -739,4 +780,9 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
         reference_instruments=_build_reference_instruments(
             document, source, default_segment, default_segment_code
         ),
+        module_config={
+            key: value
+            for key, value in document.items()
+            if key not in FRAMEWORK_KEYS
+        },
     )

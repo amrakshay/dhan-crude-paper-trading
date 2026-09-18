@@ -177,6 +177,28 @@ the newest bar from the WebSocket it already has. If you are tempted to persist
 ticks to back a chart, read the "Price chart" section of `README.md` first — that
 option was considered and rejected.
 
+**`daily_bars` is not that, and here is why.** The rule above forbids
+accumulating **ticks**: database I/O on the hot path, which breaks the
+performance contract, and rebuilding from a stream what the vendor already
+serves correctly. The `daily_bars` table, added 2026-09-18 for the NSE swing
+momentum rotation, is a different object with a different provenance. Every row
+is *fetched whole* from `/charts/historical` — the same read-only market-data
+endpoint the chart uses — by a background job, once per symbol per day, after
+the close. No tick reaches it, nothing in it is derived from the feed,
+`apply_packet` does not know it exists, and if it were deleted it would be
+refetched rather than lost.
+
+It exists because a rotation needs 260+ sessions for ~500 symbols available
+*instantly* at 09:15, and re-fetching that is a five-minute job at Dhan's rate
+limits — comfortable overnight, impossible between waking up and the open. The
+chart's 15-second/5-minute in-memory cache in `candle_service` is the right
+answer for one instrument a human is looking at, and no answer at all for five
+hundred a scheduler is about to trade.
+
+The distinction to keep is **provenance, not durability**: fetched bars may be
+stored; ticks may not be accumulated into bars. If you find yourself writing
+`daily_bars` rows from `MarketBook`, you are on the wrong side of it.
+
 **A chart click never writes an option.** `src/chart_trading/` translates a
 click on the FUTURE's chart into a long ATM option: Buy buys the call, Sell buys
 the put. A "Sell" is a long put, never a short call, so the worst case stays the

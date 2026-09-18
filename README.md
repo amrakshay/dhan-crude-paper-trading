@@ -496,6 +496,184 @@ the page reports on.
 
 ---
 
+## NSE Swing Momentum — a second strategy module
+
+A breadth-gated momentum rotation on the Nifty 500, researched separately and
+specified in full at
+`~/Workarea/local/pullback/backend/intrday_test_strategy/research2/SWING_MOMENTUM_HANDOFF.md`.
+That document is the source of truth for the rules, the parameters (P1–P19),
+the indicator formulas, the cost model and the backtested results. This section
+covers only how it is built *here*.
+
+**It is not finished, and it does not trade yet.** What exists today computes
+what the strategy *would* do. See "What is not built yet" below.
+
+### What a strategy module can now do that it could not before
+
+- **Own many underlyings.** A strategy declares a *universe* — a CSV of symbols
+  in `backend/conf/universes/` — and ownership resolves against it. MCX crude
+  still owns exactly one underlying and its resolution is unchanged.
+- **Trust the instrument master's lot size.** `LOT_SIZE = 1.0` is a defect on
+  MCX and correct on NSE, where a delivery trade is one share. An instrument set
+  says which, instead of 500 `contract_specs` entries restating a number the
+  master already gets right.
+- **Filter by series.** NSE publishes several `EQUITY` rows under one
+  `UNDERLYING_SYMBOL` — CHOLAFIN and MOTHERSON each have their share and a
+  listed NCD. The strategy ingests `EQ` and `BE` only.
+- **Declare a reference instrument.** The NIFTY 50 index is read, never traded,
+  and deliberately not a row in `instruments` — see "Security ids are not
+  globally unique" below.
+- **Carry its own parameters.** Blocks of a strategy YAML the framework does not
+  interpret travel to the strategy's own module through
+  `StrategyDefinition.module_config`. That is how P1–P19 stay configuration
+  without the registry learning what a momentum lookback is.
+
+### Security ids are not globally unique
+
+Dhan's `SECURITY_ID` is unique **per exchange segment**, not globally. Verified
+against the live master on 2026-09-18: id `13` is NIFTY in `IDX_I` and **ABB**
+in `NSE_EQ`, and there are 44 such collisions between the INDEX and EQUITY row
+sets. ABB is a Nifty 500 constituent.
+
+`instruments.security_id` carries a global `UNIQUE` constraint and `MarketBook`
+keys its rows by security id alone, so ingesting both would either fail the
+constraint or silently merge an index's prices with a stock's. Two things follow:
+
+- the regime index is a **reference instrument**, not an ingested one — the
+  charts client takes `(security_id, exchange_segment, instrument)` as arguments
+  and needs no database row;
+- the instrument-master parser **refuses** a security id that appears in two
+  segments, rather than relying on today's luck. There is no collision between
+  MCX CRUDEOIL's 1,240 ids and the Nifty 500's 499 as of 2026-09-18.
+
+`daily_bars` is keyed on `(exchange_segment, symbol, bar_date)` for the same
+reason, plus a second one: ids *move*. The universe file's own ids for HEG and
+HFCL no longer match the master.
+
+### Daily bars — stored, and why that is not tick accumulation
+
+`daily_bars` holds one row per symbol per session. Root `CLAUDE.md` §4 forbids
+accumulating **ticks**; these bars are *fetched whole* from Dhan's
+`/charts/historical` endpoint by a background job, once per symbol per day,
+after the close. No tick reaches the table, nothing in it is derived from the
+feed, and deleting it would cost a refetch rather than data. The full argument
+is in root `CLAUDE.md` §4, next to the rule it looks like an exception to.
+
+It exists because the rotation needs 260+ sessions for ~500 symbols available
+*instantly* at 09:15, and refetching that is a five-minute job at Dhan's rate
+limits — comfortable overnight, impossible between waking up and the open.
+
+**Bootstrapping.** The ten-year research panel is imported once, from wherever
+it lives; 49 MB of research CSV is not copied into this repository:
+
+```bash
+cd backend
+CONFIG_PATH=conf .venv/bin/python scripts/import_daily_bars.py \
+    --strategy nse-swing-momentum \
+    --directory ~/Workarea/local/pullback/backend/intrday_test_strategy/research2/data_daily_10y
+```
+
+Measured on 2026-09-18: **501 symbols, 1,088,241 bars, 197 s**, nothing skipped.
+The panel ends 2026-07-14, so the first nightly refresh backfills the gap.
+
+Do **not** point the importer at `research2/gate_run/data_ext/`. Those files
+splice a second vendor's rows after 2026-07-14; they are the parity fixture, and
+as production data the join would be invisible afterwards.
+
+**Refreshing.** `DailyBarRefreshService` tops every symbol up from its last
+stored session (re-requesting that session, so a corporate-action restatement is
+picked up). It paces itself at `daily_bars.request_delay_seconds` — 0.6 s,
+because `DhanChartsClient` throttles per security id and therefore throttles a
+loop over 500 different ids not at all. A symbol that fails does not fail the
+run. **No credentials means no bars and an error**; there is no synthetic
+fallback on this path, because a fabricated close would go straight into a
+trading decision.
+
+### The universe is a file, refreshed by hand
+
+`backend/conf/universes/nifty500.csv`, copied from the research project on
+2026-09-18. Refresh it quarterly after NSE's index review from
+`https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv` — that
+archive host serves scripted clients; `www.nseindia.com`'s API returns 503 to
+them. Keeping it a file rather than a scrape is what stops this application
+gaining a new outbound host. Full procedure and the current data caveats:
+`backend/conf/universes/README.md`.
+
+Checked against the live master on 2026-09-18: **499 of 500** symbols resolve.
+`JBCHEPHARM` has no NSE row at all, and its last bar in the research panel is
+2026-07-16.
+
+### Charges
+
+NSE delivery gets its own rate card, `conf/charges/nse-equity-delivery.yaml`,
+because it is a different set of taxes rather than the same ones at different
+rates: **STT on both legs** (commodity CTT is sell-side only) and a **flat
+depository charge per sell**. The engine now iterates the levies a card
+declares rather than computing a fixed set of six; the commodity card was
+rewritten into the same form and its numbers have not moved by a paisa.
+
+Two figures differ from the specification's cost model, deliberately:
+
+| | Specification §5 | Here | Why |
+|---|---|---|---|
+| Exchange transaction charge | 0.00297% | 0.0030699% + ₹0.01/crore IPFT | NSE circular NSE/FA/73061, effective 1 Mar 2026. The backtest predates it. |
+| DP charge per sell | ₹16.00 flat | ₹12.50 + GST | Dhan's published rate. ₹16 is not a figure this card can source. |
+
+A round trip on a ~₹1,00,000 position costs about **0.245%** of turnover against
+the specification's "~0.30%", which includes its 0.05%/side slippage assumption
+— slippage lives in the fill simulator here, not in the charges engine.
+
+### Verified reproduction of the specification's §13 snapshot
+
+Run against the research project's extended panel (the one §13 was computed on),
+as of 2026-09-17:
+
+| | This platform | Specification §13 |
+|---|---|---|
+| NIFTY 50 close | 23,270.6 | 23,270.6 |
+| NIFTY 200-SMA | 24,501.7 | 24,501.7 |
+| Regime gate (P8) | OFF | OFF |
+| 63-day return (P9) | −3.71% | −3.71% |
+| Liquid universe | 448 | 448 |
+| Above own SMA200 | 215 | 215 |
+| Breadth (P10) | 48.0% | 48.0% |
+| Slots (P11) | 4 | 4 |
+| Qualifying candidates | 199 | 199 |
+| Top-15 ranking | identical, in order | — |
+
+Reproduce it with the panel present:
+
+```bash
+cd backend
+SWING_SECTION_13=1 .venv/bin/python -m pytest tests/test_swing_ranking.py -k section_13
+```
+
+It is opt-in rather than always-on because it imports 1.1 million rows and adds
+about four minutes to a suite run.
+
+Two things that reproduction caught, both of which would have been silent:
+
+- **`0.65 − 0.35` is not `0.30`** in IEEE-754, and the backtest's slot ramp
+  divides by the literal `0.30`. The YAML therefore configures the breadth
+  *span* rather than an upper bound; a derived span gives 2 slots where the
+  engine gives 3, at a breadth of 0.425.
+- **A symbol with no bar on the session must be skipped, never forward-filled**
+  (the backtest's mechanic 1). Forward-filled, JBCHEPHARM went on ranking as a
+  buy candidate two months after it stopped trading, on a price that no longer
+  existed.
+
+### What is not built yet
+
+Phases 5–10 of the implementation handoff. In order: the decision journal and
+session record, execution (the rebalance through `submit_paper_order`), the
+chandelier trailing stop, the scheduler, the strategy page, and the performance
+metrics. Until those exist this module computes what the strategy *would* do and
+nothing acts on it.
+
+The module ships **disabled**, and carries a **separate arming switch**
+(`automation.armed_by_default: false`): enabling the strategy will make it
+compute, decide and record; arming is what will let it submit an order.
+
 ## Switching SQLite → MySQL
 
 Change one line in `.env`:
@@ -755,6 +933,54 @@ not carried over.
 ---
 
 ## Known gaps
+
+### NSE Swing Momentum
+
+* **It has no live track record, and neither does the strategy.** Zero rupees
+  have traded this rule anywhere. The specification's own honest expectation is
+  **12–18% CAGR against a 19.9% headline**, because the backtest is
+  survivorship-biased and every parameter was chosen in-sample with no
+  walk-forward and no holdout.
+* **The universe is survivorship-biased.** `nifty500.csv` is *today's* Nifty 500
+  applied backwards. No point-in-time membership history is available without
+  paid data. The research project measured the size of this effect once, on a
+  smallcap proxy: +157% for the constituent composite against the actual ETF's
+  +94.6% over the same period — a 62 percentage-point gap.
+* **Four universe security ids disagree with the instrument master**, and two of
+  them matter. `HEG` (file 1336, master 7368) and `HFCL` (file 21951, master
+  21954) — and **HFCL is rank 2 in the specification's §13 snapshot**. The
+  master is authoritative here and the divergence is logged on every refresh,
+  but whether those ids were correct when the research panel was downloaded in
+  July 2026 and have since changed, or were wrong then, is **NOT VERIFIED**. If
+  they were wrong at fetch time, HFCL's history in the panel is some other
+  instrument's.
+* **`JBCHEPHARM` cannot be traded.** It has no NSE row in the current master and
+  its last panel bar is 2026-07-16. It is reported as unresolved on every
+  refresh rather than dropped silently, and the universe is effectively 499.
+* **Nothing has been run against a live Dhan token.** `dhan_charts_client` has
+  still never been exercised against the real endpoint — its docstring has said
+  so since it was written, and that has not changed. The daily-bar refresh path,
+  the response schema and the rate-limit behaviour are **unverified in
+  practice**. Everything reproduced above was computed from the research
+  project's stored panel.
+* **The Closing Auction Session is not modelled.** Since 3 August 2026
+  continuous trading for F&O-eligible names ends at 15:15. A stop triggered
+  between 15:15 and 15:30 on one of those names cannot fill in continuous
+  trading. The backtest predates this entirely and so does this implementation;
+  the trailing stop is not built yet, and this must be handled when it is. The
+  F&O-eligible set is derivable from the instrument master (228 distinct NSE
+  `FUTSTK` underlyings as of 2026-09-18) and needs no new data source.
+* **The DP charge is levied per ORDER, not per scrip per day.** Selling one
+  scrip in two orders on one day is charged twice. This errs pessimistically and
+  the strategy sells a whole position in a single order, but it is not what the
+  depository does.
+* **Taxes on gains are not modelled at all.** Returns here, like the
+  specification's, are pre-tax. STCG applies to holds under twelve months.
+* **The LIQUIDBEES cash sleeve and the gold overlay are not implemented.** The
+  specification records the first as arithmetic rather than a simulation and the
+  second as an overlay estimate; neither was adopted.
+
+### Everything else
 
 * **The system health page's process metrics need `psutil`.** Memory, CPU, open
   file descriptors and the OS thread count come from it; if it is ever missing
