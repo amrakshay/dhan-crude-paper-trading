@@ -105,7 +105,10 @@ export default function LivePricePage() {
     <Stack spacing={3}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
         <Box>
-          <Typography variant="h2">Live Price</Typography>
+          {/* Named for what it shows, matching the sidebar. The route and
+              the component keep their old names: renaming a path breaks
+              every saved link and every role-pages entry pointing at it. */}
+          <Typography variant="h2">Crude Oil</Typography>
           <Typography variant="body2" color="text.secondary">
             {future
               ? `${future.displayName ?? future.tradingSymbol} · expires ${future.expiryDate}`

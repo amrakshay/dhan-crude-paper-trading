@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   AppBar,
   Box,
+  Button,
   Divider,
   Drawer,
   IconButton,
@@ -10,6 +12,8 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Menu,
+  MenuItem,
   Stack,
   Toolbar,
   Tooltip,
@@ -17,6 +21,7 @@ import {
 } from '@mui/material';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
@@ -33,6 +38,7 @@ function AppShellInner() {
   const { session, logout, pages, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [accountMenu, setAccountMenu] = useState(null);
 
   // Filtered from the server's role -> pages mapping. Presentation only: the
   // API refuses what this role may not do, whatever the sidebar shows.
@@ -76,31 +82,66 @@ function AppShellInner() {
             </IconButton>
           </Tooltip>
 
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Tooltip title={`${session?.email ?? ''} — ${isAdmin ? 'Account admin' : 'User'}`}>
-              <Box
-                onClick={() => navigate('/profile')}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.75,
-                  cursor: 'pointer',
-                  color: 'text.secondary',
-                  '&:hover': { color: 'text.primary' },
+          {/* The account menu. Profile is no longer in the sidebar -- a page
+              about YOU does not belong in a rail of pages about trading -- so
+              this is the only way to reach it and it has to look like a menu
+              rather than a name that happens to be clickable. Sign out moved
+              in with it: two ways to do one thing, a menu item and a stray
+              icon, is how a header accumulates. */}
+          <Button
+            onClick={(event) => setAccountMenu(event.currentTarget)}
+            size="small"
+            endIcon={<ExpandMoreIcon />}
+            startIcon={<PersonIcon sx={{ fontSize: 18 }} />}
+            sx={{ color: 'text.secondary', textTransform: 'none' }}
+          >
+            <Typography variant="body2" color="inherit" noWrap>
+              {session?.fullName || session?.email}
+            </Typography>
+          </Button>
+          <Menu
+            anchorEl={accountMenu}
+            open={Boolean(accountMenu)}
+            onClose={() => setAccountMenu(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <Box sx={{ px: 2, py: 1 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {session?.fullName || session?.email}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {session?.email} — {isAdmin ? 'Account admin' : 'User'}
+              </Typography>
+            </Box>
+            <Divider />
+            {/* Gated the same way every other page is: from the server's own
+                page list, not from a role check written here (§5). */}
+            {pages?.includes('/profile') ? (
+              <MenuItem
+                onClick={() => {
+                  setAccountMenu(null);
+                  navigate('/profile');
                 }}
               >
-                <PersonIcon sx={{ fontSize: 18 }} />
-                <Typography variant="body2" color="inherit">
-                  {session?.fullName || session?.email}
-                </Typography>
-              </Box>
-            </Tooltip>
-            <Tooltip title="Sign out">
-              <IconButton onClick={handleLogout} size="small">
-                <LogoutIcon />
-              </IconButton>
-            </Tooltip>
-          </Stack>
+                <ListItemIcon>
+                  <PersonIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Profile</ListItemText>
+              </MenuItem>
+            ) : null}
+            <MenuItem
+              onClick={() => {
+                setAccountMenu(null);
+                handleLogout();
+              }}
+            >
+              <ListItemIcon>
+                <LogoutIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Sign out</ListItemText>
+            </MenuItem>
+          </Menu>
         </Toolbar>
       </AppBar>
 

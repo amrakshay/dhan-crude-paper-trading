@@ -5,7 +5,6 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import StickyNote2Icon from '@mui/icons-material/StickyNote2';
 import GroupIcon from '@mui/icons-material/Group';
-import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
@@ -25,7 +24,10 @@ import AutoModeIcon from '@mui/icons-material/AutoMode';
  * ROLE_USER calling the settings endpoints whatever the sidebar shows.
  */
 export const navigationItems = [
-  { path: '/live', label: 'Live Price', icon: ShowChartIcon },
+  // Named for what it actually shows: ONE strategy's front contract. It is
+  // granted by the `live-price` capability, which only MCX Crude Options
+  // declares, so switching that strategy off takes this out of the sidebar.
+  { path: '/live', label: 'Crude Oil', icon: ShowChartIcon },
   { path: '/chain', label: 'Option Chain', icon: TableChartIcon },
   { path: '/positions', label: 'Positions', icon: AccountBalanceWalletIcon },
   { path: '/orders', label: 'Order History', icon: ReceiptLongIcon },
@@ -34,11 +36,20 @@ export const navigationItems = [
   { path: '/notes', label: 'Trade Notes', icon: StickyNote2Icon },
   { path: '/swing', label: 'Swing Momentum', icon: AutoModeIcon },
   { path: '/users', label: 'Users', icon: GroupIcon },
-  { path: '/profile', label: 'Profile', icon: PersonIcon },
   { path: '/strategies', label: 'Strategies & Features', icon: TuneIcon },
   { path: '/settings', label: 'Settings', icon: SettingsIcon },
   { path: '/health', label: 'System Health', icon: MonitorHeartIcon },
 ];
+
+/**
+ * Pages that are reachable but deliberately NOT in the sidebar.
+ *
+ * Profile lives in the header's account menu instead, beside the signed-in
+ * name -- that is where a person looks for their own account, and it is one
+ * fewer permanent row in a list of pages about trading. It is still a real
+ * route with a real `RoleRoute` gate; this only keeps it out of the rail.
+ */
+export const pagesOutsideTheSidebar = ['/profile'];
 
 /** The sidebar for a role, in the order declared above. */
 export function visibleNavigationItems(pages) {

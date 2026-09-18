@@ -74,7 +74,7 @@ npm run dev                                         # http://localhost:5173
 
 Open http://localhost:5173 and sign in as **`trader@abc.com`** with the
 `APP_ADMIN_PASSWORD` you set in `.env`. That account is seeded by the migration
-above. Then click **Refresh instruments** on the Live Price page to pull the
+above. Then click **Refresh instruments** on the Crude Oil page to pull the
 instrument master (~35 MB, cached for 12 hours).
 
 > **Upgrading an existing checkout?** `APP_USERNAME` / `APP_PASSWORD` no longer
@@ -212,7 +212,7 @@ To go live: set `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN`, set
 
 ## Price chart
 
-The Live Price page carries a candlestick chart of the near-month CRUDEOIL
+The Crude Oil page carries a candlestick chart of the near-month CRUDEOIL
 future, below the stat tiles, with a volume pane beneath the candles.
 Timeframes: `1m 3m 5m 15m 30m 1h 4h 1D 1W 1M`.
 

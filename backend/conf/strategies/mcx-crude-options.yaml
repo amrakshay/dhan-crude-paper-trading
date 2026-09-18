@@ -138,6 +138,11 @@ capabilities:
   # A future cash-equity strategy would not list option-chain or greeks: it has
   # no options to chain, and a capability it cannot support must not be
   # advertised.
+  # The live quote screen for this strategy's front contract. Declared here and
+  # nowhere else: it shows ONE instrument's depth, chart and ticket, which only
+  # a strategy with a single front contract has. Switching this strategy off now
+  # takes the Crude Oil page out of the sidebar with it.
+  - "live-price"
   - "option-chain"
   - "price-chart"
   - "chart-trading"

@@ -142,6 +142,18 @@ These are product requirements, not styling choices:
 
 ## 5. Roles in the UI
 
+- **The sidebar is not the whole route table.** `/profile` is a real route
+  with a real `RoleRoute` gate and is deliberately NOT in `navigationItems`:
+  a page about the signed-in person does not belong in a rail of pages about
+  trading. It lives in the header's account menu, which also carries Sign out
+  -- one menu rather than a menu item and a stray icon doing the same thing.
+  `pagesOutsideTheSidebar` in `navigation.js` records the exception so the next
+  reader does not "fix" the omission. The menu item is still gated off the
+  server's `pages` list, like everything else.
+- **The landing route is `/positions`, not `/live`.** `/live` is the Crude Oil
+  screen and is gated behind the MCX strategy, so it is not somewhere to land
+  when that strategy is off. Positions is ungated and is never withdrawn by a
+  toggle, which is what makes it a safe default.
 - **The sidebar and the routes are driven by the server.** `/auth/me` returns
   the pages the role may see -- `backend/conf/role-pages.json` INTERSECTED with
   the pages the enabled strategies and capabilities grant;

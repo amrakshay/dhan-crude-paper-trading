@@ -19,7 +19,14 @@
     "set is these pages intersected with what the enabled strategies and",
     "capabilities grant (see pages_for_role). Only /live, /chain, /notes and",
     "/reports are gated that way; the rest, including everything that shows",
-    "history, are never withdrawn."
+    "history, are never withdrawn.",
+    "",
+    "/live is the Crude Oil screen and is granted by the live-price",
+    "CAPABILITY, which only mcx-crude-options declares. It used to be granted",
+    "by ANY strategy being live, which left it in the sidebar showing a front",
+    "contract no running strategy had. /profile stays here and stays a real",
+    "route; it is simply not in the sidebar -- the header account menu is",
+    "where it lives now."
   ],
   "pages": [
     "/live",

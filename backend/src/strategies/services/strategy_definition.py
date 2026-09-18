@@ -36,6 +36,13 @@ class StrategyConfigError(Exception):
 # The generic capability catalogue. A strategy may support any subset of these;
 # it may not invent one, because a capability is a feature of THIS codebase
 # (pages, pollers, background work) and not of the strategy.
+# The live quote screen for ONE instrument: its depth ladder, its chart and
+# the one-click ticket beside them. It shows a strategy's FRONT CONTRACT, so
+# only a strategy that has one can support it -- the NSE rotation holds a
+# basket of equities and has no single instrument to put on that screen,
+# which is why it was wrong for the page to appear whenever ANY strategy was
+# running. Added 2026-09-18.
+CAPABILITY_LIVE_PRICE = "live-price"
 CAPABILITY_OPTION_CHAIN = "option-chain"
 CAPABILITY_PRICE_CHART = "price-chart"
 CAPABILITY_CHART_TRADING = "chart-trading"
@@ -44,6 +51,7 @@ CAPABILITY_TRADE_NOTES = "trade-notes"
 CAPABILITY_PNL_REPORTS = "pnl-reports"
 
 KNOWN_CAPABILITIES: Tuple[str, ...] = (
+    CAPABILITY_LIVE_PRICE,
     CAPABILITY_OPTION_CHAIN,
     CAPABILITY_PRICE_CHART,
     CAPABILITY_CHART_TRADING,
@@ -53,6 +61,7 @@ KNOWN_CAPABILITIES: Tuple[str, ...] = (
 )
 
 CAPABILITY_LABELS: Dict[str, str] = {
+    CAPABILITY_LIVE_PRICE: "Live price screen",
     CAPABILITY_OPTION_CHAIN: "Option chain",
     CAPABILITY_PRICE_CHART: "Price chart",
     CAPABILITY_CHART_TRADING: "Chart trading",
@@ -62,6 +71,10 @@ CAPABILITY_LABELS: Dict[str, str] = {
 }
 
 CAPABILITY_DESCRIPTIONS: Dict[str, str] = {
+    CAPABILITY_LIVE_PRICE: (
+        "The live quote screen for a strategy's front contract: depth, chart "
+        "and ticket. Only a strategy with a single front contract can offer it."
+    ),
     CAPABILITY_OPTION_CHAIN: "The paired-strike chain page.",
     CAPABILITY_PRICE_CHART: "Candle history from Dhan's chart endpoints.",
     CAPABILITY_CHART_TRADING: "One-click entry from the futures chart.",
@@ -193,6 +206,7 @@ SETTING_DESCRIPTIONS: Dict[str, str] = {
 # show HISTORY (/orders, /positions) are deliberately absent: a strategy going
 # off must never hide trades that already happened.
 CAPABILITY_PAGES: Dict[str, str] = {
+    CAPABILITY_LIVE_PRICE: "/live",
     CAPABILITY_OPTION_CHAIN: "/chain",
     CAPABILITY_TRADE_NOTES: "/notes",
     CAPABILITY_PNL_REPORTS: "/reports",
@@ -206,11 +220,24 @@ CAPABILITY_PAGES: Dict[str, str] = {
 # capability toggle and nothing else: turning P&L reports off hides Reports for
 # everyone, but turning the last STRATEGY off must not, or a trader loses the
 # record of what that strategy did.
-CAPABILITY_LIVE_PAGES: FrozenSet[str] = frozenset({CAPABILITY_OPTION_CHAIN})
+CAPABILITY_LIVE_PAGES: FrozenSet[str] = frozenset(
+    {CAPABILITY_LIVE_PRICE, CAPABILITY_OPTION_CHAIN}
+)
 
-# Pages that exist only while at least one strategy is live. Live Price has
-# nothing to show without a subscribed instrument.
-STRATEGY_LIVE_PAGES: Tuple[str, ...] = ("/live",)
+# Pages granted by a strategy being live, WHATEVER that strategy is.
+#
+# Empty since 2026-09-18, and deliberately kept rather than deleted. `/live`
+# used to be here, which meant the Crude Oil screen appeared whenever ANY
+# strategy was running -- so switching MCX crude off and leaving only the NSE
+# rotation on left a page in the sidebar showing a front contract that no
+# running strategy had. A page belongs to whatever can actually fill it, and
+# the mechanism for that already existed: a capability the strategy declares.
+#
+# The tuple stays because the distinction it draws is still real. A page that
+# needs *something* live but is not specific to one strategy's instruments
+# belongs here; a page that needs one strategy's own contract belongs in
+# CAPABILITY_PAGES. Nothing is in the first category today.
+STRATEGY_LIVE_PAGES: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

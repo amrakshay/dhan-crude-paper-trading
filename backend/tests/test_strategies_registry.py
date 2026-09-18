@@ -6,6 +6,7 @@ import pytest
 from src.strategies.services.strategy_definition import (
     CAPABILITY_CHART_TRADING,
     CAPABILITY_GREEKS,
+    CAPABILITY_LIVE_PRICE,
     CAPABILITY_OPTION_CHAIN,
     CAPABILITY_PNL_REPORTS,
     StrategyConfigError,
@@ -17,6 +18,7 @@ from src.strategies.services.strategy_registry import (
 )
 
 CRUDE = "mcx-crude-options"
+SWING = "nse-swing-momentum"
 
 
 def _document(**overrides):
@@ -188,6 +190,64 @@ def test_pages_follow_the_enabled_strategies_and_capabilities():
         assert "/reports" in registry.feature_pages()
     finally:
         registry.set_capability_enabled(CAPABILITY_OPTION_CHAIN, True)
+
+
+def test_the_crude_screen_goes_with_the_crude_strategy_not_with_any_strategy():
+    """The bug this capability exists to fix, asserted directly.
+
+    `/live` is ONE instrument's depth, chart and ticket -- a strategy's front
+    contract. It used to be granted by any strategy being live, so switching
+    MCX crude off and leaving the NSE rotation on left "Crude Oil" in the
+    sidebar showing a contract that no running strategy had. The rotation holds
+    a basket of equities and has no front contract to put there.
+    """
+    registry = get_strategy_registry()
+
+    registry.set_enabled(CRUDE, False)
+    registry.set_enabled(SWING, True)
+
+    pages = registry.feature_pages()
+    assert "/live" not in pages, (
+        "the crude screen must not survive its own strategy being switched off, "
+        "however many other strategies are running"
+    )
+    # The rotation's own page is untouched, and so is every history page.
+    assert "/reports" in pages
+
+    registry.set_enabled(CRUDE, True)
+    assert "/live" in registry.feature_pages()
+
+
+def test_the_crude_screen_can_be_switched_off_on_its_own():
+    """It is a capability, so it has its own flag as well as its strategy's.
+
+    Switching the screen off must not take the strategy off with it: crude can
+    still be enabled, still trade and still be charged; there is simply no live
+    quote page for it.
+    """
+    registry = get_strategy_registry()
+    registry.set_enabled(CRUDE, True)
+
+    try:
+        registry.set_capability_enabled(CAPABILITY_LIVE_PRICE, False)
+        assert "/live" not in registry.feature_pages()
+        assert registry.is_enabled(CRUDE) is True
+    finally:
+        registry.set_capability_enabled(CAPABILITY_LIVE_PRICE, True)
+
+    assert "/live" in registry.feature_pages()
+
+
+def test_only_the_crude_module_offers_the_live_screen():
+    """Declared in one YAML and nowhere else.
+
+    A capability a strategy does not list can never be switched on for it, so
+    this is what stops the page coming back the next time a module is added.
+    """
+    registry = get_strategy_registry()
+
+    assert CAPABILITY_LIVE_PRICE in registry.get(CRUDE).capabilities
+    assert CAPABILITY_LIVE_PRICE not in registry.get(SWING).capabilities
 
 
 def test_pages_that_show_history_are_never_gated():

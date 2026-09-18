@@ -49,9 +49,13 @@ export default function App() {
         <Route path="/swing" element={<RoleRoute path="/swing"><SwingMomentumPage /></RoleRoute>} />
         <Route path="/settings" element={<RoleRoute path="/settings"><SettingsPage /></RoleRoute>} />
         <Route path="/health" element={<RoleRoute path="/health"><SystemHealthPage /></RoleRoute>} />
-        <Route path="/" element={<Navigate to="/live" replace />} />
+        {/* Positions, not the Crude Oil screen: that page is now gated
+            behind the MCX strategy and is not there to land on when it is
+            switched off. Positions is ungated and never withdrawn by a
+            toggle, so it is always a valid destination. */}
+        <Route path="/" element={<Navigate to="/positions" replace />} />
       </Route>
-      <Route path="*" element={<Navigate to="/live" replace />} />
+      <Route path="*" element={<Navigate to="/positions" replace />} />
     </Routes>
   );
 }

@@ -192,6 +192,17 @@ are the ones that only matter once you are editing the code.
   -- "the instrument master has not been ingested", where the live subscription
   must be left alone, and "nothing is enabled", where everything must be
   unsubscribed. Telling them apart is what makes "off" free anything.
+- **A page belongs to whatever can actually fill it.** `/live` shows ONE
+  strategy's front contract -- depth, chart, ticket -- and was granted by
+  `STRATEGY_LIVE_PAGES` whenever ANY strategy was live. Switching MCX crude off
+  and leaving the NSE rotation on therefore left "Crude Oil" in the sidebar
+  showing a contract no running strategy had; the rotation holds a basket of
+  equities and has no front contract. It is now the `live-price` CAPABILITY,
+  declared by `mcx-crude-options` and by nothing else, which is the mechanism
+  that already existed for exactly this. `STRATEGY_LIVE_PAGES` is now empty and
+  is kept rather than deleted: the distinction it draws -- a page that needs
+  something live but is not specific to one strategy's instruments -- is still
+  real, it just has no members.
 - **`BalanceService` owns cash, blocked margin, available and equity.** Four
   numbers, one place. A second implementation anywhere is a bug waiting for a
   disagreement.
