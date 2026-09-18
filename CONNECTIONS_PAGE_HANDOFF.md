@@ -146,6 +146,103 @@ no record is the thing this codebase most consistently refuses.
 
 ---
 
+## The two test buttons, and what the operator should expect
+
+Telegram's detail view gets **Send test message** and **Listen for a test
+message**. They prove the two halves separately, which matters because they
+fail for completely different reasons. Neither runs on its own — both are
+explicit button presses.
+
+### Send test message — proves the outbound half
+
+Calls `sendMessage` to the configured channel. In one press it proves the bot
+token, the channel id, and that the bot has permission to post there.
+
+**On screen, immediately:** the button goes busy, then a result that names the
+channel it posted to and the time. Not just "Sent" — "Posted to *NSE Swing
+Alerts* at 21:58 IST. Check the channel."
+
+**In Telegram, the message must identify itself.** Which installation sent it,
+when, and that it is a manual test rather than an alert. Somebody with a
+staging copy and a real one needs to tell them apart at a glance, and a bare
+"test" tells them nothing:
+
+```
+Test message from Dhan Paper Trading
+Sent by hand from the Connections page - this is not an alert.
+Host: <hostname>  ·  21:58 IST, 18 Sep 2026
+If you can read this, alerts will reach this channel.
+```
+
+**The failures are distinct and must read distinctly.** A wrong token, a bot
+that is not a member of the channel, a bot that is a member but cannot post, a
+channel that does not exist, and flood control (`retry_after` is documented on
+`ResponseParameters`) are five different problems with five different fixes.
+"Failed to send" is not an acceptable message for any of them.
+
+### Listen for a test message — proves the inbound half, and is the setup tool
+
+This is the more valuable of the two and the less obvious. It opens a listening
+window — 60 seconds is right — and reports the first update that arrives.
+
+**On screen:** "Listening for 60s. **Send a direct message to @your_bot now.**"
+with a live countdown, then the result.
+
+**What it reports, and why this is the point:**
+
+| Field | Why the operator needs it |
+|---|---|
+| Sender user id | **This is how they discover their own numeric Telegram user id**, which the command allowlist needs and which Telegram offers no friendly way to find |
+| Sender name / username | So they can confirm it is them and not somebody else |
+| Chat id and chat type | Fills in the channel id field without hunting for it |
+| The message text | Confirms it is the message they just sent, not a stale one |
+
+Offer both discoveries as one-click suggestions — "add this user to the command
+allowlist", "use this chat as the alert channel" — but **applying them stays an
+explicit action**. Discovering an id must never grant it anything.
+
+It should work even when commands are switched OFF, because it is how you set
+commands up in the first place.
+
+### What the operator must be told, or this button wastes an hour
+
+**Tell them to DM the bot, not post in the channel.** The Bot API documents
+`Message.from` as *"Sender of the message; may be empty for messages sent to
+channels"* — **a channel post carries no user**. So posting in the channel
+discovers the chat id and teaches them nothing about their user id, which is
+the thing they came for. The instruction on screen has to say which to do.
+
+**A bot cannot message a person first.** The operator must have started a
+conversation with the bot at least once, or a DM cannot arrive. Say so.
+
+**Privacy mode hides group messages.** In groups a bot sees only commands and
+replies unless privacy mode is off. `getMe` returns
+`can_read_all_group_messages`, so the card can report this as a fact rather
+than leaving the operator guessing — surface it beside the bot name.
+
+**A webhook makes this impossible.** The docs are explicit: `getUpdates` *"will
+not work if an outgoing webhook is set up"*. If one is, say that, rather than
+timing out and blaming the operator.
+
+**Nothing arriving is a RESULT, not an error.** After 60 quiet seconds, say
+"Nothing arrived" and list the reasons in the order they are likely: you posted
+in the channel instead of messaging the bot directly, you have never started a
+chat with the bot, privacy mode, a webhook is set. A spinner that gives up
+silently is the worst version of this button.
+
+**UNVERIFIED — check this before designing around it.** Telegram is widely
+reported to allow only ONE `getUpdates` consumer per bot, returning HTTP 409
+("terminated by other getUpdates request") to a second concurrent caller. **I
+could not find this in the official documentation** — it is not on the
+`getUpdates` page — so treat it as likely but unconfirmed. It matters because a
+background command poller and a listen-test window would be exactly two
+concurrent consumers. The safe design either way is for the listen test to
+**borrow the running poller's stream** rather than open its own; if the poller
+is not running, the test can poll directly. Confirm the behaviour against a
+real bot before relying on either.
+
+---
+
 ## Traps — these are specific and each has cost me or the repo real time
 
 **The Telegram bot token goes in the URL PATH.** Every call is
@@ -254,7 +351,13 @@ two, leave it out and add it when it earns its place.
   the synthetic-feed switch and still works.
 - Telegram: bot token stored encrypted and registered with `log_redaction`,
   channel id, validation that distinguishes bad token / bot not in channel /
-  no such channel, and a test message on request only.
+  no such channel.
+- **Send test message**, posting a self-identifying message that names the
+  installation and the time, with five distinguishable failure messages.
+- **Listen for a test message**, with a countdown, reporting the sender's user
+  id and the chat id as one-click suggestions that still require an explicit
+  action to apply — and telling the operator to DM the bot rather than post in
+  the channel, because a channel post carries no user.
 - Alerts out, on whatever events are agreed — and the list of events is itself
   worth a decision before building.
 - Commands in, with a user-id allowlist that is empty by default, read-only
