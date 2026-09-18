@@ -336,10 +336,34 @@ than anywhere except the health page.
   Auto trade deliberately stays on Strategies & Features: it is the one control
   that lets the software spend money on its own and it belongs with the
   strategy's running state.
+- **The Configuration tab is a FORM: nothing takes effect until Save.** The
+  controls edit a draft, one sticky Save applies it, and one dialog lists every
+  pending change with the server's warnings for each before any of it happens.
+  Live switches were the first version and were wrong for this page: these
+  settings change what software does with money unattended, several only make
+  sense together, and an operator could not see what they were about to do
+  before it was already true.
+  - **The draft holds ONLY the fields actually changed.** That removes the whole
+    bug class: with a 10 s poll, a draft seeded with every field either gets
+    overwritten mid-edit or stops tracking the server and offers to "save" a
+    revert nobody asked for. Setting a field back to the server's value removes
+    it from the draft, so it stops counting as a change and starts tracking
+    again.
+  - **Changes are applied in an order that avoids an illegal intermediate
+    state.** The server refuses the off-gate variant together with a relaxed
+    regime gate, so the restrictive move goes first in each direction; without
+    that, a valid Save fails halfway with a message about a state nobody asked
+    for. `orderPolicyChanges` is that rule.
+  - **A half-applied save says which half.** Each change is reported applied or
+    not applied with its reason, and the draft is dropped and the page re-read
+    afterwards rather than assuming the save did what was asked.
+  - **The contradictory pair is caught in the draft** so Save is never offered
+    for it. The server refuses it too and that refusal is the authority; this is
+    so the operator sees it while still deciding.
 - **The dialog shows the server's refusal BEFORE the confirm button, and
   disables it.** A form that offers an edit the server will refuse is worse
-  than one that does not (section 5), so the time fields ask
-  `setting-warnings` first and render the reason.
+  than one that does not (section 5), so each pending change asks
+  `policy-warnings` / `setting-warnings` first and renders the reason.
 - **The screen says "auto trade", "analysis of stocks" and "order placement";
   the code and the database still say armed, NIGHTLY and REBALANCE.** Renaming
   stored run kinds would rewrite history, so the translation lives at the edge

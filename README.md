@@ -1139,6 +1139,15 @@ Stored run kinds are **not** renamed — `swing_sessions.run_kind` still reads
 `NIGHTLY` and `REBALANCE`, because renaming stored values rewrites history. The
 translation happens at the edge, in the page.
 
+The Configuration tab is a **form**: the switches and the time fields edit a
+draft, one Save applies the lot, and a single dialog lists every pending change
+with the server's warnings for each before any of it happens. Nothing on that
+tab takes effect while you are still deciding — the sticky bar at the bottom
+says how many changes are unsaved, and Discard throws them away. Save is refused
+outright for the contradictory pair (the off-gate variant with a relaxed regime
+gate), and the changes are applied in an order that never passes through that
+state on the way to a legal one.
+
 Auto trade stays on **Strategies & Features**, beside the on/off switch: it is
 the one control that lets this software spend money on its own, and it belongs
 with the strategy's running state. Everything else — the three rule switches and
