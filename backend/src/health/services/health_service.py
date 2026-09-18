@@ -158,17 +158,36 @@ def _upstream_feed_health(manager: Any, feed_status: Dict[str, Any]) -> Dict[str
 
     state = feed_status.get("state")
     connected = state == ConnectionState.CONNECTED.value
+
+    # Headroom is only meaningful when something is subscribed. Dhan sends data
+    # for instruments this process asked for and nothing else -- its protocol
+    # pings never surface as messages -- so with an empty subscription set the
+    # figure drains to zero on a perfectly healthy socket. Reporting it anyway
+    # showed a bar sliding to zero and back every 45 seconds, which is the same
+    # lie the synthetic card refuses to tell in the other direction.
+    subscribed = feed_status.get("subscribed") or 0
+    if not subscribed:
+        headroom_ms = None
+
     common.update(
         {
             "hasUpstreamConnection": True,
-            "upstreamNote": None,
+            "upstreamNote": (
+                None
+                if subscribed
+                else (
+                    "Connected, but nothing is subscribed, so no data is expected "
+                    "and the inactivity countdown does not apply. Enable a "
+                    "strategy with instruments, or refresh the instrument master."
+                )
+            ),
             "mode": feed_status.get("mode"),
             "requestCode": feed_status.get("requestCode"),
             "lastMessageAgeMs": last_message_age_ms,
             # Dhan drops a silent connection after this long; the watchdog task
             # exists for exactly this. An age creeping towards it is the most
             # actionable number on this page.
-            "inactivityTimeoutSeconds": inactivity_seconds,
+            "inactivityTimeoutSeconds": inactivity_seconds if subscribed else None,
             "inactivityHeadroomMs": headroom_ms,
             # This process uses at most one slot. It cannot see what other
             # processes on the same credentials are using, so the claim is

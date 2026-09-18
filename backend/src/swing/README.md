@@ -61,8 +61,49 @@ backtested results:
   justified by a rank of 16 or of 40, and an operator has to be able to see
   which one.
 
+## The decision journal
+
+`swing_sessions` and `swing_decisions`, written by `journal_service.py` from
+whatever `swing_runner.py` decided. Two rules:
+
+- **Append-only, and enforced rather than documented.** `BaseRepository` hands
+  every subclass an `update` and a `delete`, so `CashLedgerRepository`'s
+  "append-only" has only ever been a convention. The journal's repositories
+  override both to raise. A decision record that can be edited is not a record
+  of what was decided, and this is the table someone will open in six months to
+  find out why the system sold something.
+- **Store the inputs, not just the conclusion.** Every number the gate, the
+  breadth and the slot count were computed from is a column. "Gate OFF" cannot
+  be checked later; "NIFTY 23,270.6 against SMA200 24,501.7, breadth 215/448,
+  4 slots" can. The ranking and the configuration in force are stored whole.
+
+Other things it does deliberately:
+
+- `session_date` is the **session decided** -- the regime index's own bar date
+  -- not the wall-clock date the job ran.
+- A closed market records a `SKIPPED` row. "The job did not run" and "the job
+  ran and there was no session" are different facts, and the missed-run
+  detector has to tell them apart.
+- A run is **idempotent per session**: a restart at 18:20 does not re-decide
+  what was decided at 18:15. `force=True` appends a new record rather than
+  editing the old one.
+- **Every held name's rank is stored**, even when it has fallen out of the top
+  of the list -- that is precisely the case a rotation exit has to be explained
+  by.
+- A non-action is a record too: "Skipped: slots full (4 allowed by a breadth of
+  48.0%)", "Not entered: the regime gate is OFF".
+
 ## What is not here yet
 
-The decision journal, the rebalance, the trailing stop, the scheduler, the UI
-and the performance metrics. See the handoff's phasing. Until those exist this
-package computes what the strategy *would* do and nothing else acts on it.
+Execution (the rebalance through `submit_paper_order`), the chandelier trailing
+stop, the scheduler, the UI and the performance metrics.
+
+**Carried to the final phase:** teaching the feed's inactivity watchdog about
+market hours. It reconnects after 40 s without a data frame, which is right
+during a session and wrong across the close — a book subscribed overnight
+reconnects every 45 seconds until the next open. The zero-subscription case is
+fixed; the idle-market case needs each strategy's `market_hours`, which is the
+knowledge the scheduler brings. See `dhan_feed_client._watchdog`. See the handoff's
+phasing. `SwingRunner.run_nightly` decides and records; **it places no orders**,
+and execution is a separate run kind so that deciding and trading on the
+decision are separately recorded and separately gated.

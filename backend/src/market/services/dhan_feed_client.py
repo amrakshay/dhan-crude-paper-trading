@@ -261,16 +261,41 @@ class DhanFeedClient:
         self.packets_applied += self.book.apply_frame(packets)
 
     async def _watchdog(self) -> None:
-        """Force a reconnect when the upstream goes quiet.
+        """Force a reconnect when a SUBSCRIBED feed goes quiet.
 
-        Dhan pings every 10s, so a connection with no traffic for the
-        inactivity window is dead even though the socket still looks open. A
-        silently dead feed is indistinguishable from a quiet market in the UI,
-        which is exactly the failure this tool must not have.
+        A connection carrying subscriptions and no traffic for the inactivity
+        window is dead even though the socket still looks open. A silently dead
+        feed is indistinguishable from a quiet market in the UI, which is
+        exactly the failure this tool must not have.
+
+        **Silence only means anything when something is subscribed.** Dhan's
+        protocol pings are handled inside the websockets library and never
+        reach `async for message in websocket`, so they do not touch
+        `last_message_ms`; the only thing that does is a data frame for an
+        instrument this client asked for. With an empty subscription set there
+        is nothing to send data, so the timer drains on a perfectly healthy
+        socket and the watchdog reconnects every 45 seconds for ever.
+
+        That is not hypothetical. It ran 9 times in 6 minutes on 2026-09-18,
+        after MCX crude was switched off and the swing rotation -- which
+        subscribes only what it holds, and holds nothing yet -- was switched on.
+        The churn burns one of Dhan's five connection slots on a loop and
+        turns the dead-feed signal into constant noise.
+
+        **Still open, deferred to the scheduler phase:** the same false
+        positive fires on a SUBSCRIBED but idle market. MCX closes at 23:30 and
+        NSE at 15:30, so a book held across the close reconnects every 45
+        seconds until the next open. Fixing it means asking each strategy
+        whether its market is currently open -- `market_hours` is on the
+        definition already -- which is the knowledge the scheduler introduces,
+        so it lands with it rather than as a second half-measure here.
         """
         while not self._stopping:
             await asyncio.sleep(5)
             if self.state != ConnectionState.CONNECTED or self._websocket is None:
+                continue
+            if not self._subscribed:
+                # Nothing was asked for, so nothing arriving proves nothing.
                 continue
             silence_seconds = (now_ms() - self.last_message_ms) / 1000
             if silence_seconds > self._inactivity_timeout():

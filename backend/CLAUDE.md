@@ -554,6 +554,16 @@ list; these are the ones that will bite a future change.
 - `tests/conftest.py` sets env vars **before** anything imports the app, and
   points `DATABASE_URL` at a temp SQLite file. Fixtures: `db_session`,
   `api_client`, `auth_client`, `sample_master_csv`.
+- **The strategy registry is reset to "everything enabled" for every test**, by
+  the autouse `strategy_state_baseline` fixture, and restored afterwards. It
+  is a process-wide singleton, so a test that flips a toggle otherwise leaks it
+  into every test after — and, less obviously, `submit_paper_order` refuses a
+  new order for a switched-off strategy, so every test that trades a contract
+  used to depend on that contract's module happening to ship enabled. When the
+  defaults changed on 2026-09-18, 71 tests failed for a reason that had nothing
+  to do with what they were testing. A test whose subject IS a shipped default
+  reads `enabled_by_default` off the definition; a test whose subject is what
+  switching a strategy off *does* sets the state it wants.
 - **The temp database and log directory are named after the process id**, and
   `pytest_sessionfinish` removes them. They used to have fixed names, so two
   concurrent runs shared one SQLite file — the second run's schema setup tears

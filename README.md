@@ -662,17 +662,119 @@ Two things that reproduction caught, both of which would have been silent:
   buy candidate two months after it stopped trading, on a price that no longer
   existed.
 
+### Verified against live Dhan, 2026-09-18
+
+The charts client had never been run against a real token; its docstring said
+so. It now has. It worked first try with no schema differences, and the full
+pipeline was exercised end to end on an isolated instance:
+
+| Step | Result |
+|---|---|
+| Instrument master, both strategies | 1,739 rows (1,240 crude + 499 equity), 0.5 s |
+| Daily-bar refresh, 500 symbols | **500 refreshed, 0 failed**, 23,000 bars inserted, 1,000 updated, 747 s |
+| Stored coverage | 500 equities + NIFTY, 1,108,462 bars, 2015-07-01 → 2026-09-17 |
+
+The 1,000 updates are the last stored session re-requested per symbol, which is
+how a corporate-action restatement is picked up.
+
+Live Dhan agrees with the research panel exactly on the regime inputs:
+
+| | Live Dhan | Specification §13 |
+|---|---|---|
+| NIFTY close | 23,270.60 | 23,270.6 |
+| NIFTY 200-SMA | 24,501.66 | 24,501.7 |
+| Shortfall to reclaim | 5.29% | +5.3% |
+| 63-day return (P9) | −3.71% | −3.71% |
+| Above own SMA200 | 215 | 215 |
+| Slots (P11) | 4 | 4 |
+
+…and every one of the 499 equity closes on 2026-09-17 matches the panel to
+**0.00%**.
+
+### The research panel has a phantom trading session
+
+The rankings still differ — 14 of the top 15 names but in a different order,
+with momentum and ATR% off by a few percent each. Chasing that down found a
+defect in the research project's **extended** panel, not in either
+implementation:
+
+> `research2/gate_run/data_ext/` contains a bar for **395 of 499 equities on
+> 2026-09-14**, a Monday on which NSE was shut. Every one has
+> `open = high = low = close` equal to the previous session's close, and
+> `volume = 0`. No NIFTY bar exists for that date in any source. Live Dhan has
+> **zero** bars of this shape across 1,108,462 rows.
+
+It is yfinance's flat-bar-on-a-holiday artefact, introduced by the splice that
+extends the panel past 2026-07-14.
+
+It matters far more than 0.036% of rows suggests, because **every lookback in
+this strategy is positional**: `close.shift(5)`, `close.shift(126)`, the ATR
+EWM and the ADV20 window count rows, not days. One phantom row shifts all of
+them by a session for those 395 symbols — while the NIFTY series, which has no
+phantom bar, stays correctly aligned. The zero also drags the 20-day turnover
+mean down about 5%, which is enough to flip a name across the ₹10 crore
+liquidity floor: BATAINDIA (₹10.33 cr live, ₹9.28 cr spliced) and UCOBANK
+(₹10.36 cr, ₹9.80 cr) are decided differently by the two datasets.
+
+**Scope.** The headline §9.1 result (19.9% CAGR) was computed on
+`data_daily_10y`, which is pure Dhan and clean. What is affected is everything
+computed on the *extended* panel: §9.3's independent reproduction, the thirteen
+§11 gate experiments, and the §13 snapshot itself.
+
+**What this repository does about it.** `is_phantom_bar` drops the shape on
+both the import and the live-refresh paths, loudly, and it is tested. The §13
+reproduction test deliberately imports *with the guard disabled*, because a
+like-for-like reproduction has to read the same rows the specification was
+computed from. Fixing the research panel is not this repository's to do.
+
 ### What is not built yet
 
-Phases 5–10 of the implementation handoff. In order: the decision journal and
-session record, execution (the rebalance through `submit_paper_order`), the
-chandelier trailing stop, the scheduler, the strategy page, and the performance
-metrics. Until those exist this module computes what the strategy *would* do and
-nothing acts on it.
+Phases 6–10 of the implementation handoff. In order: execution (the rebalance
+through `submit_paper_order`), the chandelier trailing stop, the scheduler, the
+strategy page, and the performance metrics. Until those exist this module
+computes and records what the strategy *would* do, and nothing acts on it.
 
-The module ships **disabled**, and carries a **separate arming switch**
-(`automation.armed_by_default: false`): enabling the strategy will make it
-compute, decide and record; arming is what will let it submit an order.
+Carried into the **final phase**, because it needs market-hours awareness that
+does not exist yet:
+
+> **The feed's inactivity watchdog false-positives on a subscribed but idle
+> market.** It forces a reconnect after 40 s without a data frame, and Dhan's
+> protocol pings never reach the message loop, so the only thing that resets
+> the timer is a trade in something this process subscribed to. That is fine
+> while a liquid instrument is subscribed during its session; it is wrong
+> overnight. Crude's MCX session ends at 23:30 and NSE equities stop at 15:30,
+> so a book subscribed across the close will reconnect every 45 seconds until
+> the next open — burning one of Dhan's five connection slots on a loop and
+> drowning the dead-feed signal in noise.
+>
+> The zero-subscription case is already fixed (2026-09-18): silence proves
+> nothing when nothing was asked for. The idle-market case needs the watchdog
+> to know each strategy's `market_hours`, which is exactly the knowledge the
+> scheduler introduces — so it belongs with it, not before.
+
+### Which strategy is running
+
+As of 2026-09-18 the defaults are **NSE Swing Momentum on, MCX Crude Options
+off**. `enabled_by_default` decides the state of an installation that has never
+been configured; after that the live state is a row in `feature_toggles`, owned
+by the Strategies & Features page.
+
+Switching crude off costs nothing that was recorded: every order, position and
+P&L figure it produced stays exactly where it is, and Reports and Trade Notes
+stay reachable. What does go away while it is off are the pages that need
+something live — the Option Chain and Chart Trading, which are the two
+capabilities the swing rotation does not declare — and the greeks poll.
+
+**Enabled is not armed.** The swing module carries a second switch,
+`automation.armed_by_default`, which is **false**:
+
+| | what it does |
+|---|---|
+| enabled | computes, decides and writes a decision record every session |
+| armed | may submit an order |
+
+Turning the strategy on therefore starts the journal, not the trading — and in
+any case the scheduler and the execution path do not exist yet.
 
 ## Switching SQLite → MySQL
 
@@ -957,12 +1059,17 @@ not carried over.
 * **`JBCHEPHARM` cannot be traded.** It has no NSE row in the current master and
   its last panel bar is 2026-07-16. It is reported as unresolved on every
   refresh rather than dropped silently, and the universe is effectively 499.
-* **Nothing has been run against a live Dhan token.** `dhan_charts_client` has
-  still never been exercised against the real endpoint — its docstring has said
-  so since it was written, and that has not changed. The daily-bar refresh path,
-  the response schema and the rate-limit behaviour are **unverified in
-  practice**. Everything reproduced above was computed from the research
-  project's stored panel.
+* **The specification's §13 top-15 ordering does not survive clean data.** Run
+  on live Dhan rather than on the spliced panel, 14 of the 15 names are the
+  same but the order differs and the scores move by a few percent — because the
+  panel's phantom 2026-09-14 session shifts every positional lookback by one
+  bar. The live figures are the more correct ones. Whether the §11 gate
+  experiments' conclusions survive the same correction has **not been checked**;
+  they were all computed on the affected panel.
+* **The live feed has not been exercised.** The token is configured and the
+  REST chart endpoint works, but `market_feed.synthetic_feed` is still true, so
+  prices are generated locally. Nothing that needs a real depth book — which is
+  everything in phase 6 onwards — has been tested against live quotes.
 * **The Closing Auction Session is not modelled.** Since 3 August 2026
   continuous trading for F&O-eligible names ends at 15:15. A stop triggered
   between 15:15 and 15:30 on one of those names cannot fill in continuous

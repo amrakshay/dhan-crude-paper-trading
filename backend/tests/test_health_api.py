@@ -236,7 +236,13 @@ async def test_the_synthetic_feed_is_not_shown_as_a_healthy_upstream_socket(auth
 
 
 async def test_the_upstream_card_reads_the_message_age_against_the_drop_cliff(auth_client):
-    """The raw age is an integer; the headroom is the number to act on."""
+    """The raw age is an integer; the headroom is the number to act on.
+
+    The stub is SUBSCRIBED, which is the only state in which the cliff exists:
+    Dhan sends data for instruments this process asked for and nothing else, so
+    with an empty subscription set the countdown drains on a healthy socket and
+    is deliberately withheld (see test_market_feed_watchdog.py).
+    """
     from src.market.services.feed_manager import get_feed_manager
 
     manager = get_feed_manager()
@@ -250,6 +256,7 @@ async def test_the_upstream_card_reads_the_message_age_against_the_drop_cliff(au
             **payload["feed"],
             "state": "CONNECTED",
             "lastMessageAgeMs": 35_000,
+            "subscribed": 165,
         }
         return payload
 
