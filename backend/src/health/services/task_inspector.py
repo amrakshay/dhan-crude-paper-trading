@@ -115,6 +115,27 @@ def _automation_expected() -> bool:
     )
 
 
+def feed_flags() -> Dict[str, bool]:
+    """`is_synthetic` and `feed_running`, read off the live feed manager.
+
+    Both callers of `inspect()` need the same two booleans derived the same
+    way, and "running" is subtler than it looks: a feed in DISABLED, and one
+    that has never reported a state at all, are both not-running, while every
+    other connection state is. Deriving that twice is how the system health
+    page and the strategy health tab would start disagreeing about whether a
+    task should be alive.
+    """
+    from src.constants import ConnectionState
+    from src.market.services.feed_manager import get_feed_manager
+
+    manager = get_feed_manager()
+    state = (manager.status().get("feed") or {}).get("state")
+    return {
+        "is_synthetic": bool(manager.is_synthetic),
+        "feed_running": state not in (None, ConnectionState.DISABLED.value),
+    }
+
+
 def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
     """Which named tasks should be alive, given the current configuration."""
     expected: Set[str] = set()

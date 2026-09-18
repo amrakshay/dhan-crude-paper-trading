@@ -272,6 +272,19 @@ export function buildTheme(mode) {
           root: { textTransform: 'none', fontWeight: 600, fontSize: '0.875rem' },
         },
       },
+      // An inline link in prose. `dark.link` already exists as a token and was
+      // already wired to the text and outlined buttons; MuiLink was not, so a
+      // link inside a sentence fell back to the indigo accent, which is a
+      // brand colour chosen against a WHITE surface and is close to unreadable
+      // on the dark one. Same rule as the buttons, so the two agree.
+      MuiLink: {
+        styleOverrides: {
+          root: {
+            color: isDark ? dark.link : light.brand,
+            textDecorationColor: 'currentColor',
+          },
+        },
+      },
       MuiAlert: { styleOverrides: { root: { borderRadius: shared.borderRadius } } },
       MuiDialog: { styleOverrides: { paper: { border: `1px solid ${c.border}` } } },
       MuiMenu: { styleOverrides: { paper: { border: `1px solid ${c.border}` } } },

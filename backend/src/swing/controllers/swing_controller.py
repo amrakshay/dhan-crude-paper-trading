@@ -63,6 +63,23 @@ class SwingController:
     ) -> Dict[str, Any]:
         return await self._service(strategy_key).performance(portfolio_id)
 
+    async def health(
+        self, strategy_key: str, portfolio_id: Optional[int]
+    ) -> Dict[str, Any]:
+        """Is this strategy healthy, and what has it actually been doing?
+
+        A different question from `status`, which is what the rule SAYS right
+        now. This one is whether the machinery under it is working: are its two
+        background jobs alive, are its prices fresh, which rules are in force
+        and who moved them.
+        """
+        from src.swing.services.swing_health_service import SwingHealthService
+
+        service = self._service(strategy_key)
+        return await SwingHealthService(
+            self.session, service.definition, service.parameters
+        ).health(portfolio_id)
+
     def explain(self, strategy_key: str) -> Dict[str, Any]:
         """The rule as configured -- what the "How it works" page renders."""
         return self._service(strategy_key).explain()

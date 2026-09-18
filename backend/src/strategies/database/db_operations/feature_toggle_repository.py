@@ -1,5 +1,5 @@
 """Feature toggle persistence."""
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,33 @@ class FeatureToggleRepository(BaseRepository[FeatureToggle]):
         for row in rows:
             states.setdefault(row.scope, {})[row.toggle_key] = bool(row.enabled)
         return states
+
+    async def audit_for(
+        self, scope: str, toggle_keys: Sequence[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """When each of those toggles was last written, and by whom.
+
+        There is no HISTORY here and this deliberately does not pretend
+        otherwise: the row carries the CURRENT value with the last person to
+        set it. "The gate was relaxed at 15:19 and re-enforced at 16:40" is not
+        a question this table can answer, and the health page says so in those
+        words rather than implying a trail it does not have.
+        """
+        if not toggle_keys:
+            return {}
+        result = await self.session.execute(
+            select(FeatureToggle).where(
+                FeatureToggle.scope == scope,
+                FeatureToggle.toggle_key.in_([str(key) for key in toggle_keys]),
+            )
+        )
+        return {
+            row.toggle_key: {
+                "updated_at": row.updated_at,
+                "updated_by_user_id": row.updated_by_user_id,
+            }
+            for row in result.scalars().all()
+        }
 
     async def set_state(
         self,

@@ -638,6 +638,57 @@ human order.
 
 ---
 
+## 10f-bis. The rotation's own health tab
+
+`src/swing/services/swing_health_service.py` assembles `GET /api/swing/health`.
+It is the per-strategy sibling of `src/health/`, and the split is the point:
+that package answers "what is this process doing" and is genuinely
+process-wide; this one answers "is this strategy healthy". Putting it in
+`src/health/` would make that package import `src/swing/` for its own payload.
+
+- **Almost nothing here is new measurement**, the same rule `src/health/`
+  follows. Every figure is an existing `status()` dict, a repository read or an
+  `asyncio.all_tasks()` walk, and nothing is measured on the tick path. Prefer
+  joining an existing counter to adding one.
+- **It is the one ADMIN-ONLY read on the swing router.** Every other endpoint
+  there is open to a `ROLE_USER`, because the page is a journal and a journal
+  is history. This one serves live machinery state and WARNING+ log records,
+  which can carry anything a developer interpolated -- the same exposure
+  `/api/healthcheck/problems` is gated for. `require_admin` on the route is
+  what refuses it; hiding the tab is presentation (section 10).
+- **It reuses the rule rather than restating it.**
+  `execution_service.staleness_reason()` was lifted to module scope so the tab
+  shows the operator the SAME sentence the rebalance would refuse with;
+  `DailyBarRefreshService.targets_for` is what decides which universe symbols
+  are "resolved"; `BalanceService` is the only place money is computed;
+  `describe_policies` / `describe_settings` already report the default beside
+  what is in force. A second description of any of these would drift.
+- **`task_inspector.feed_flags()` exists so the two health surfaces cannot
+  disagree** about whether a task should be alive. `health_service` derives
+  `feed_running` from it too.
+- **It must render with the strategy OFF and with nothing ever traded.**
+  Nothing here computes a ranking, resolves a subscription or requires a
+  portfolio; every block degrades to an absence WITH A REASON. `undefined is
+  not zero` applies to every count, and `tests/test_swing_health.py` asserts
+  the specific ones that have been got wrong elsewhere on this page.
+- **Timestamps go through `to_ist()` on the way out.** Stored values are naive
+  UTC (section 3), and a naive ISO string is parsed by the browser as LOCAL --
+  so the tab reported a switch as moved five and a half hours before it was,
+  beside an IST clock reading correctly. Caught on the rendered page on
+  2026-09-18 and pinned by
+  `test_every_timestamp_carries_its_offset`.
+- **Three things it cannot know are STATED on the payload, not implied away:**
+  there is no audit history (only the current value with its last author), the
+  scheduler's run list is process-scoped, and `SwingStopMonitor`'s counters are
+  kept once per process across every strategy. Each carries its own note
+  constant, and each note is asserted.
+- **Secrets: see the root `CLAUDE.md`.** This endpoint serves log records, so
+  it has its own assertion in `tests/test_no_secrets_in_logs.py` rather than a
+  line in the swing list -- the record path is the new exposure and is
+  exercised with a registered runtime secret.
+
+---
+
 ## 10g. Performance metrics
 
 `src/reports/services/metrics_service.py` is generic and sits beside

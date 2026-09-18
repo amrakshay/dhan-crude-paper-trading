@@ -26,6 +26,9 @@ backtested results:
 | `services/scheduler.py` | The `swing-scheduler` task: the nightly job, the rebalance, and missed-run detection |
 | `services/swing_runner.py` | One nightly decision, journalled. Places no orders |
 | `services/swing_service.py` | Read models for the page. Decides nothing |
+| `services/gate_policy.py` | Whether a RULE is enforced; refuses a contradictory pair |
+| `services/schedule_settings.py` | WHEN it wakes up, and the two times it refuses |
+| `services/swing_health_service.py` | Is this strategy healthy? The Health tab's payload. Reads only, and admin-only |
 
 ## The two switches
 
@@ -259,6 +262,35 @@ be a record of a decision nobody took.
   YAML stops being greppable against the specification's own table and root
   `CLAUDE.md` §3a stops being true.
 
+## Health — a per-strategy question, not a process one
+
+`services/swing_health_service.py` backs `GET /api/swing/health`
+(`/swing?tab=health`, **administrators only**). `src/health/` answers "what is
+this process doing" and is genuinely process-wide; this answers "is THIS
+strategy healthy, and what has it been doing" — are its two background jobs
+alive, are its bars fresh enough to trade on, what does it hold, what is it
+watching, which rules are in force and who last moved each.
+
+It is an assembler. Everything on it was already computed somewhere: the
+scheduler's and the stop monitor's `status()` dicts, `task_inspector`,
+`DailyBarRepository.coverage` / `latest_dates` / `trading_dates`,
+`DailyBarRefreshService.targets_for`, `describe_policies` /
+`describe_settings`, `BalanceService` and the `swing_stops` table. Nothing is
+new measurement and nothing is on the tick path.
+
+Three things it deliberately says it cannot answer, rather than implying
+otherwise:
+
+* **there is no audit history** — the toggle and setting tables hold the
+  current value with its last author, and that is all;
+* **the scheduler's run list is process-scoped** and empty after a restart, so
+  "what it last did" is also read from the JOURNAL, which is not;
+* **`SwingStopMonitor`'s counters are kept once per process**, across every
+  automated strategy, and are labelled as such rather than keyed per strategy.
+
+If a second automated module is ever added, the third one stops being merely a
+label and should be fixed first.
+
 ## The decision journal
 
 `swing_sessions` and `swing_decisions`, written by `journal_service.py` from
@@ -293,8 +325,10 @@ Other things it does deliberately:
 
 ## What is not here yet
 
-Execution (the rebalance through `submit_paper_order`), the chandelier trailing
-stop, the scheduler, the UI and the performance metrics.
+An audit trail of the switches (`strategy_audit`), persisted bar-refresh
+outcomes, and per-strategy stop-watcher counters. All three are described under
+**Health** above and in the README's "Known gaps"; each was a deliberate
+decision on 2026-09-18 rather than an oversight.
 
 **Carried to the final phase:** teaching the feed's inactivity watchdog about
 market hours. It reconnects after 40 s without a data frame, which is right

@@ -302,6 +302,18 @@ uses — do not write a second one), and log lines are served from
 `tests/test_no_secrets_in_logs.py` pointed at the endpoint itself. If you add a
 field to the health payload, add its no-secrets assertion in the same change.
 
+**There are TWO health surfaces and they answer different questions.**
+`src/health/` and `/health` answer "what is this PROCESS doing" -- one feed
+connection, one book, one CPU, one set of tasks -- and are admin-only.
+`src/swing/services/swing_health_service.py` and `/swing?tab=health` answer "is
+THIS STRATEGY healthy, and what has it been doing", and are admin-only too:
+they serve live machinery state and log records, which is the exposure the
+`/api/healthcheck/*` routes are gated for. Neither copies the other. A figure
+that is not about one strategy stays on the process page and the strategy tab
+LINKS to it; the strategy tab imports `task_inspector` (a read-only helper) and
+`src/health/` imports nothing from `src/swing/` for its own payload, which is
+why the per-strategy service lives in the swing package.
+
 **The health page must not distort what it monitors.** Nothing it reports is
 measured on the tick path — every number is either already-existing component
 state or an `asyncio.all_tasks()` walk. It polls at 5 s, and both its endpoints
@@ -379,6 +391,8 @@ backend/src/swing/                 the NSE rotation: ranking, planner, execution
 backend/src/swing/services/gate_policy.py          whether a RULE is enforced
 backend/src/swing/services/schedule_settings.py   WHEN it wakes up, and the two
                                                   times it refuses
+backend/src/swing/services/swing_health_service.py  is THIS strategy healthy
+frontend/src/components/SwingHealth.jsx           its Health tab, admin-only
 backend/src/swing/services/scheduler.py            the only clock in this app
 backend/src/swing/services/stop_monitor.py         the chandelier stop watcher
 backend/src/reports/services/metrics_service.py    CAGR, drawdown, MAR, concentration

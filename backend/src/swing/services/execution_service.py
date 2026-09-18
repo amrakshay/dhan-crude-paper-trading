@@ -96,6 +96,42 @@ from src.swing.services.swing_parameters import SwingParameters
 logger = get_logger("swing.execution")
 
 
+def max_staleness_days() -> int:
+    """How many calendar days of staleness the rebalance will still trade on."""
+    from src import config_utils
+
+    return config_utils.get_property_value_int("swing.max_bar_staleness_days", 5)
+
+
+def staleness_reason(session_date: date) -> Optional[str]:
+    """Why the stored bars are too old to trade on, or None.
+
+    Measured in CALENDAR days rather than sessions, deliberately: the only
+    calendar this application has is the stored index bars, and those are
+    precisely what is in doubt here. Five days covers a Thursday close followed
+    by a long weekend; a longer exchange holiday will refuse and say so, which
+    is the safe direction.
+
+    Module-level so the health tab can show the operator the SAME sentence the
+    rebalance would refuse with, rather than a second description of the same
+    rule that could drift from it.
+    """
+    from src.core.time_utils import ist_today
+
+    behind = (ist_today() - session_date).days
+    limit = max_staleness_days()
+    if behind <= limit:
+        return None
+    return (
+        f"Refusing to rebalance: the newest stored session is "
+        f"{session_date.isoformat()}, {behind} day(s) ago, against a limit "
+        f"of {limit}. The daily-bar refresh has not run, and trading on a "
+        f"ranking computed from prices that old would be acting on a market "
+        f"that no longer exists. Nothing was placed. Run "
+        f"scripts/refresh_daily_bars.py, or let the nightly job run."
+    )[:500]
+
+
 class SwingExecutionError(Exception):
     pass
 
@@ -532,33 +568,10 @@ class SwingExecutionService:
 
     @staticmethod
     def _max_staleness_days() -> int:
-        from src import config_utils
-
-        return config_utils.get_property_value_int("swing.max_bar_staleness_days", 5)
+        return max_staleness_days()
 
     def _staleness_reason(self, session_date: date) -> Optional[str]:
-        """Why the stored bars are too old to trade on, or None.
-
-        Measured in CALENDAR days rather than sessions, deliberately: the only
-        calendar this application has is the stored index bars, and those are
-        precisely what is in doubt here. Five days covers a Thursday close
-        followed by a long weekend; a longer exchange holiday will refuse and
-        say so, which is the safe direction.
-        """
-        from src.core.time_utils import ist_today
-
-        behind = (ist_today() - session_date).days
-        limit = self._max_staleness_days()
-        if behind <= limit:
-            return None
-        return (
-            f"Refusing to rebalance: the newest stored session is "
-            f"{session_date.isoformat()}, {behind} day(s) ago, against a limit "
-            f"of {limit}. The daily-bar refresh has not run, and trading on a "
-            f"ranking computed from prices that old would be acting on a market "
-            f"that no longer exists. Nothing was placed. Run "
-            f"scripts/refresh_daily_bars.py, or let the nightly job run."
-        )[:500]
+        return staleness_reason(session_date)
 
     def _session_message(
         self, outcome: RebalanceOutcome, blocked: Optional[str]

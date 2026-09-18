@@ -68,6 +68,29 @@ async def get_book(
     return await controller.book(strategy_key, portfolio_id)
 
 
+@swing_router.get("/health")
+async def get_health(
+    strategy_key: str = Query(DEFAULT_STRATEGY, alias="strategyKey"),
+    portfolio_id: Optional[int] = Query(None, alias="portfolioId"),
+    controller: SwingController = Depends(get_swing_controller),
+    _: SessionPrincipal = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Is this strategy healthy, and what has it actually been doing?
+
+    **ROLE_ACCOUNT_ADMIN only**, unlike every other read on this router. The
+    rest of the page is a JOURNAL and a journal is history, which is why `/swing`
+    is open to any signed-in user. This endpoint is not history: it reports the
+    live state of the machinery -- the background tasks, the feed subscription,
+    the instrument master, the effective configuration with the name of whoever
+    last changed it, and recent WARNING+ log records, which can carry anything a
+    developer ever put in a warning. `require_admin` here is what refuses the
+    request; hiding the tab is presentation (backend/CLAUDE.md section 10).
+
+    Nothing here is measured on the tick path and nothing here writes.
+    """
+    return await controller.health(strategy_key, portfolio_id)
+
+
 @swing_router.get("/history")
 async def get_history(
     strategy_key: str = Query(DEFAULT_STRATEGY, alias="strategyKey"),

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -10,6 +10,7 @@ import {
   Divider,
   Grid,
   LinearProgress,
+  Link as MuiLink,
   Paper,
   Stack,
   Table,
@@ -29,6 +30,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { swingApi } from '../api/swing';
 import SwingConfiguration from '../components/SwingConfiguration';
+import SwingHealth from '../components/SwingHealth';
 import SwingExplainer from '../components/SwingExplainer';
 import { useAuth } from '../auth/AuthContext';
 import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
@@ -521,21 +523,9 @@ function ActivityStrip({ status }) {
             available at entry, and the next analysis run sets one.
           </Typography>
         ) : null}
-        {monitor.deferredToAuction ? (
-          <Typography variant="caption" color="warning.main">
-            {monitor.deferredToAuction} exit(s) deferred to the next open by the
-            closing auction.
-          </Typography>
-        ) : null}
-        {monitor.lastPassAtIst ? (
-          <Typography variant="caption" color="text.disabled">
-            last pass {new Date(monitor.lastPassAtIst).toLocaleTimeString()}
-          </Typography>
-        ) : (
-          <Typography variant="caption" color="text.disabled">
-            the monitor has completed no pass since this process started
-          </Typography>
-        )}
+        {/* The watcher's internals — passes, exits deferred to the auction, the
+            last pass — are diagnostics and live on the Health tab. What stays
+            here is what it is watching and how close the nearest stop is. */}
         {monitor.error ? (
           <Typography variant="caption" color="error.main">
             monitor error: {monitor.error}
@@ -546,72 +536,14 @@ function ActivityStrip({ status }) {
   );
 }
 
-/**
- * The last twenty scheduled jobs, newest first.
- *
- * A STATUS DICT, not a second journal: it lives in the process and starts empty
- * after a restart. The real record is `swing_sessions`, below.
- */
-function ActivityLog({ status }) {
-  const rows = status?.scheduler?.recent ?? [];
-  if (!rows.length) {
-    return (
-      <Alert severity="info">
-        No scheduled job has run since this process started. That is not the same
-        as none having happened — this list lives in memory, and the decision
-        history below is the record.
-      </Alert>
-    );
-  }
-  return (
-    <TableContainer component={Paper} variant="outlined">
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>At (IST)</TableCell>
-            <TableCell>Job</TableCell>
-            <TableCell>Result</TableCell>
-            <TableCell>Detail</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {rows.map((run, index) => (
-            <TableRow key={`${run.kind}-${run.atIst}-${index}`}>
-              <TableCell className="numeric">
-                {new Date(run.atIst).toLocaleString()}
-              </TableCell>
-              <TableCell>{RUN_LABELS[run.kind] ?? run.kind}</TableCell>
-              <TableCell>
-                <Chip
-                  size="small"
-                  label={run.ok ? 'ok' : 'FAILED'}
-                  sx={{
-                    bgcolor: run.ok ? 'action.selected' : 'error.main',
-                    color: run.ok ? 'text.secondary' : 'error.contrastText',
-                  }}
-                />
-              </TableCell>
-              <TableCell>
-                <Typography variant="caption" color="text.secondary">
-                  {run.detail || '—'}
-                </Typography>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-}
-
-function ArmingCard({ status }) {
+function ArmingCard({ status, isAdmin }) {
   if (!status) {
     return <NotLoadedYet>Reading the schedule…</NotLoadedYet>;
   }
-  return <ArmingCardBody status={status} />;
+  return <ArmingCardBody status={status} isAdmin={isAdmin} />;
 }
 
-function ArmingCardBody({ status }) {
+function ArmingCardBody({ status, isAdmin }) {
   const scheduler = status?.scheduler ?? {};
   const schedule = (scheduler.schedules ?? []).find(
     (one) => one.strategyKey === status?.strategyKey,
@@ -680,21 +612,23 @@ function ArmingCardBody({ status }) {
         </Grid>
       </Grid>
 
+      {/* A gap in the journal is a HEALTH fact, not an activity one, and the
+          full list used to be the loudest thing on this tab despite usually
+          being historical. One line here, the dates and the detail on Health.
+          The closing-auction note moved there too: it is reference material,
+          not what the strategy is doing. */}
       {missed > 0 ? (
         <Alert severity="warning" sx={{ mt: 2 }} icon={<WarningAmberIcon />}>
-          {(scheduler.missedRuns ?? []).map((entry) => (
-            <Typography key={`${entry.kind}-${entry.sessions.join()}`} variant="body2">
-              {entry.count} missed {entry.kind} run(s): {entry.sessions.join(', ')}.
-              Trailing stops were not recomputed on those sessions.
-            </Typography>
-          ))}
+          {missed} session{missed === 1 ? '' : 's'} with no decision record —
+          trailing stops were not recomputed on {missed === 1 ? 'it' : 'them'}.{' '}
+          {isAdmin ? (
+            <MuiLink component={RouterLink} to="/swing?tab=health">
+              See the dates on the Health tab.
+            </MuiLink>
+          ) : (
+            'An administrator can see the dates on the Health tab.'
+          )}
         </Alert>
-      ) : null}
-
-      {status?.closingAuction ? (
-        <Typography variant="caption" color="text.disabled" sx={{ mt: 2, display: 'block' }}>
-          {status.closingAuction.note}
-        </Typography>
       ) : null}
     </Paper>
   );
@@ -1085,6 +1019,8 @@ export default function SwingMomentumPage() {
   const { activeId: portfolioId } = useActivePortfolio();
 
   const [status, setStatus] = useState(null);
+  const [health, setHealth] = useState(null);
+  const [healthError, setHealthError] = useState(null);
   const [book, setBook] = useState(null);
   const [history, setHistory] = useState(null);
   const [performance, setPerformance] = useState(null);
@@ -1097,11 +1033,17 @@ export default function SwingMomentumPage() {
   const [loading, setLoading] = useState(true);
 
   // The tab lives in the URL so "read this page" is a link somebody can send.
+  //
+  // `health` is offered only to an administrator, and a ROLE_USER who follows a
+  // `?tab=health` link lands on Live rather than on a tab whose every request
+  // would be refused. That is presentation: the API refuses the payload
+  // independently (frontend/CLAUDE.md §5).
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab');
-  const tab = ['how-it-works', 'configuration'].includes(requested)
-    ? requested
-    : 'live';
+  const availableTabs = isAdmin
+    ? ['how-it-works', 'configuration', 'health']
+    : ['how-it-works', 'configuration'];
+  const tab = availableTabs.includes(requested) ? requested : 'live';
 
   const load = useCallback(async () => {
     try {
@@ -1125,7 +1067,18 @@ export default function SwingMomentumPage() {
     } finally {
       setLoading(false);
     }
-  }, [portfolioId]);
+
+    // On the SAME cadence, not a second poll loop: a page that reports on load
+    // must not be a load source. Admin-only, and its failure is kept off
+    // `error` so that a 403 or a hiccup here cannot blank the Live tab.
+    if (!isAdmin) return;
+    try {
+      setHealth(await swingApi.health(STRATEGY, portfolioId));
+      setHealthError(null);
+    } catch (problem) {
+      setHealthError(problem.message);
+    }
+  }, [portfolioId, isAdmin]);
 
   useEffect(() => {
     load();
@@ -1206,6 +1159,7 @@ export default function SwingMomentumPage() {
       >
         <Tab value="live" label="Live" />
         <Tab value="configuration" label="Configuration" />
+        {isAdmin ? <Tab value="health" label="Health" /> : null}
         <Tab value="how-it-works" label="How it works" />
       </Tabs>
 
@@ -1213,6 +1167,8 @@ export default function SwingMomentumPage() {
         <SwingExplainer explain={explain} status={status} />
       ) : tab === 'configuration' ? (
         <SwingConfiguration status={status} isAdmin={isAdmin} onChanged={load} />
+      ) : tab === 'health' ? (
+        <SwingHealth health={health} error={healthError} isAdmin={isAdmin} />
       ) : (
         <>
 
@@ -1225,7 +1181,7 @@ export default function SwingMomentumPage() {
       {loading && !status ? <CircularProgress size={22} /> : null}
 
       <ActivityStrip status={status} />
-      <ArmingCard status={status} />
+      <ArmingCard status={status} isAdmin={isAdmin} />
       <GateCard status={status} />
 
       {isAdmin && portfolioId ? (
@@ -1291,20 +1247,6 @@ export default function SwingMomentumPage() {
           ) : (
             <Alert severity="info">Pick a portfolio to see its performance.</Alert>
           )}
-        </Box>
-      </Box>
-
-      <Box>
-        <Typography variant="overline" color="text.secondary">
-          Recent scheduled runs
-        </Typography>
-        <Typography variant="caption" color="text.secondary" display="block">
-          What the clock has done since this process started. It lives in
-          memory, not in the database — the record is the decision history
-          below.
-        </Typography>
-        <Box sx={{ mt: 1 }}>
-          <ActivityLog status={status} />
         </Box>
       </Box>
 

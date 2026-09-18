@@ -30,6 +30,14 @@ including their WCAG contrast ratios, come from that portal's documented
 Prices and quantities get `className="numeric"`, which applies tabular figures
 so digits do not jitter as they tick.
 
+**`MuiLink` is wired to `dark.link`, not to the accent.** The indigo `#354bbb`
+is a brand colour chosen against a WHITE surface; a link inside a sentence
+rendered in it is close to unreadable on the dark one. The `link` token already
+existed and was already used by the text and outlined buttons -- `MuiLink` was
+simply never overridden, which is why an inline link needs no `sx` now. Use
+MUI's `Link` (with `component={RouterLink}` for an in-app route) rather than a
+bare `<RouterLink>`, or it renders in the browser's default blue.
+
 **`MuiChip` sets a background on every chip in this theme.** That defeats
 `color="primary"`, whose text turns white and lands on the theme's grey -- once
 shipped as an unreadable capability chip. Set `bgcolor` and `color` explicitly
@@ -369,8 +377,43 @@ than anywhere except the health page.
   stored run kinds would rewrite history, so the translation lives at the edge
   (`RUN_LABELS` in the page). Keep the two vocabularies apart rather than
   half-renaming either.
-- **The tab is in the URL** (`?tab=how-it-works`, `?tab=configuration`), so
-  "read this page" is a link somebody can send.
+- **The FOURTH tab, Health, is the only ADMIN-ONLY part of this page.**
+  `SwingHealth.jsx` renders `GET /api/swing/health`. The rest of `/swing` is
+  open to a `ROLE_USER` because a journal is history; this one is live
+  machinery state and WARNING+ log records, which is the exposure `/health` is
+  gated for. The tab is not offered to a `ROLE_USER` and `?tab=health` falls
+  back to Live for one -- and that is presentation: the endpoint refuses them
+  with a 403 regardless (section 5).
+  - **It adds no second poll.** The page already polls at 10 s and fetches the
+    health payload on the same cadence. A page that reports on load must not be
+    a load source. Its failure is kept OFF the page's `error` state, so a
+    hiccup on an admin-only read cannot blank the Live tab.
+  - **"Off" is not "broken".** `Verdict` takes three tones, not a boolean: a
+    switched-off strategy is working exactly as configured and colouring it red
+    would make the panel cry wolf on the state an operator chose. Red is
+    reserved for a job that should be running and is not.
+  - **Three states where two would lie.** A subscription that was BUILT and
+    matched nothing, one that was never built, and one holding instruments are
+    three different answers -- a green "0 instruments" would be the page saying
+    "no prices are arriving" in the colour it uses for everything being fine.
+    Same for the stop watcher: "not running", "no pass yet" and "watching
+    nothing" each read differently.
+  - **"What it last did" comes from the JOURNAL, not the run list.** The
+    scheduler's in-memory list is empty after a restart; the journal is not,
+    and a panel showing only the first would say "nothing has run" about a
+    strategy that ran last night. Both are on the tab, labelled.
+  - **It says what it cannot know.** No audit history, a process-scoped run
+    list, and stop-watcher counters kept once per process across every
+    strategy. The server sends each note; the tab renders it rather than
+    composing its own.
+- **Four things MOVED off Live when Health was added**, because they are health
+  rather than activity: the missed-runs date list (a one-line summary stays,
+  pointing at Health), the twenty-row "Recent scheduled runs" table, the
+  closing-auction note, and the stop watcher's internals. Live keeps "N stops
+  watched, nearest X%". Do not move them back: Live answers "what is it doing",
+  Health answers "is it sound".
+- **The tab is in the URL** (`?tab=how-it-works`, `?tab=configuration`,
+  `?tab=health`), so "read this page" is a link somebody can send.
 - **The page is NOT gated by the strategy toggle.** `/swing` is deliberately
   outside `gated_pages()`: a journal is history, and switching the strategy off
   must not hide the record of what it did. Reading it is open to any signed-in

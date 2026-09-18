@@ -395,10 +395,9 @@ def build_health(
     swing_stop_status = get_swing_stop_monitor().status()
     swing_scheduler_status = get_swing_scheduler().status()
 
-    feed_running = feed_status.get("state") not in (
-        None,
-        ConnectionState.DISABLED.value,
-    )
+    # Derived in `task_inspector` so the strategy health tab and this page
+    # cannot disagree about which tasks should be alive.
+    feed_running = task_inspector.feed_flags()["feed_running"]
 
     # Counters that belong to a component, joined onto its task's row.
     feed_task_counters = {

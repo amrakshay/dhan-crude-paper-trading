@@ -1,5 +1,5 @@
 """Strategy setting persistence. Rows in, rows out; validation belongs above."""
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,26 @@ class StrategySettingRepository(BaseRepository[StrategySetting]):
         for row in await self.list_all():
             states.setdefault(row.strategy_key, {})[row.setting_key] = row.value
         return states
+
+    async def audit_for(self, strategy_key: str) -> Dict[str, Dict[str, Any]]:
+        """When each of one strategy's settings was last written, and by whom.
+
+        Current value only, with its last writer -- see the matching note on
+        `FeatureToggleRepository.audit_for`. There is no history table and the
+        page that reads this says so.
+        """
+        result = await self.session.execute(
+            select(StrategySetting).where(
+                StrategySetting.strategy_key == str(strategy_key)
+            )
+        )
+        return {
+            row.setting_key: {
+                "updated_at": row.updated_at,
+                "updated_by_user_id": row.updated_by_user_id,
+            }
+            for row in result.scalars().all()
+        }
 
     async def set_value(
         self,

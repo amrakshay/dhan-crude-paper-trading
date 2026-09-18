@@ -467,6 +467,88 @@ async def test_the_swing_endpoints_never_return_a_secret(auth_client, captured_l
     _assert_clean(captured_logs, token)
 
 
+async def test_the_swing_health_endpoint_never_returns_a_secret(
+    auth_client, captured_logs
+):
+    """The Health tab's endpoint, added 2026-09-18, gets its own assertion.
+
+    Every new endpoint gets one in the same change (root `CLAUDE.md`), and
+    this one earns a test of its own rather than a line in the list above,
+    because it is the only swing endpoint that SERVES LOG RECORDS. A warning
+    can carry whatever a developer interpolated into it, which is exactly the
+    exposure `/api/healthcheck/problems` is admin-only for. The records come
+    from the buffer that stores text already formatted through
+    `RedactingFormatter`; this asserts that holds through this endpoint too,
+    and not only through the system health page.
+
+    It also reaches the feed manager, the scheduler, the instrument master and
+    the charge rate card -- all of which sit beside the Dhan credentials in the
+    same config tree.
+    """
+    import os
+
+    from src import log_buffer, log_redaction
+
+    token = _sentinel_token()
+    saved = await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    portfolios = await auth_client.get("/api/portfolios")
+    portfolio_id = portfolios.json()["portfolios"][0]["id"]
+
+    # A swing component logging a runtime secret is the specific path this
+    # endpoint opens, so it is exercised rather than assumed.
+    buffered = "swing-buffered-secret-DO-NOT-SHOW-7b31c4"
+    log_redaction.register_secret(buffered)
+    try:
+        get_logger("swing.stops").warning("could not ratchet using %s", buffered)
+
+        responses = [
+            await auth_client.get("/api/swing/health"),
+            await auth_client.get(
+                f"/api/swing/health?portfolioId={portfolio_id}"
+            ),
+        ]
+
+        for response in responses:
+            assert response.status_code == 200, response.text
+            assert buffered not in response.text
+            assert token not in response.text
+            for part in token.split("."):
+                if len(part) >= 9:
+                    assert part not in response.text
+            assert SENTINEL_CLIENT_ID not in response.text
+            for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+                value = os.environ.get(name)
+                if value and len(value) >= 9:
+                    assert value not in response.text, (
+                        f"{name} reached the swing health payload"
+                    )
+            assert "jwt_secret" not in response.text
+            assert "encryption_key" not in response.text
+            assert "access_token" not in response.text
+
+        # The record IS served -- redacted, not dropped. A page that silently
+        # withheld the warning would be worse than one that showed it scrubbed.
+        records = responses[0].json()["problems"]["records"]
+        assert any("could not ratchet" in one["message"] for one in records)
+        assert log_redaction.REDACTED in responses[0].text
+    finally:
+        log_redaction.clear_secrets()
+        handler = log_buffer.get_handler()
+        if handler is not None:
+            handler.clear()
+
+    _assert_clean(captured_logs, token)
+
+
 async def test_the_policy_endpoints_never_return_a_secret(auth_client, captured_logs):
     """The enforcement switches, added 2026-09-18, get their own assertion.
 

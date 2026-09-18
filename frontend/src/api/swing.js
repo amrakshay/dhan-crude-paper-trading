@@ -38,6 +38,14 @@ export const swingApi = {
   performance: (strategyKey, portfolioId) =>
     api.get(`/swing/performance${toQuery({ strategyKey, portfolioId })}`),
 
+  // IS IT HEALTHY — a different question from `status`, which is what the rule
+  // SAYS right now. ADMIN-ONLY, unlike every other read here: the rest of the
+  // page is a journal and a journal is history, but this reports live
+  // machinery state and recent log records. The server refuses a ROLE_USER
+  // with a 403 regardless of whether the tab is shown.
+  health: (strategyKey, portfolioId) =>
+    api.get(`/swing/health${toQuery({ strategyKey, portfolioId })}`),
+
   // The rule as CONFIGURED — every threshold, multiple and lookback read out
   // of the strategy's own YAML. The "How it works" page renders this rather
   // than restating the numbers in JavaScript, which would be a second source

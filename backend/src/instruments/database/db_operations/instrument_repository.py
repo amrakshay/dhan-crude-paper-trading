@@ -123,6 +123,44 @@ class InstrumentRepository(BaseRepository[Instrument]):
         result = await self.session.execute(select(func.max(Instrument.refreshed_at)))
         return result.scalar_one_or_none()
 
+    async def count_active(self, exchange_segment: Optional[str] = None) -> int:
+        """Active rows, optionally in one segment.
+
+        Separate from `count_all` on purpose: `count_all` is every row this
+        master has ever carried, including the contracts
+        `deactivate_missing` retired. An operator asking "how much of the
+        universe can this strategy resolve" means the live ones.
+        """
+        query = select(func.count(Instrument.id)).where(Instrument.is_active.is_(True))
+        if exchange_segment:
+            query = query.where(Instrument.exchange_segment == exchange_segment)
+        result = await self.session.execute(query)
+        return int(result.scalar_one() or 0)
+
+    async def count_fno_eligible(
+        self, exchange_segment: str, symbols: Sequence[str]
+    ) -> int:
+        """How many of those symbols carry an active F&O-eligible row.
+
+        The F&O set is DERIVED from the master's own FUTSTK rows and is never
+        configured (root `CLAUDE.md`), which is what makes this figure worth
+        reporting: it is the population the Closing Auction Session rule
+        applies to, and it moves when Dhan's master moves.
+        """
+        if not symbols:
+            return 0
+        result = await self.session.execute(
+            select(func.count(func.distinct(Instrument.underlying_symbol))).where(
+                and_(
+                    Instrument.exchange_segment == exchange_segment,
+                    Instrument.is_active.is_(True),
+                    Instrument.fno_eligible.is_(True),
+                    Instrument.underlying_symbol.in_(sorted(set(symbols))),
+                )
+            )
+        )
+        return int(result.scalar_one() or 0)
+
     async def upsert_many(self, rows: Iterable[Dict[str, Any]]) -> Dict[str, int]:
         """Insert new contracts and update changed ones.
 

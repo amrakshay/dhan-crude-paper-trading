@@ -957,6 +957,67 @@ returns are concentrated.
 The page is deliberately **not** hidden when the strategy is switched off. A
 journal is history, and history does not go away with a toggle.
 
+### The Health tab
+
+`/swing?tab=health`, **administrators only**. System health (`/health`) answers
+*what is this process doing* — one feed connection, one book, one set of
+background tasks. It cannot answer the question an operator actually has about
+a strategy that trades unattended:
+
+> Is this strategy healthy, is anything about to stop it working, and what has
+> it actually been doing?
+
+That answer used to be scattered across the Live tab, the system health page,
+the log and nowhere at all. The Health tab gathers it, for one strategy, in the
+same plain words as the rest of the page, in six panels:
+
+* **Is it working right now?** — switched on, auto trade, the market and the IST
+  clock, and *its clock* and *its stop watcher* reported as running or not
+  running. A strategy that is on and armed with a dead scheduler places nothing
+  and says nothing; that is the failure this tab exists to make visible. Plus
+  how many instruments it holds on the shared feed and when the subscription was
+  last rebuilt.
+* **What it will do next, and what it last did** — the schedule in full, both
+  times shown as *what it ships with* beside *what is in force*, and the last
+  run of each kind **from the journal** rather than from the in-memory run list,
+  so a restart does not make it read as "nothing has run". Underneath it: the
+  sessions with no decision record, and the twenty-row activity log.
+* **The data it decides on** — bar coverage, how stale the newest session is
+  against `swing.max_bar_staleness_days`, *the exact sentence the rebalance
+  would refuse with* if it would refuse, the symbols whose newest bar is behind
+  the rest (these silently drop out of the ranking), the universe census
+  configured/resolved/unresolved/F&O-eligible, and when the instrument master
+  was last refreshed.
+* **What it holds, and what it is watching** — positions and how many have no
+  live mark, active stops and how many have no level yet, stops triggered and
+  waiting for the next open, and the portfolio's four money figures. Plus the
+  stop watcher's own internals, with its process-wide counters **labelled** as
+  process-wide.
+* **The rules it is running under** — a read-only mirror of the Configuration
+  tab: each rule switch and both timings, with what the strategy ships with
+  beside what is in force, and who last changed it and when.
+* **Recent problems** — warnings and errors from `dcpt.swing.*` and
+  `dcpt.daily_bars.*`, newest first, from the in-memory buffer that has already
+  been through the log redactor. The panel says the buffer is process-scoped and
+  that `logs/app.log` is the durable record.
+
+It is the one read on `/swing` that a `ROLE_USER` may not make. The rest of the
+page is a journal and a journal is history; this is live machinery state and log
+records, which is why `/api/healthcheck/*` is admin-only today. `require_admin`
+on `GET /api/swing/health` is what refuses it — hiding the tab is presentation.
+
+It adds no poll of its own: the page already polls at 10 s and fetches the
+health payload on the same cadence. Nothing on it is measured on the tick path.
+
+Four things moved off the **Live** tab when this was added, because they are
+health rather than activity: the missed-runs date list (a one-line summary
+stays, pointing here), the twenty-row "Recent scheduled runs" table, the
+closing-auction note, and the stop watcher's internals. Live keeps "N stops
+watched, nearest X%".
+
+The tab is honest about three things it cannot tell you, rather than implying
+otherwise — see **Known gaps**.
+
 ### Performance metrics
 
 The statistics the specification reports, computed from this book's own
@@ -1134,6 +1195,8 @@ The wording on screen is deliberately plainer than the code's:
 | Auto trade ON / OFF | `armed` / `AUTOMATION` scope | may it place orders by itself |
 | Analysis of stocks | `nightly` / `RUN_NIGHTLY` | re-rank, move the stops, write the record; never places an order |
 | Order placement | `rebalance` / `RUN_REBALANCE` | sell the sell list, buy the buy list |
+| Its clock | the `swing-scheduler` task | the only clock in this application |
+| Its stop watcher | the `swing-stop-monitor` task | watches the chandelier stops and exits the ones that are hit |
 
 Stored run kinds are **not** renamed — `swing_sessions.run_kind` still reads
 `NIGHTLY` and `REBALANCE`, because renaming stored values rewrites history. The
@@ -1147,6 +1210,10 @@ says how many changes are unsaved, and Discard throws them away. Save is refused
 outright for the contradictory pair (the off-gate variant with a relaxed regime
 gate), and the changes are applied in an order that never passes through that
 state on the way to a legal one.
+
+The **Health** tab (`/swing?tab=health`, admins only) mirrors all of it
+read-only, with what the strategy ships with beside what is in force and who
+last changed each one. It edits nothing and links back to Configuration.
 
 Auto trade stays on **Strategies & Features**, beside the on/off switch: it is
 the one control that lets this software spend money on its own, and it belongs
@@ -1486,6 +1553,31 @@ not carried over.
   depth, the stop set at entry, the reason on the `PLACED` event and the cash
   ledger movement are all **unverified in production** and are the first things
   to check when one appears (specification §14.3).
+* **There is no audit HISTORY of the switches.** `feature_toggles` and
+  `strategy_settings` carry the CURRENT value of each switch with whoever last
+  set it and when — nothing more. "The gate was relaxed at 15:19 and
+  re-enforced at 16:40" cannot be answered, and the Health tab says so in those
+  words rather than implying a trail it does not have. A real trail needs an
+  append-only `strategy_audit` table written by `StrategyStateService`; it was
+  considered on 2026-09-18 and deliberately not built, because the current value
+  with its author is already most of the answer.
+* **Bar refresh outcomes are not persisted.** How many symbols a nightly refresh
+  refreshed, failed on or could not resolve lives on the scheduler's in-memory
+  `JobRun.detail` and dies with the process, so a refresh that failed before the
+  last restart leaves no trace on the Health tab. Bar COVERAGE is a database
+  read and is unaffected; `logs/app.log` is the durable record of the runs
+  themselves.
+* **The stop watcher's counters are process-wide, not per strategy.**
+  `SwingStopMonitor` keeps one set of passes / triggers / exits placed /
+  deferred-to-auction across every automated strategy. With one automated module
+  they are that module's figures; with two they would silently be the sum. The
+  Health tab labels them rather than keying them, which is a real limitation and
+  is what to fix first if a second automated strategy is added.
+* **The Health tab has only been seen on an empty installation.** As of
+  2026-09-18 it has been exercised against a database with no bars, no orders
+  and no positions, plus a switch and a timing moved by hand to check the
+  "who changed it" line. Its lagging-symbols table, its staleness refusal and
+  its money panel with a real book are **unverified against live data**.
 * **MySQL is DDL-compile-verified only.** The 2026-09-18 migration that widens
   `swing_stops` and adds the regime columns has never been executed against a
   live MySQL server, only against SQLite.
