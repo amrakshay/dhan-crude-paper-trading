@@ -75,6 +75,40 @@ def test_a_strategy_sees_only_the_rules_about_it():
     assert "error-records" not in strategy_keys
 
 
+def test_a_rule_about_machinery_a_strategy_DOES_NOT_HAVE_stays_off_its_page():
+    """"About a strategy" and "about THIS strategy" stopped being the same thing.
+
+    Until a second automated module arrived every `strategy_scoped` rule was
+    the rotation's, so the unqualified list was right by accident. It is not
+    any more: BTST's specification says B15 is none and none is possible, so a
+    deferred stop cannot happen to it, and the rotation holds for weeks and has
+    no overnight book with a due exit to be stuck in.
+
+    A rule on the wrong page is worse than a missing one -- it reads as cover
+    somebody has and has not.
+    """
+    swing = {rule.key for rule in alert_catalogue.rules_for(STRATEGY)}
+    btst = {
+        rule.key
+        for rule in alert_catalogue.rules_for(alert_catalogue.STRATEGY_BTST)
+    }
+
+    assert alert_catalogue.EVENT_DEFERRED_STOPS in swing
+    assert alert_catalogue.EVENT_DEFERRED_STOPS not in btst
+
+    assert alert_catalogue.EVENT_BTST_EXIT_INCOMPLETE in btst
+    assert alert_catalogue.EVENT_BTST_EXIT_INCOMPLETE not in swing
+
+    # What BOTH have: a journal that can miss a session, bars that can go
+    # stale, and trades. Those stay unqualified rather than being listed per
+    # module, so a third strategy inherits them without an edit here.
+    for shared in (alert_catalogue.EVENT_MISSED_SESSIONS,
+                   alert_catalogue.EVENT_STALE_BARS,
+                   "trade-bought", "trade-sold"):
+        assert shared in swing, shared
+        assert shared in btst, shared
+
+
 # --- what it reports --------------------------------------------------------
 async def test_a_rule_that_never_fired_says_never_rather_than_zero(auth_client):
     """Never fired is a third state, not a timestamp and not a count."""

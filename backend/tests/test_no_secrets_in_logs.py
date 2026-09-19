@@ -1406,9 +1406,18 @@ async def test_the_other_btst_reads_carry_no_secret_either(auth_client):
     )
     assert saved.status_code == 200, saved.text
 
+    portfolios = await auth_client.get("/api/portfolios")
+    portfolio_id = portfolios.json()["portfolios"][0]["id"]
+
     for path in (
         "/api/btst/status",
+        # WITH a portfolio too, and that is not belt and braces. `status`
+        # carries the portfolio's four figures only when one is in scope, so
+        # the un-scoped call above never reaches `BalanceService` at all --
+        # a block added on 2026-09-19 would have been covered by nothing.
+        f"/api/btst/status?portfolioId={portfolio_id}",
         "/api/btst/signals",
+        f"/api/btst/signals?portfolioId={portfolio_id}",
         "/api/btst/history",
         "/api/btst/performance",
         "/api/btst/configuration",

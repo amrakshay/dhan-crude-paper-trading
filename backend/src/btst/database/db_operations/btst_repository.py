@@ -244,6 +244,40 @@ class BtstDecisionRepository(_AppendOnly, BaseRepository[BtstDecision]):
         )
         return list(result.scalars().all())
 
+    async def by_order_ids(
+        self, strategy_key: str, order_ids: Sequence[int]
+    ) -> Dict[int, BtstDecision]:
+        """The decisions that PLACED these orders, keyed by order id.
+
+        A holding stores `entry_order_id` and a decision stores `order_id`, so
+        this is what joins a position still on the book to the sentence that
+        explains why it was bought -- the rank it held, the volume ratio and
+        the close location measured at 15:20, none of which exist anywhere else
+        once the session is over.
+
+        One query for the whole book rather than one per row: five is the slot
+        count today, and a loop that is free at five is what a page is still
+        doing when somebody raises it.
+        """
+        ids = [int(one) for one in order_ids if one is not None]
+        if not ids:
+            return {}
+        result = await self.session.execute(
+            select(BtstDecision)
+            .join(BtstSession, BtstSession.id == BtstDecision.session_id)
+            .where(
+                and_(
+                    BtstSession.strategy_key == strategy_key,
+                    BtstDecision.order_id.in_(ids),
+                )
+            )
+        )
+        return {
+            int(one.order_id): one
+            for one in result.scalars().all()
+            if one.order_id is not None
+        }
+
 
 class BtstHoldingRepository(BaseRepository[BtstHolding]):
     """The overnight book. **Deliberately NOT append-only.**

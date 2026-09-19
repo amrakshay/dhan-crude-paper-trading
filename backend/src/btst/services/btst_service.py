@@ -130,14 +130,57 @@ class BtstService:
         open_holdings = await self._holdings().open_for(
             self.definition.key, portfolio_id
         )
+        # WHY each open position was bought, from the decision that placed it.
+        # The rotation's page has a ranking table because it holds ten names
+        # for weeks and the ranking is what decides which; this one holds up to
+        # five for eighteen hours, and what is worth knowing about each is the
+        # measurement that qualified it -- which is on the decision row and
+        # nowhere else once the session is over.
+        entry_decisions = await self._decisions().by_order_ids(
+            self.definition.key, [one.entry_order_id for one in open_holdings]
+        )
+
+        policies = describe_policies(self.definition, self.parameters)
+        settings = describe_settings(self.definition, self.parameters)
+
+        balance = None
+        if portfolio_id is not None:
+            balance = (await self._balances().balance_for(portfolio_id)).as_dict()
 
         return {
             "strategyKey": self.definition.key,
             "label": self.definition.label,
+            # The strategy's own one-liner, from the YAML, so the page's header
+            # is not a second description that drifts from the file.
+            "description": self.definition.description,
             "enabled": registry.is_enabled(self.definition.key),
+            "automated": self.definition.automation.automated,
             "armed": registry.is_armed(self.definition.key),
             "armedByDefault": self.definition.automation.armed_by_default,
             "noTrackRecord": NO_TRACK_RECORD,
+            # WHAT THE CLOCK IS DOING, this second. Composed here rather than
+            # taken from the scheduler's own `schedules` list, which is built
+            # out of `SwingParameters` and therefore skips this strategy
+            # entirely -- see `_scheduler_payload`.
+            "scheduler": self._scheduler_payload(),
+            # WHICH RULES ARE OBEYED, beside the YAML's default for each, so
+            # the page can never show a gate that looks on while nothing acts
+            # on it. `contradiction` is always null here and the key is present
+            # on purpose: this strategy's two switches answer different
+            # questions and no pair of them contradicts.
+            "policies": policies["policies"],
+            "policyContradiction": policies["contradiction"],
+            "settings": settings["settings"],
+            # Four figures, never one (frontend/CLAUDE.md section 3). Null when
+            # no portfolio is in scope, which is not a balance of zero.
+            "balance": balance,
+            # THE CLOSING AUCTION, which this strategy needs stated more than
+            # the rotation does: its scan is at 15:20, inside the window.
+            "closingAuction": self._closing_auction_payload(),
+            # When the universe joins the feed and when it leaves. Activity
+            # rather than health: the verdict on whether prices are actually
+            # ARRIVING is the Health tab's, and this is only the clock.
+            "subscriptionWindow": self._subscription_window(now),
             "market": {
                 "open": market_clock.is_market_open(self.definition, now=now),
                 "tradingDay": market_clock.is_trading_day(self.definition, now=now),
@@ -155,7 +198,10 @@ class BtstService:
                 "nextExitIst": self._next_occurrence(schedule.exit_at),
             },
             "policy": policy.as_dict(),
-            "holdings": [self._holding_row(one) for one in open_holdings],
+            "holdings": [
+                self._holding_row(one, entry_decisions.get(one.entry_order_id))
+                for one in open_holdings
+            ],
             "lastScan": self._session_row(latest_scan),
             "lastExit": self._session_row(latest_exit),
             # The distinction the page turns on. A scan that ran and found
@@ -166,7 +212,167 @@ class BtstService:
                 "nothing, and nothing is the ordinary outcome rather than a "
                 "fault."
             ),
+            # ONE LINE, not the whole table. Section 9.4's year-by-year decay
+            # is the most important fact about this strategy and it is on the
+            # "How it works" tab in full; repeating it here would put the same
+            # ten rows on two tabs, where the second copy is the one that goes
+            # stale. What the Live tab carries is the sentence, and a link.
+            "exitTimingNote": (
+                "THE EXIT IS THE STRATEGY. Sold at the next OPEN the "
+                "specification measures +0.617% at a 71.4% win rate; the "
+                "identical signals held to the next CLOSE measure +0.428% at "
+                "49.0%. A position that does not leave at the open is not a "
+                "delayed trade, it is a different one."
+            ),
         }
+
+    # --- the clock ----------------------------------------------------------
+    def _scheduler_payload(self) -> Dict[str, Any]:
+        """What the shared clock is doing, narrowed to THIS strategy.
+
+        The scheduler already reports itself, and the rotation's page reads
+        `status()["schedules"]` to find its own row. **This strategy is not in
+        that list**: those rows are built by constructing `SwingParameters` for
+        every automated module, and a definition that raises is skipped -- and
+        this one raises, because it has no `breadth_lower`. Nothing consumed
+        the omission before, since the only reader looked itself up by key.
+
+        So the times come from `btst_schedule` -- which owns them -- and only
+        the genuinely process-wide facts are taken from the scheduler. The runs
+        and the missed runs are filtered to this strategy's key, which
+        `JobRun`/`MissedRun` carry precisely so two modules can share one clock.
+        """
+        from src.swing.services.scheduler import get_swing_scheduler
+
+        status = get_swing_scheduler().status()
+        mine_recent = [
+            run
+            for run in (status.get("recent") or [])
+            if run.get("strategyKey") == self.definition.key
+        ]
+        mine_missed = [
+            entry
+            for entry in (status.get("missedRuns") or [])
+            if entry.get("strategyKey") == self.definition.key
+        ]
+        progress = status.get("progress")
+        return {
+            "schedulerEnabled": status.get("enabled"),
+            # "idle" and "the scheduler is not running" are different answers
+            # and the page renders them differently.
+            "running": status.get("running"),
+            "activity": status.get("activity"),
+            "activitySinceIst": status.get("activitySinceIst"),
+            "nowIst": status.get("nowIst"),
+            "intervalSeconds": status.get("intervalSeconds"),
+            "recent": mine_recent,
+            "missedRuns": mine_missed,
+            "missedRunCount": sum(
+                len(entry.get("sessions") or []) for entry in mine_missed
+            ),
+            "checkedForMissedAtIst": status.get("checkedForMissedAtIst"),
+            "error": status.get("error"),
+            "progress": progress,
+            # WHOSE long job it is. `progress` is a single process-wide field
+            # with no owner on it, and the only thing that ever sets it is the
+            # rotation's nightly bar refresh -- so a page rendering it without
+            # this sentence would report another strategy's twelve-minute job
+            # as though this one were running it. It is shown here rather than
+            # hidden because those are the bars five of this strategy's seven
+            # filters read.
+            "progressNote": (
+                "This is the shared daily-bar refresh, run by the rotation's "
+                "nightly job. It is not this strategy's own work -- it has no "
+                "long job of its own -- but it is what keeps the bars five of "
+                "these filters read up to date."
+                if progress
+                else None
+            ),
+            "clockNote": (
+                "One clock serves every automated strategy, so what it is "
+                "doing this second may belong to another one. The runs and "
+                "missed sessions listed here are this strategy's only."
+            ),
+            "runListNote": (
+                "The run list is in memory and is empty after a restart, which "
+                "is not the same as nothing having run. The decision history "
+                "below is the durable record."
+            ),
+        }
+
+    def _closing_auction_payload(self) -> Optional[Dict[str, Any]]:
+        """The CAS note, which matters more here than on the rotation.
+
+        NSE's Closing Auction Session ends continuous cash trading at 15:15 for
+        F&O-eligible names, and this strategy's scan is at 15:20 -- INSIDE that
+        window. That is the whole reason `fno.exclude` exists, so the page says
+        it rather than leaving the reader to notice that two configured times
+        are on the wrong side of each other.
+        """
+        auction = self.definition.market_hours.closing_auction
+        if auction is None:
+            return None
+        schedule = resolve_schedule(self.definition, self.parameters)
+        scan_is_inside = schedule.scan > auction.continuous_close
+        return {
+            "appliesTo": auction.applies_to,
+            "continuousClose": auction.continuous_close.strftime("%H:%M"),
+            "auctionClose": auction.auction_close.strftime("%H:%M"),
+            "scanAtIst": schedule.scan_at,
+            "scanIsInsideTheWindow": scan_is_inside,
+            "note": (
+                (
+                    f"Continuous cash trading ends at "
+                    f"{auction.continuous_close.strftime('%H:%M')} for "
+                    f"F&O-eligible names, and this strategy scans at "
+                    f"{schedule.scan_at} -- INSIDE that window. No order could "
+                    f"fill continuously for one of those names at that time, "
+                    f"which is why F&O names are excluded from the universe "
+                    f"rather than scanned and then refused. The guard is per "
+                    f"instrument and runs immediately before each order."
+                )
+                if scan_is_inside
+                else (
+                    f"Continuous cash trading ends at "
+                    f"{auction.continuous_close.strftime('%H:%M')} for "
+                    f"F&O-eligible names. This strategy scans at "
+                    f"{schedule.scan_at}, before that."
+                )
+            ),
+        }
+
+    def _subscription_window(self, now) -> Optional[Dict[str, Any]]:
+        """When the universe is on the feed.
+
+        This is the only strategy that subscribes its whole universe, and it
+        does so for a window rather than all session -- so "nothing is
+        subscribed" is the correct state for most of the day and a page that
+        did not say when the window opens would read as a fault.
+        """
+        subscription = self.definition.subscription
+        opens = subscription.window_opens_at
+        closes = subscription.window_closes_at
+        if opens is None and closes is None:
+            return None
+        return {
+            "kind": subscription.kind,
+            "opensAtIst": opens.strftime("%H:%M") if opens else None,
+            "closesAtIst": closes.strftime("%H:%M") if closes else None,
+            "open": subscription.window_is_open(now.time()),
+            "universeSize": (
+                len(self.definition.universe) if self.definition.universe else None
+            ),
+            "note": (
+                "Outside this window the strategy subscribes only what it "
+                "holds, exactly like every other module. Whether prices are "
+                "actually arriving is on the Health tab."
+            ),
+        }
+
+    def _balances(self):
+        from src.portfolios.services.balance_service import BalanceService
+
+        return BalanceService(self.session)
 
     def _next_occurrence(self, at_text: str) -> Optional[str]:
         from src.core.time_utils import parse_hhmm
@@ -177,7 +383,7 @@ class BtstService:
         )
         return moment.isoformat() if moment is not None else None
 
-    def _holding_row(self, holding) -> Dict[str, Any]:
+    def _holding_row(self, holding, entry=None) -> Dict[str, Any]:
         return {
             "id": holding.id,
             "symbol": holding.symbol,
@@ -199,6 +405,25 @@ class BtstService:
             "overnightGap": _money(holding.overnight_gap),
             "entryGateOn": holding.entry_gate_on,
             "entryRegimeEnforced": holding.entry_regime_enforced,
+            # WHY it was bought, from the decision that placed it. Null when
+            # the decision cannot be found -- a position entered by hand, or
+            # one whose order id was never recorded -- which is a different
+            # answer from "there was no reason", so the page says so.
+            "entry": (
+                None
+                if entry is None
+                else {
+                    "reason": entry.reason,
+                    "rank": entry.rank,
+                    "price": _money(entry.price),
+                    "volRatio": _number(entry.vol_ratio),
+                    "clv": _number(entry.clv),
+                    "breakoutHigh": _money(entry.breakout_high),
+                    "momentum": _number(entry.momentum),
+                    "sessionHigh": _money(entry.session_high),
+                    "sessionLow": _money(entry.session_low),
+                }
+            ),
         }
 
     def _session_row(self, record) -> Optional[Dict[str, Any]]:
@@ -369,16 +594,51 @@ class BtstService:
             # composed by the page: B1-B16 are in the YAML and are editable
             # from nowhere, which is what keeps the file greppable against the
             # specification's own table.
+            # Composed from the PARAMETERS, not typed out. It listed "the
+            # 55-day breakout, the 2x volume multiple, the 0.8 close-location
+            # floor... and the five slots" as literal text until 2026-09-19 --
+            # which made the one sentence on the page insisting those numbers
+            # live in the YAML the only place on the page that restated them,
+            # and it would have gone on saying 55 after the file changed.
             "notEditable": (
-                "B1-B16 -- the 55-day breakout, the 2x volume multiple, the "
-                "0.8 close-location floor, the 200-day trend filter, the "
-                "six-month momentum floor, the ranking and the five slots -- "
-                "live in conf/strategies/nse-btst-overnight.yaml and are "
-                "editable from no page. The 'How it works' tab renders them "
-                "read-only from that same file. What is editable here is "
-                "whether a rule is OBEYED and WHEN the strategy wakes up, "
-                "which are runtime facts rather than parameters of the rule."
+                f"B1-B16 -- the "
+                f"{self.parameters.breakout_lookback_sessions}-session "
+                f"breakout, the {self.parameters.volume_multiple:g}x volume "
+                f"multiple, the {self.parameters.close_location_minimum} "
+                f"close-location floor, the "
+                f"{self.parameters.trend_sma_sessions}-session trend filter, "
+                f"the {self.parameters.momentum_floor:.0%} momentum floor, the "
+                f"ranking and the {self.parameters.slots} slots -- live in "
+                f"conf/strategies/{self.definition.key}.yaml and are editable "
+                f"from no page. The 'How it works' tab renders them read-only "
+                f"from that same file. What is editable here is whether a rule "
+                f"is OBEYED and WHEN the strategy wakes up, which are runtime "
+                f"facts rather than parameters of the rule."
             ),
+            # The specific things somebody WILL look for here and not find,
+            # named rather than left to the B-numbers above. The rotation's tab
+            # does the same for its rebalance cadence.
+            "alsoNotEditable": [
+                (
+                    "THE EXIT ITSELF. It sells everything at the configured "
+                    "time, unconditionally -- no rank is consulted and there is "
+                    "no condition under which a position is kept. Only WHEN it "
+                    "runs is a setting; THAT it runs is the strategy."
+                ),
+                (
+                    f"THE SLOT COUNT and the position size. B11 is "
+                    f"{self.parameters.slots} and B12 divides total equity by "
+                    f"{self.parameters.position_size_divisor}. Both are in the "
+                    f"YAML, because how much of the book one signal consumes is "
+                    f"a parameter of the rule and not a runtime fact."
+                ),
+                (
+                    "THE STOP. B15 is none and none is possible -- the only "
+                    "risk window is overnight, when no order can execute at any "
+                    "price. There is no control here because there is nothing "
+                    "to switch on."
+                ),
+            ],
         }
 
     # --- the "How it works" tab ---------------------------------------------
@@ -467,6 +727,56 @@ class BtstService:
                 "scanAtIst": schedule.scan_at,
                 "exitAtIst": schedule.exit_at,
             },
+            # The day, as configured. Here so the explainer's timeline can be
+            # DRAWN from the file rather than from five numbers typed into
+            # JSX -- the one diagram in this module that is mostly times, and
+            # so the one most exposed to a second source of truth.
+            "marketHours": {
+                "open": self.definition.market_hours.open.strftime("%H:%M"),
+                "close": self.definition.market_hours.close.strftime("%H:%M"),
+                "timezone": self.definition.market_hours.timezone,
+                "closingAuction": self._closing_auction_payload(),
+            },
+            "subscription": {
+                "kind": self.definition.subscription.kind,
+                "windowOpensAtIst": (
+                    self.definition.subscription.window_opens_at.strftime("%H:%M")
+                    if self.definition.subscription.window_opens_at
+                    else None
+                ),
+                "windowClosesAtIst": (
+                    self.definition.subscription.window_closes_at.strftime("%H:%M")
+                    if self.definition.subscription.window_closes_at
+                    else None
+                ),
+            },
+            # The thresholds the pictures label, as NUMBERS rather than as the
+            # sentences in `parameters` above. The funnel diagram writes "> 2x"
+            # beside a bar and the CLV diagram shades the top fifth of a
+            # candle; both need the value, not its description, and parsing it
+            # back out of the prose would be the second source of truth this
+            # payload exists to prevent.
+            # THE FUNNEL'S STAGES, in the scan's own order, each with what it
+            # TESTS. Rendered from `FILTER_STAGES` like everything else that
+            # names these filters, so the picture and the scan cannot drift
+            # into listing them differently -- and the test sentences are
+            # composed here, from the parameters, rather than typed beside the
+            # bars in JSX where they would go on saying 55 after the YAML
+            # changed.
+            "funnelStages": self._funnel_stages(parameters, schedule.scan_at),
+            "thresholds": {
+                "breakoutLookbackSessions": parameters.breakout_lookback_sessions,
+                "volumeMultiple": parameters.volume_multiple,
+                "volumeWindowSessions": parameters.volume_window_sessions,
+                "closeLocationMinimum": parameters.close_location_minimum,
+                "trendSmaSessions": parameters.trend_sma_sessions,
+                "momentumFloor": parameters.momentum_floor,
+                "momentumLookbackSessions": parameters.momentum_lookback_sessions,
+                "momentumSkipSessions": parameters.momentum_skip_sessions,
+                "liquidityFloorRupees": parameters.liquidity_floor_rupees,
+                "priceFloor": _number(parameters.price_floor),
+                "slots": parameters.slots,
+            },
             "regimeIndex": (
                 {
                     "symbol": reference.symbol,
@@ -526,6 +836,54 @@ class BtstService:
             ),
             "caveats": self._caveats(),
         }
+
+    @staticmethod
+    def _funnel_stages(parameters: BtstParameters, scan_at: str) -> List[Dict[str, Any]]:
+        """Each filter stage with what it tests, keyed as the journal keys it.
+
+        The keys come from `FILTER_STAGES`, which is also what
+        `_funnel` renders a stored record with -- so the explainer's picture
+        and the recorded census line up stage for stage by construction rather
+        than by two lists being kept in step by hand.
+        """
+        # SHORT on purpose: these are captions beside a bar in a diagram, not
+        # prose. A sentence that runs past the picture's own width is clipped
+        # by the viewBox and teaches nothing, so each says the rule and its
+        # number and stops. The full descriptions are the `parameters` rows.
+        tests = {
+            "universe": "B1 -- the configured universe file",
+            "tradable": f"F&O names excluded -- the scan is at {scan_at}",
+            "history": (
+                f"enough bars for every lookback (to "
+                f"{parameters.trend_sma_sessions})"
+            ),
+            "quoted": "a usable session high, low and volume",
+            "liquidity": (
+                f"B2 -- Rs "
+                f"{parameters.liquidity_floor_rupees / 10_000_000:,.0f} crore a day"
+            ),
+            "price_floor": f"B3 -- above Rs {parameters.price_floor:,.0f}",
+            "breakout": (
+                f"B4 -- above the prior "
+                f"{parameters.breakout_lookback_sessions}-session high"
+            ),
+            "volume": (
+                f"B5 -- {parameters.volume_multiple:g}x the "
+                f"{parameters.volume_window_sessions}-session average"
+            ),
+            "close_strength": (
+                f"B6 -- closing in the top "
+                f"{(1 - float(parameters.close_location_minimum)) * 100:.0f}% "
+                f"of the range"
+            ),
+            "trend": f"B7 -- above its {parameters.trend_sma_sessions}-session SMA",
+            "momentum": f"B8 -- six-month return above {parameters.momentum_floor:.0%}",
+        }
+
+        return [
+            {"key": key, "label": label, "test": tests.get(key, "")}
+            for key, label in FILTER_STAGES
+        ]
 
     @staticmethod
     def _caveats() -> List[str]:

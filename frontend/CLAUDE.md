@@ -182,10 +182,11 @@ Both pages are admin-only, and `/connections` is deliberately NOT strategy-gated
 
 ## 4a. The Alerts tab
 
-`src/components/AlertsPanel.jsx` is rendered by BOTH the System Health page and
-the Swing Momentum page, the same way `JobProgress.jsx` is shared by two tabs
-and for the same reason: they are the same list filtered, and two components
-would drift into describing the same rule differently.
+`src/components/AlertsPanel.jsx` is rendered by the System Health page and by
+EVERY automated strategy's own page -- the rotation's and BTST's -- the same
+way `JobProgress.jsx` is shared by two tabs and for the same reason: they are
+the same list filtered, and three components would drift into describing the
+same rule differently.
 
 - **Read-only, and it says so.** No edit, no delete. What gets alerted is a
   property of the build. The panel states that rather than leaving somebody
@@ -201,6 +202,16 @@ would drift into describing the same rule differently.
   strategy; process-wide ones stay on System Health. Do not repeat one onto
   both -- the server filters on `alerts.strategy_key` and the two pages would
   disagree the moment one changed.
+- **And "about a strategy" is not "about THIS strategy".** `AlertRule.
+  strategy_scoped` says a rule belongs on some strategy's page;
+  `AlertRule.strategy_keys` says WHICH, for the rules where only some modules
+  can raise it. The distinction did not exist while there was one automated
+  strategy and every scoped rule was the rotation's. With two it does: a
+  deferred stop cannot happen to a strategy with no stop, and a stuck
+  overnight position cannot happen to one that holds for weeks. `None` still
+  means every automated module, which is right for a missed session, stale
+  bars and the two trade rules. **A rule shown on the wrong page is worse than
+  an absent one -- it reads as cover somebody has and does not.**
 - Both tabs are **admin-only** and fetch on their page's EXISTING poll rather
   than adding one. Their failure is kept off the page's `error` state, so a
   hiccup on an admin-only read cannot blank the tab beside it.
@@ -524,15 +535,15 @@ than anywhere except the health page.
 - `npm run build` must pass before committing.
 
 ---
-
 ## 5e. The BTST Overnight page
 
 `src/pages/BtstOvernightPage.jsx`, with `BtstSignals`, `BtstConfiguration`,
-`BtstHealth`, `BtstExplainer` and the shared `BtstFunnel`. The second strategy
-that trades with nobody watching, so section 3's honesty rules apply as hard
-here as on `/swing` — plus two that are specific to this one.
+`BtstHealth`, `BtstExplainer`, the shared `BtstFunnel`, and the shared
+`AlertsPanel` and `JobProgress`. The second strategy that trades with nobody
+watching, so section 3's honesty rules apply as hard here as on `/swing` —
+plus several that are specific to this one.
 
-- **FIVE tabs, where the rotation has four**, and the extra one is Signals.
+- **SIX tabs, where the rotation has five**, and the extra one is Signals.
   That is not symmetry for its own sake: the rotation's decision happens
   overnight in one shot, while this one forms over the afternoon, and between
   14:30 and 15:20 the funnel filling up is the most interesting thing on the
@@ -559,29 +570,166 @@ here as on `/swing` — plus two that are specific to this one.
   pays the far touch and walks the book, against the backtest's flat 0.05% a
   side. That gap is the most valuable number the exercise produces and the page
   reports it rather than hiding it.
-- **The "How it works" tab restates no number.** `BtstExplainer` renders
-  `GET /api/btst/explain`, which reads every threshold and lookback out of the
-  strategy's YAML. It leads with the specification's own recommendation NOT to
-  fund this yet and with the year-by-year decay table, above the rules rather
-  than below them — a reader who stops half way should have seen both. It also
-  states, in the page, that the specification contradicts itself about B10.
+
+### What the Live tab says it is DOING
+
+- **`ActivityStrip` is built from `status.scheduler`, which this module
+  composes ITSELF.** The rotation's strip reads its own row out of
+  `SwingScheduler.status()["schedules"]`; this strategy is not in that list and
+  cannot be. Those rows are built by constructing `SwingParameters` for every
+  automated module and skipping any definition that raises — and this one
+  raises, because its YAML has no `breadth_lower`. Nothing noticed, because the
+  only reader looked itself up by key and found it. `BtstService.
+  _scheduler_payload` therefore takes the times from `btst_schedule`, which
+  owns them, and only the genuinely process-wide facts from the scheduler.
+  `test_this_strategy_is_absent_from_the_schedulers_own_schedule_list` pins the
+  reason so the next reader does not "simplify" it back.
+- **ONE CLOCK RUNS EVERY AUTOMATED STRATEGY, so the strip says so.** The runs
+  and the missed sessions are filtered to this strategy's key — `JobRun` and
+  `MissedRun` carry it precisely so two modules can share a clock — and the
+  activity line carries the server's note that what the clock is doing this
+  second may belong to another strategy.
+- **`JobProgress` renders here ATTRIBUTED, and that is the whole point.** This
+  strategy has no long job of its own. `scheduler.progress` is a single
+  process-wide field with no owner on it and the only thing that ever sets it
+  is the rotation's nightly bar refresh, so a bar rendered bare would report
+  another strategy's twelve-minute job as this one's work. It is shown rather
+  than hidden because those are the bars five of these filters read, and the
+  server sends `progressNote` saying whose job it is. Do not render the bar
+  without the note.
+- **Four figures, never one.** `MoneyCard` shows cash, blocked margin,
+  available and equity, because this strategy deploys about a third of the book
+  in a single afternoon pass and B12 sizes every entry against total equity. A
+  withheld equity figure says so and says what it means for the next scan.
+- **The closing-auction note is on this page and matters more than on
+  `/swing`.** Continuous cash trading ends at 15:15 for F&O-eligible names and
+  the scan is at 15:20 — INSIDE that window, which is the entire reason
+  `fno.exclude` exists. The server COMPUTES that relationship from the two
+  configured times (`scanIsInsideTheWindow`) rather than asserting a sentence
+  that would stay put if either moved.
+- **A rule that is NOT ENFORCED is named in the strip.** A gate that looks on
+  while nothing obeys it is the failure §5d's equivalent rule exists to
+  prevent.
+- **ONE LINE about the exit timing, linking to the explainer.** Section 9.4's
+  decay table is the most important fact about this strategy and it is on "How
+  it works" in full; putting the ten rows on two tabs would leave the second
+  copy to go stale.
+- **NO SEPARATE RANKING TABLE, deliberately.** The rotation has one because it
+  holds ten names for weeks and the rank decides which; this holds up to five
+  for eighteen hours, the Signals tab IS the ranking, and what is worth knowing
+  about a position already open is the measurement that qualified it. The
+  holdings row carries the entry reason, its rank, its volume ratio and its
+  CLV, joined from the decision that placed the order — and says "no decision
+  record for this entry" when there is none, which is not the same as no
+  reason.
+
+### Alerts, and why the tab exists
+
+- **`btst-exit-incomplete` is the most important alert in the module** — a
+  position still held after the exit ran, guarding the thing §10.1 says IS the
+  strategy — and until 2026-09-19 it was raised, stored, de-duplicated and
+  delivered with nowhere on this page to appear. The Alerts tab renders the
+  shared `AlertsPanel` filtered to this strategy, exactly as `/swing` does.
+- **"About a strategy" stopped meaning "about the rotation".** `AlertRule.
+  strategy_scoped` was enough while there was one automated module; with two,
+  the unqualified list put "a triggered stop is waiting for the next open" on
+  the page of a strategy whose B15 is none and none is possible, and put the
+  BTST exit rule on the rotation's, which has no overnight book to get stuck.
+  `AlertRule.strategy_keys` names the modules that raise a rule when only some
+  do; `None` still means every automated strategy, which is right for a missed
+  session, stale bars and the two trade rules. **A rule on the wrong page is
+  worse than a missing one: it reads as cover somebody has and has not.**
+
+### The "How it works" tab
+
+- **It restates no number.** `BtstExplainer` renders `GET /api/btst/explain`,
+  which reads every threshold and lookback out of the strategy's YAML. It leads
+  with the specification's own recommendation NOT to fund this yet and with the
+  year-by-year decay table, above the rules rather than below them — a reader
+  who stops half way should have seen both. It also states, in the page, that
+  the specification contradicts itself about B10.
+- **Its diagrams are inline SVG in theme tokens**, not a charting dependency
+  and not a hardcoded hex — four static pictures do not justify a library, and
+  `theme.palette.*` / `theme.market.*` is what makes them legible in both modes
+  without a second set of assets. They are the day timeline (the single most
+  explanatory picture in the module: open, universe on the feed, auction, scan
+  and buy, close, sell — with the overnight hold marked as the window in which
+  no stop is possible), the filter funnel, the CLV band, and the exit-timing
+  comparison drawn as two bars.
+- **The funnel's stages, labels AND what each one tests all come from the
+  payload**, which builds them from the scan's own `FILTER_STAGES`. The first
+  draft carried its own list of stage keys in JSX and five of nine matched
+  nothing, so every bar silently read "not measured" against a scan that had
+  measured all of them.
+- **Those captions are SHORT because SVG cannot wrap.** The count and the
+  caption sit in FIXED columns rather than trailing a variable-width bar:
+  trailing it put the longest caption past the right-hand edge of the viewBox,
+  where SVG clips it without a word.
+- **Where a recorded scan exists the funnel is drawn with ITS census, labelled
+  with that scan's date.** A picture claiming to be today's when it is
+  yesterday's would be worse than one claiming nothing; today's, as it forms,
+  is the Signals tab. With nothing ever scanned the bars show the funnel's
+  SHAPE and say so, rather than a row of zeros that would read as a market in
+  which nothing qualified.
+
+### Configuration, Health, and the rest
+
 - **The Configuration tab is a FORM: nothing takes effect until Save**, the
   draft holds only the fields actually changed, the dialog shows the server's
   warnings and refusal before the confirm button, and a half-applied save says
   which half. All of that is the rotation's tab's contract and the reasons are
-  the same; §5d has them.
+  the same; §5d has them. Each setting gets the rotation's per-row treatment —
+  title, state chips, description, control — because these rows are read far
+  more often than they are changed.
+- **There is deliberately NO `orderPolicyChanges` here, and it is checked
+  rather than forgotten.** The rotation orders its changes because the server
+  refuses one pair; this strategy has none — `btst_policy.
+  validate_policy_change` accepts every combination as a documented no-op and
+  `describe_policies` returns `contradiction: null` unconditionally, because
+  these two switches answer different questions. The component says so, so the
+  absence is not ambiguous.
+- **What is NOT editable is NAMED, not left to a range of B-numbers.** The
+  disclaimer is composed from the parameters rather than typed out: it listed
+  "the 55-day breakout, the 2× volume multiple, the 0.8 close-location floor …
+  and the five slots" as literal text until 2026-09-19, which made the one
+  sentence insisting those numbers live in the YAML the only place on the page
+  that restated them. Beside it, `alsoNotEditable` names the three things
+  somebody actually comes looking for and does not find: the exit itself, the
+  slot count and position size, and the stop.
 - **The Health tab is the only ADMIN-ONLY part of this page**, and its FIRST
   panel is "did the exit run" — before the clock, before the bars. Its second
   is "is the universe subscribed", because this is the only strategy whose
   decision needs live prices for ~289 instruments at one moment and it
   subscribes them for a window rather than all session. `Verdict` takes three
-  tones, not a boolean: off is not broken.
+  tones, not a boolean: off is not broken. Under those two it carries the money
+  ("can it size an entry?"), the scheduled-run list with each run's outcome,
+  the missed-session dates, the rules in force beside their shipped defaults,
+  and every open holding with WHEN ITS EXIT IS DUE — which is the health
+  question the Live tab's book does not answer.
 - **The stop watcher's ABSENCE is stated rather than left blank.** This
   strategy has no stop and none is possible, and a row reading "not running"
   would invite somebody to fix it.
+- **ONE POLL, with one deliberate exception.** The page polls at 10 s and the
+  health payload and the alert catalogue ride that same cadence; both are
+  admin-only and both failures are kept OFF the page's `error` state, so a
+  hiccup on an admin read cannot blank the Live tab. `BtstHealth` used to poll
+  on its own, which meant two clocks asking the same question at the same rate.
+  **The Signals tab is the exception and keeps its own fetch**, because
+  `/btst/signals` runs the whole filter funnel over the universe on every call:
+  putting it on the page's cadence would run a 500-symbol scan every ten
+  seconds for somebody reading the journal, which is the load the rule exists
+  to prevent. It is mounted with its tab, so it runs while somebody is looking
+  at it and not otherwise.
+- **Countdowns tick LOCALLY** off the absolute timestamps the server sends, so
+  a stalled poll shows as a clock running past a run that never happened.
 - **The tab is in the URL** (`?tab=signals`, `?tab=health`, …), so "read this
-  page" is a link somebody can send. `?tab=health` falls back to Live for a
-  `ROLE_USER`, which is presentation — the endpoint 403s them regardless.
+  page" is a link somebody can send. `?tab=health` and `?tab=alerts` fall back
+  to Live for a `ROLE_USER`, which is presentation — the endpoints 403 them
+  regardless.
 - **The page is NOT gated by the strategy toggle**, like `/swing`: a journal is
   history, and switching the strategy off must not hide the record of what it
   did.
+- **Known gap: the page is not usable at phone width**, and neither is any
+  other — the shell's navigation rail does not collapse below `md`, so the
+  content is squeezed into a narrow column. That is the shell's, not this
+  page's, and it is not fixed here.

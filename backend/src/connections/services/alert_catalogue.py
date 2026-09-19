@@ -64,6 +64,13 @@ EVENT_STALE_BARS = "stale-bars"
 EVENT_DEFERRED_STOPS = "deferred-stops"
 EVENT_BTST_EXIT_INCOMPLETE = "btst-exit-incomplete"
 EVENT_APP_STARTED = "app-started"
+# The two modules whose rules are not interchangeable. Spelled here rather than
+# beside each rule so there is one place to look when a third arrives -- and
+# spelled at all because these two rules describe machinery the OTHER strategy
+# does not have, which no amount of `strategy_scoped` can express.
+STRATEGY_SWING = "nse-swing-momentum"
+STRATEGY_BTST = "nse-btst-overnight"
+
 
 
 @dataclass(frozen=True)
@@ -89,6 +96,20 @@ class AlertRule:
     # strategy's page; the rest are process-wide and appear only on the system
     # page.
     strategy_scoped: bool = False
+    # WHICH strategies raise it, when only some do. `None` means every
+    # automated module can, which is true of a missed session, stale bars and
+    # the two trade rules.
+    #
+    # It exists because a second automated strategy arrived. Until 2026-09-19
+    # there was one, so "about a strategy" and "about the rotation" were the
+    # same statement and `strategy_scoped` alone was enough. With two, the
+    # unqualified list put "a triggered stop is waiting for the next open" on
+    # the page of a strategy whose specification says B15 is none and none is
+    # possible -- a page promising a message that cannot be sent -- and put the
+    # BTST exit rule on the rotation's, which has no overnight book to get
+    # stuck. A rule nobody will ever fire is worse than an absent one: it reads
+    # as cover somebody has and does not.
+    strategy_keys: Optional[Tuple[str, ...]] = None
     # How repeats are collapsed, so the page can say it rather than an operator
     # having to infer it from a count.
     collapsing: str = ""
@@ -325,6 +346,9 @@ RULES: Tuple[AlertRule, ...] = (
         kind=KIND_HEALTH,
         dedupe_prefix=_health(EVENT_DEFERRED_STOPS),
         strategy_scoped=True,
+        # THE ROTATION'S ONLY. BTST has no stop and none is possible, so this
+        # could never fire for it.
+        strategy_keys=(STRATEGY_SWING,),
         collapsing="One message per distinct set of waiting stops.",
     ),
     AlertRule(
@@ -349,6 +373,9 @@ RULES: Tuple[AlertRule, ...] = (
         kind=KIND_HEALTH,
         dedupe_prefix=_health(EVENT_BTST_EXIT_INCOMPLETE),
         strategy_scoped=True,
+        # BTST'S ONLY. The rotation holds for weeks and has no overnight book
+        # with a due exit to be stuck in.
+        strategy_keys=(STRATEGY_BTST,),
         collapsing=(
             "A CONDITION, so one message when a position gets stuck and "
             "silence while it stays stuck -- not one per pass."
@@ -481,7 +508,15 @@ def rules_for(strategy_key: Optional[str] = None) -> List[AlertRule]:
     """
     if strategy_key is None:
         return all_rules()
-    return [rule for rule in RULES if rule.strategy_scoped]
+    return [
+        rule
+        for rule in RULES
+        if rule.strategy_scoped
+        # A rule that names its modules appears only on theirs. One that names
+        # none is true of every automated strategy -- a missed session, stale
+        # bars and the two trade rules.
+        and (rule.strategy_keys is None or strategy_key in rule.strategy_keys)
+    ]
 
 
 def by_key(key: str) -> Optional[AlertRule]:

@@ -10,7 +10,6 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControlLabel,
   Paper,
   Stack,
   Switch,
@@ -45,7 +44,55 @@ import { strategiesApi } from '../api/strategies';
  * **The dialog shows the server's warnings BEFORE the confirm button.** A form
  * that offers an edit the server will refuse is worse than one that does not,
  * so each pending change asks for its warnings and its refusal first.
+ *
+ * **THERE IS DELIBERATELY NO `orderPolicyChanges` HERE, and this is checked
+ * rather than forgotten.** The rotation orders its changes because the server
+ * refuses one pair of them — `off_gate.enabled` together with a relaxed
+ * `regime.enforce` — so a valid Save applied in the wrong order fails half way
+ * with a message about a state nobody asked for. This strategy has no such
+ * pair: `btst_policy.validate_policy_change` accepts every combination (it is
+ * a documented no-op, not a missing hook) and `describe_policies` returns
+ * `contradiction: null` unconditionally, because these two switches answer
+ * different questions — WHEN to trade and WHAT to trade — and every
+ * combination of them is a strategy somebody could mean. So the changes are
+ * applied in the order they appear, and if a contradictory pair is ever added
+ * to this module, this is the comment that has to change with it.
  */
+/**
+ * One setting per row: what it is, what it means, its state, and the control.
+ *
+ * The same treatment the rotation's tab gives each switch, and the reason is
+ * that these rows are read far more often than they are changed — an operator
+ * comes here to find out what is in force, and a column of bare switches makes
+ * that the hardest thing on the page to see.
+ */
+function Row({ title, subtitle, chips, control }) {
+  return (
+    <Box>
+      <Stack
+        direction="row"
+        spacing={2}
+        alignItems="flex-start"
+        justifyContent="space-between"
+      >
+        <Box sx={{ flexGrow: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {title}
+            </Typography>
+            {chips}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            {subtitle}
+          </Typography>
+        </Box>
+        <Box sx={{ flexShrink: 0 }}>{control}</Box>
+      </Stack>
+      <Divider sx={{ mt: 1.5 }} />
+    </Box>
+  );
+}
+
 export default function BtstConfiguration({ strategyKey, isAdmin }) {
   const [payload, setPayload] = useState(null);
   const [draft, setDraft] = useState({});
@@ -181,30 +228,37 @@ export default function BtstConfiguration({ strategyKey, isAdmin }) {
           {policies.map((one) => {
             const key = `policy:${one.key}`;
             const value = key in draft ? draft[key] : one.enforced;
+            const changed = key in draft;
             return (
-              <Box key={one.key}>
-                <FormControlLabel
-                  disabled={!isAdmin}
-                  control={
-                    <Switch
-                      checked={Boolean(value)}
-                      onChange={(event) => edit(key, event.target.checked, one.enforced)}
+              <Row
+                key={one.key}
+                title={one.label}
+                subtitle={`${one.description} Shipped default: ${
+                  one.default ? one.onLabel : one.offLabel
+                }.`}
+                chips={
+                  <>
+                    <Chip
+                      size="small"
+                      label={value ? one.onLabel : one.offLabel}
+                      color={value ? 'default' : 'warning'}
                     />
-                  }
-                  label={
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <span>{one.label}</span>
-                      <Chip size="small" label={value ? one.onLabel : one.offLabel} />
-                      {one.overridden ? (
-                        <Chip size="small" variant="outlined" label="overridden" />
-                      ) : null}
-                    </Stack>
-                  }
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', ml: 6 }}>
-                  {one.description} Shipped default: {one.default ? one.onLabel : one.offLabel}.
-                </Typography>
-              </Box>
+                    {one.overridden ? (
+                      <Chip size="small" variant="outlined" label="overridden" />
+                    ) : null}
+                    {changed ? (
+                      <Chip size="small" color="info" label="unsaved" />
+                    ) : null}
+                  </>
+                }
+                control={
+                  <Switch
+                    disabled={!isAdmin}
+                    checked={Boolean(value)}
+                    onChange={(event) => edit(key, event.target.checked, one.enforced)}
+                  />
+                }
+              />
             );
           })}
         </Stack>
@@ -221,36 +275,52 @@ export default function BtstConfiguration({ strategyKey, isAdmin }) {
           {settings.map((one) => {
             const key = `setting:${one.key}`;
             const value = key in draft ? draft[key] : one.value;
+            const changed = key in draft;
             return (
-              <Box key={one.key}>
-                <TextField
-                  size="small"
-                  label={one.label}
-                  value={value || ''}
-                  disabled={!isAdmin}
-                  onChange={(event) => edit(key, event.target.value, one.value)}
-                  sx={{ width: 160 }}
-                  inputProps={{ placeholder: 'HH:MM' }}
-                />
-                {one.overridden ? (
-                  <Chip size="small" variant="outlined" label="overridden" sx={{ ml: 1 }} />
-                ) : null}
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  {one.description}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                  Allowed: {one.allowed} Shipped default: {one.default}.
-                </Typography>
-              </Box>
+              <Row
+                key={one.key}
+                title={one.label}
+                subtitle={`${one.description} Allowed: ${one.allowed} Shipped default: ${one.default}.`}
+                chips={
+                  <>
+                    {one.overridden ? (
+                      <Chip size="small" variant="outlined" label="overridden" />
+                    ) : null}
+                    {changed ? <Chip size="small" color="info" label="unsaved" /> : null}
+                  </>
+                }
+                control={
+                  <TextField
+                    size="small"
+                    value={value || ''}
+                    disabled={!isAdmin}
+                    onChange={(event) => edit(key, event.target.value, one.value)}
+                    sx={{ width: 120 }}
+                    inputProps={{ placeholder: 'HH:MM' }}
+                  />
+                }
+              />
             );
           })}
         </Stack>
       </Paper>
 
       {/* What is NOT editable here, and why — sent by the server rather than
-          composed by the page, so the sentence cannot drift from the rule. */}
+          composed by the page, so the sentence cannot drift from the rule.
+          The second list names the specific things somebody comes to this tab
+          looking for and does not find, rather than leaving them to work it
+          out from a range of B-numbers. */}
       <Alert severity="info" icon={<InfoOutlinedIcon />}>
-        {payload?.notEditable}
+        <Typography variant="body2">{payload?.notEditable}</Typography>
+        {(payload?.alsoNotEditable || []).length ? (
+          <Stack spacing={0.75} sx={{ mt: 1.5 }}>
+            {payload.alsoNotEditable.map((one, index) => (
+              <Typography key={index} variant="caption" sx={{ display: 'block' }}>
+                • {one}
+              </Typography>
+            ))}
+          </Stack>
+        ) : null}
       </Alert>
 
       {isAdmin ? (

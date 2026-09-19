@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Box,
@@ -14,12 +13,14 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useTheme } from '@mui/material/styles';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
-import { btstApi } from '../api/btst';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import { formatPrice } from '../utils/format';
 
 /**
  * Is this strategy healthy, and DID THE EXIT RUN?
@@ -40,31 +41,23 @@ import { btstApi } from '../api/btst';
  * chose. Red is reserved for something that should be running and is not.
  */
 
-const POLL_MS = 10000;
+/** The stored run kind in the words the page uses, the same translation the
+ *  page itself makes. The DATABASE keeps SCAN and EXIT; renaming stored values
+ *  would rewrite history, so the translation lives at the edge. */
+const RUN_LABELS = {
+  SCAN: 'Afternoon scan',
+  EXIT: 'Morning exit',
+  MANUAL: 'Manual run',
+};
 
-export default function BtstHealth({ strategyKey, portfolioId }) {
-  const [payload, setPayload] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+export default function BtstHealth({ health: payload, error }) {
+  // NO POLL OF ITS OWN. The page already polls at 10 s and fetches this on the
+  // same cadence, because a page that reports on load must not be a load
+  // source. Its failure arrives here as `error` and is kept off the page's own
+  // error state, so a hiccup on this admin-only read cannot blank the Live tab.
+  if (error) return <Alert severity="error">{error}</Alert>;
 
-  const load = useCallback(async () => {
-    try {
-      setPayload(await btstApi.health(strategyKey, portfolioId));
-      setError(null);
-    } catch (caught) {
-      setError(caught.message || 'Could not read the health payload');
-    } finally {
-      setLoading(false);
-    }
-  }, [strategyKey, portfolioId]);
-
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, POLL_MS);
-    return () => clearInterval(timer);
-  }, [load]);
-
-  if (loading && !payload) {
+  if (!payload) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
         <CircularProgress />
@@ -72,12 +65,13 @@ export default function BtstHealth({ strategyKey, portfolioId }) {
     );
   }
 
-  if (error) return <Alert severity="error">{error}</Alert>;
-
   const exit = payload?.exit || {};
   const working = payload?.working || {};
   const feed = payload?.feed || {};
   const data = payload?.data || {};
+  const money = payload?.money || {};
+  const schedule = payload?.schedule || {};
+  const rules = payload?.rules || {};
 
   return (
     <Stack spacing={2}>
@@ -95,7 +89,12 @@ export default function BtstHealth({ strategyKey, portfolioId }) {
           <Figure label="Failed, ever" value={exit.failedEver} bad={exit.failedEver > 0} />
           <Figure label="Exit time" value={`${exit.exitAtIst} IST`} />
         </Stack>
-        {exit.overdue?.length ? (
+        {/* EVERY open position with when its exit is due — not only the
+            overdue ones. The Live tab's book says what is held and why it was
+            bought; this says whether each is still inside the window it is
+            meant to leave in, which is the only question this tab exists to
+            answer. */}
+        {exit.holdings?.length ? (
           <TableContainer sx={{ mt: 1.5 }}>
             <Table size="small">
               <TableHead>
@@ -103,21 +102,34 @@ export default function BtstHealth({ strategyKey, portfolioId }) {
                   <TableCell>Symbol</TableCell>
                   <TableCell align="right">Qty</TableCell>
                   <TableCell>Entered</TableCell>
-                  <TableCell>Why it is still held</TableCell>
+                  <TableCell>Due out</TableCell>
+                  <TableCell>State</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {exit.overdue.map((one) => (
-                  <TableRow key={one.symbol}>
+                {exit.holdings.map((one) => (
+                  <TableRow key={`${one.symbol}-${one.entrySessionDate}`}>
                     <TableCell>{one.symbol}</TableCell>
                     <TableCell align="right" className="numeric">
                       {one.quantity}
                     </TableCell>
                     <TableCell>{one.entrySessionDate}</TableCell>
+                    <TableCell className="numeric">
+                      {new Date(one.dueAtIst).toLocaleString()}
+                    </TableCell>
                     <TableCell>
-                      <Typography variant="caption">
-                        {one.exitReason || one.exitStatus}
-                      </Typography>
+                      {one.overdue ? (
+                        <Stack spacing={0.25}>
+                          <Chip size="small" color="error" label={`${one.minutesLate} min late`} />
+                          <Typography variant="caption">
+                            {one.exitReason || one.exitStatus}
+                          </Typography>
+                        </Stack>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">
+                          held, not yet due
+                        </Typography>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -212,6 +224,188 @@ export default function BtstHealth({ strategyKey, portfolioId }) {
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
           {data.note}
         </Typography>
+      </Paper>
+
+      {/* CAN IT AFFORD TO TRADE? B12 sizes every entry as total equity over
+          the slot count, and the funds check runs again at the fill — so a
+          withheld equity figure means the next scan buys nothing, which is
+          worth knowing at 15:19 rather than at 15:21. */}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Verdict tone={money.tone} title="Can it size an entry?" text={money.verdict} />
+        {money.balance ? (
+          <Stack direction="row" spacing={3} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
+            <Figure label="Cash" value={formatPrice(money.balance.cash)} />
+            <Figure
+              label="Blocked margin (estimate)"
+              value={formatPrice(money.balance.blockedMargin)}
+            />
+            <Figure label="Available" value={formatPrice(money.balance.available)} />
+            <Figure
+              label="Equity"
+              value={
+                money.balance.equity === null || money.balance.equity === undefined
+                  ? 'no mark'
+                  : formatPrice(money.balance.equity)
+              }
+              bad={money.balance.equity === null || money.balance.equity === undefined}
+            />
+            <Figure label="Slots" value={money.slots} />
+          </Stack>
+        ) : null}
+        {money.note ? (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            {money.note}
+          </Typography>
+        ) : null}
+      </Paper>
+
+      {/* WHAT IT HAS ACTUALLY RUN. Two lists, because they answer different
+          questions: the scheduler's is what THIS PROCESS has done and is empty
+          after a restart, and the missed list is holes in the journal, which
+          is not. */}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+          Recent scheduled runs
+        </Typography>
+        {(schedule.recent || []).length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            This process has run no scheduled job for this strategy since it
+            started. That is not the same as none having happened — the decision
+            history on the Live tab is the durable record.
+          </Typography>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>When</TableCell>
+                  <TableCell>Run</TableCell>
+                  <TableCell>Outcome</TableCell>
+                  <TableCell>Detail</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(schedule.recent || []).slice(0, 20).map((one, index) => (
+                  <TableRow key={`${one.atIst}-${index}`}>
+                    <TableCell className="numeric">
+                      {new Date(one.atIst).toLocaleString()}
+                    </TableCell>
+                    <TableCell>{RUN_LABELS[one.kind] || one.kind}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={one.ok ? 'ok' : 'FAILED'}
+                        color={one.ok ? 'default' : 'error'}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption">{one.detail || '—'}</Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+
+        {(schedule.missedRuns || []).length ? (
+          <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mt: 1.5 }}>
+            <Stack spacing={0.5}>
+              {schedule.missedRuns.map((entry) => (
+                <Typography key={entry.kind} variant="body2">
+                  <strong>{RUN_LABELS[entry.kind] || entry.kind}</strong>:{' '}
+                  {entry.count} session(s) with no record —{' '}
+                  <span className="numeric">{(entry.sessions || []).join(', ')}</span>
+                </Typography>
+              ))}
+              <Typography variant="caption">
+                Reported, never silently re-decided later. A missed SCAN costs
+                that session's signals; a missed EXIT is the one that costs the
+                thesis.
+              </Typography>
+            </Stack>
+          </Alert>
+        ) : null}
+
+        {schedule.note ? (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            {schedule.note}
+          </Typography>
+        ) : null}
+      </Paper>
+
+      {/* WHICH RULES ARE IN FORCE, and which times. Both carry the shipped
+          default beside the value actually in use, so a switch somebody moved
+          is visible as a move rather than as the way it has always been. */}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+          The rules it is running under
+        </Typography>
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Rule</TableCell>
+                <TableCell>Shipped</TableCell>
+                <TableCell>In force</TableCell>
+                <TableCell>Moved?</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {(rules.policies || []).map((one) => (
+                <TableRow key={one.key}>
+                  <TableCell>
+                    <Tooltip title={one.description || ''}>
+                      <span>{one.label}</span>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary">
+                      {one.default ? one.onLabel : one.offLabel}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={one.enforced ? one.onLabel : one.offLabel}
+                      color={one.enforced ? 'default' : 'warning'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary">
+                      {one.overridden ? 'yes' : 'no'}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {(rules.settings || []).map((one) => (
+                <TableRow key={one.key}>
+                  <TableCell>
+                    <Tooltip title={one.description || ''}>
+                      <span>{one.label}</span>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary" className="numeric">
+                      {one.default}
+                    </Typography>
+                  </TableCell>
+                  <TableCell className="numeric">{one.value}</TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary">
+                      {one.overridden ? 'yes' : 'no'}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        {rules.note ? (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            {rules.note}
+          </Typography>
+        ) : null}
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 2 }}>

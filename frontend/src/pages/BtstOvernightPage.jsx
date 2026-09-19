@@ -27,6 +27,9 @@ import { useTheme } from '@mui/material/styles';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { btstApi } from '../api/btst';
+import { connectionsApi } from '../api/connections';
+import AlertsPanel from '../components/AlertsPanel';
+import JobProgress from '../components/JobProgress';
 import BtstConfiguration from '../components/BtstConfiguration';
 import BtstFunnel from '../components/BtstFunnel';
 import BtstExplainer from '../components/BtstExplainer';
@@ -95,18 +98,28 @@ const TABS = [
   { key: 'signals', label: 'Signals' },
   { key: 'configuration', label: 'Configuration' },
   { key: 'health', label: 'Health', adminOnly: true },
+  { key: 'alerts', label: 'Alerts', adminOnly: true },
   { key: 'how-it-works', label: 'How it works' },
 ];
 
 export default function BtstOvernightPage() {
   const theme = useTheme();
   const { isAdmin } = useAuth();
-  const { activePortfolioId } = useActivePortfolio();
+  // `activeId`, which is what the context actually provides. It was read as
+  // `activePortfolioId` until 2026-09-19 — a name nothing exports — so every
+  // request from this page went out with no portfolio at all: no balance, the
+  // whole strategy's holdings rather than this book's, and the two run buttons
+  // posting an undefined id. This page is the only place that name appeared.
+  const { activeId: portfolioId } = useActivePortfolio();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [status, setStatus] = useState(null);
   const [history, setHistory] = useState(null);
   const [performance, setPerformance] = useState(null);
+  const [health, setHealth] = useState(null);
+  const [healthError, setHealthError] = useState(null);
+  const [catalogue, setCatalogue] = useState(null);
+  const [catalogueError, setCatalogueError] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -125,7 +138,7 @@ export default function BtstOvernightPage() {
   const load = useCallback(async () => {
     try {
       const [nextStatus, nextHistory, nextPerformance] = await Promise.all([
-        btstApi.status(STRATEGY, activePortfolioId),
+        btstApi.status(STRATEGY, portfolioId),
         btstApi.history(STRATEGY, 30),
         btstApi.performance(STRATEGY),
       ]);
@@ -138,7 +151,32 @@ export default function BtstOvernightPage() {
     } finally {
       setLoading(false);
     }
-  }, [activePortfolioId]);
+
+    // On the SAME cadence, not a second loop: a page that reports on load must
+    // not be a load source. Both are admin-only and BOTH failures are kept off
+    // `error`, so a 403 or a hiccup on an admin read cannot blank the Live tab
+    // beside it. This is the rotation's arrangement (frontend/CLAUDE.md §5d);
+    // the Health tab used to poll on its own, which meant two clocks asking
+    // the same question at the same rate.
+    if (!isAdmin) return;
+    try {
+      setHealth(await btstApi.health(STRATEGY, portfolioId));
+      setHealthError(null);
+    } catch (problem) {
+      setHealthError(problem.message);
+    }
+
+    // The alert catalogue, filtered to THIS strategy. `btst-exit-incomplete`
+    // is `strategy_scoped`, so it appears here and NOT on the system health
+    // page — the server filters on `alerts.strategy_key` and two pages showing
+    // one rule would disagree the moment either changed (§4a).
+    try {
+      setCatalogue(await connectionsApi.catalogue(STRATEGY));
+      setCatalogueError(null);
+    } catch (problem) {
+      setCatalogueError(problem.message);
+    }
+  }, [portfolioId, isAdmin]);
 
   useEffect(() => {
     load();
@@ -150,7 +188,7 @@ export default function BtstOvernightPage() {
     setBusy(true);
     setNotice(null);
     try {
-      const result = await btstApi.runScan(STRATEGY, activePortfolioId, {
+      const result = await btstApi.runScan(STRATEGY, portfolioId, {
         placeOrders,
       });
       const run = (result.runs || [])[0];
@@ -167,7 +205,7 @@ export default function BtstOvernightPage() {
     setBusy(true);
     setNotice(null);
     try {
-      const result = await btstApi.runExit(STRATEGY, activePortfolioId);
+      const result = await btstApi.runExit(STRATEGY, portfolioId);
       const run = (result.runs || [])[0];
       setNotice(run?.message || 'The exit ran.');
       await load();
@@ -197,9 +235,11 @@ export default function BtstOvernightPage() {
       >
         <Box>
           <Typography variant="h5">{status?.label || 'BTST Overnight'}</Typography>
+          {/* The strategy's own one-liner, from its YAML by way of the
+              payload. The fallback is only for the first paint. */}
           <Typography variant="body2" color="text.secondary">
-            Buy today, sell tomorrow. The edge is the overnight gap and nothing
-            else.
+            {status?.description ||
+              'Buy today, sell tomorrow. The edge is the overnight gap and nothing else.'}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
@@ -260,16 +300,35 @@ export default function BtstOvernightPage() {
           onExit={runExit}
         />
       ) : null}
+      {/* The one read that does NOT ride the page's poll, and deliberately.
+          `/btst/signals` runs the whole filter funnel over the universe on
+          every call; putting it on the page's cadence would run it every ten
+          seconds for somebody reading the journal, which is precisely the load
+          the one-poll rule exists to prevent. It is mounted with the tab, so
+          it runs while somebody is looking at it and not otherwise. */}
       {tab === 'signals' ? (
-        <BtstSignals strategyKey={STRATEGY} portfolioId={activePortfolioId} />
+        <BtstSignals strategyKey={STRATEGY} portfolioId={portfolioId} />
       ) : null}
       {tab === 'configuration' ? (
         <BtstConfiguration strategyKey={STRATEGY} isAdmin={isAdmin} />
       ) : null}
       {tab === 'health' && isAdmin ? (
-        <BtstHealth strategyKey={STRATEGY} portfolioId={activePortfolioId} />
+        <BtstHealth health={health} error={healthError} />
       ) : null}
-      {tab === 'how-it-works' ? <BtstExplainer strategyKey={STRATEGY} /> : null}
+      {/* The rules THIS strategy will tell somebody about — including
+          `btst-exit-incomplete`, which guards the thing §10.1 says IS the
+          strategy. Process-wide rules stay on the system health page. */}
+      {tab === 'alerts' && isAdmin ? (
+        <AlertsPanel
+          catalogue={catalogue}
+          error={catalogueError}
+          loading={loading}
+          strategyKey={STRATEGY}
+        />
+      ) : null}
+      {tab === 'how-it-works' ? (
+        <BtstExplainer strategyKey={STRATEGY} status={status} />
+      ) : null}
     </Box>
   );
 }
@@ -308,6 +367,9 @@ function LiveTab({ status, history, performance, theme, isAdmin, busy, onScan, o
           win rate against 71.4%.
         </Alert>
       ) : null}
+
+      {/* WHAT IT IS DOING NOW, above what it decided. */}
+      <ActivityStrip status={status} theme={theme} />
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Grid container spacing={2}>
@@ -352,7 +414,7 @@ function LiveTab({ status, history, performance, theme, isAdmin, busy, onScan, o
         ) : null}
 
         {isAdmin ? (
-          <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+          <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
             <Button
               size="small"
               variant="outlined"
@@ -372,10 +434,323 @@ function LiveTab({ status, history, performance, theme, isAdmin, busy, onScan, o
         ) : null}
       </Paper>
 
+      {/* Four figures, never one (§3). This strategy deploys about a third of
+          the book in a single afternoon pass, so the money belongs on the tab
+          that says what it is about to do. */}
+      <MoneyCard balance={status?.balance} />
+
       <HoldingsCard holdings={holdings} theme={theme} />
       <PerformanceCard performance={performance} />
+
+      {/* ONE LINE about the exit timing, linking to the table rather than
+          repeating it. §9.4's decay table is on "How it works" in full. */}
+      {status?.exitTimingNote ? (
+        <Alert severity="info" icon={<InfoOutlinedIcon />}>
+          {status.exitTimingNote}{' '}
+          <MuiLink component={RouterLink} to="/btst?tab=how-it-works">
+            The year-by-year decay is on “How it works”.
+          </MuiLink>
+        </Alert>
+      ) : null}
+
       <HistoryCard history={history} />
     </Stack>
+  );
+}
+
+/**
+ * WHAT IT IS DOING THIS SECOND — not what it decided.
+ *
+ * The rotation's equivalent reads its row out of the scheduler's own
+ * `schedules` list; this strategy is not in that list at all (the rows are
+ * built from `SwingParameters`, which this module's YAML cannot satisfy), so
+ * the server composes a BTST-shaped view instead and this renders it.
+ *
+ * Every countdown ticks LOCALLY off an absolute timestamp, so a stalled poll
+ * shows up as a clock running past a run that never happened rather than as a
+ * number frozen at something plausible.
+ */
+function ActivityStrip({ status, theme }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!status) {
+    return (
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <CircularProgress size={16} />
+          <Typography variant="body2" color="text.secondary">
+            Reading what the strategy is doing…
+          </Typography>
+        </Stack>
+      </Paper>
+    );
+  }
+
+  const scheduler = status.scheduler || {};
+  const window = status.subscriptionWindow;
+  const last = (scheduler.recent || [])[0];
+  const missed = scheduler.missedRunCount ?? 0;
+  const notEnforced = (status.policies || []).filter((one) => !one.enforced);
+
+  // Three states, not two: a scheduler that is not running, one that is idle,
+  // and one that is mid-job each read differently.
+  const activity =
+    scheduler.running === false
+      ? 'the clock is not running'
+      : scheduler.activity || 'idle — waiting for the next scheduled run';
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Stack
+        direction="row"
+        spacing={2}
+        alignItems="center"
+        justifyContent="space-between"
+        flexWrap="wrap"
+        useFlexGap
+      >
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+          <Chip
+            size="small"
+            label={status.market?.open ? 'market OPEN' : 'market closed'}
+            sx={{
+              bgcolor: status.market?.open ? theme.market.upSoft : 'action.selected',
+              color: status.market?.open ? theme.market.up : 'text.secondary',
+              fontWeight: 600,
+            }}
+          />
+          <Typography variant="body2" className="numeric" color="text.secondary">
+            {scheduler.nowIst
+              ? `${new Date(scheduler.nowIst).toLocaleTimeString()} IST`
+              : 'clock unavailable'}
+          </Typography>
+          {window ? (
+            <Tooltip title={window.note || ''}>
+              <Chip
+                size="small"
+                variant="outlined"
+                label={
+                  window.open
+                    ? `universe on the feed (${window.universeSize ?? '?'})`
+                    : `universe joins at ${window.opensAtIst}`
+                }
+              />
+            </Tooltip>
+          ) : null}
+        </Stack>
+
+        <Stack direction="row" spacing={1} alignItems="center">
+          {scheduler.activity && !scheduler.progress ? (
+            <CircularProgress size={14} />
+          ) : null}
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            {activity}
+          </Typography>
+        </Stack>
+      </Stack>
+
+      {/* A long job, where somebody watching the strategy is already looking.
+          It is NOT this strategy's own work — nothing here has a long job —
+          so the server sends the sentence saying whose it is, and the bar is
+          rendered under it rather than unattributed. */}
+      {scheduler.progress ? (
+        <Box sx={{ mt: 1 }}>
+          <JobProgress progress={scheduler.progress} compact />
+          {scheduler.progressNote ? (
+            <Typography variant="caption" color="text.secondary">
+              {scheduler.progressNote}
+            </Typography>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {!status.enabled ? (
+        <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mt: 2 }}>
+          Switched OFF. Nothing is scanned, nothing is journalled and the
+          universe does not join the feed. The record below is unchanged, and an
+          open position can still be closed.
+        </Alert>
+      ) : !status.armed ? (
+        <Alert severity="info" icon={<InfoOutlinedIcon />} sx={{ mt: 2 }}>
+          AUTO TRADE IS OFF. It will scan, decide and write the identical
+          decision record at 15:20, and it will place no order at all — which is
+          what makes arming a safeguard rather than a mode.
+        </Alert>
+      ) : null}
+
+      {/* A gate that looks ON must never be shown while nothing obeys it. */}
+      {notEnforced.length ? (
+        <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mt: 2 }}>
+          {notEnforced.length} rule
+          {notEnforced.length === 1 ? ' is' : 's are'} NOT ENFORCED:{' '}
+          {notEnforced.map((one) => one.label).join(', ')}. It is still computed
+          and recorded on every decision, which is what makes its cost
+          measurable afterwards.{' '}
+          <MuiLink component={RouterLink} to="/btst?tab=configuration">
+            Change it on the Configuration tab.
+          </MuiLink>
+        </Alert>
+      ) : null}
+
+      <Divider sx={{ my: 2 }} />
+
+      <Grid container spacing={2}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Metric
+            label="Next scan"
+            value={<Countdown iso={status.schedule?.nextScanIst} prefix="in " />}
+            hint={`${status.schedule?.scanAtIst} IST — reads the session so far, decides and buys, in one pass`}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Metric
+            label="Next exit"
+            value={<Countdown iso={status.schedule?.nextExitIst} prefix="in " />}
+            hint={`${status.schedule?.exitAtIst} IST — sells everything held, unconditionally`}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Metric
+            label="What it last did"
+            value={
+              last ? `${(RUN_LABELS[last.kind] || last.kind).toLowerCase()} ${last.ok ? 'ok' : 'FAILED'}` : 'none this process'
+            }
+            hint={
+              last
+                ? `${new Date(last.atIst).toLocaleString()} — ${last.detail || 'no detail'}`
+                : scheduler.runListNote
+            }
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Metric
+            label="Missed runs"
+            value={missed}
+            hint="Sessions with no record. Reported, never silently re-decided later on bars that may since have been restated."
+          />
+        </Grid>
+      </Grid>
+
+      {missed > 0 ? (
+        <Alert severity="warning" sx={{ mt: 2 }} icon={<WarningAmberIcon />}>
+          {missed} session{missed === 1 ? '' : 's'} with no record. A missed
+          SCAN costs that session's signals; a missed EXIT is the one that
+          costs the thesis.{' '}
+          <MuiLink component={RouterLink} to="/btst?tab=health">
+            The dates are on the Health tab.
+          </MuiLink>
+        </Alert>
+      ) : null}
+
+      {scheduler.error ? (
+        <Typography variant="caption" color="error.main" sx={{ mt: 1, display: 'block' }}>
+          clock error: {scheduler.error}
+        </Typography>
+      ) : null}
+
+      {/* The closing auction, which this strategy needs stated more than the
+          rotation does: its scan is INSIDE the window. Composed by the server
+          from the two configured times rather than asserted here. */}
+      {status.closingAuction?.note ? (
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
+          {status.closingAuction.note}
+        </Typography>
+      ) : null}
+
+      {scheduler.clockNote ? (
+        <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: 'block' }}>
+          {scheduler.clockNote}
+        </Typography>
+      ) : null}
+    </Paper>
+  );
+}
+
+/**
+ * The portfolio's four figures.
+ *
+ * Never one: collapsing them is what makes a position's effect invisible, and
+ * blocked margin always says "estimate" because it is a configured
+ * approximation rather than what a broker would hold. An equity figure
+ * `BalanceService` withheld says so and names who is responsible, rather than
+ * valuing an unmarked position at zero.
+ */
+function MoneyCard({ balance }) {
+  if (!balance) {
+    return (
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
+          The book
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          No portfolio is in scope, so there is no money to show. Pick one in
+          the header — this strategy sizes every entry against total equity.
+        </Typography>
+      </Paper>
+    );
+  }
+
+  const withheld = balance.equity === null || balance.equity === undefined;
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Typography variant="subtitle1" sx={{ mb: 1 }}>
+        The book
+      </Typography>
+      <Grid container spacing={2}>
+        <Grid item xs={6} md={3}>
+          <Metric label="Cash" value={formatPrice(balance.cash)} />
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Metric
+            label="Blocked margin"
+            value={formatPrice(balance.blockedMargin)}
+            hint="An estimate from a configured model, never what a broker would hold."
+          />
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Metric
+            label="Available"
+            value={formatPrice(balance.available)}
+            hint="What an entry is checked against — at placement AND again at the fill."
+          />
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Metric
+            label="Equity"
+            value={
+              withheld ? (
+                <Typography variant="body2" color="text.disabled">
+                  no mark
+                </Typography>
+              ) : (
+                formatPrice(balance.equity)
+              )
+            }
+            hint="B12 sizes each entry as total equity divided by the slot count."
+          />
+        </Grid>
+      </Grid>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+        Blocked margin is an estimate.
+        {balance.unmarkedPositions
+          ? ` ${balance.unmarkedPositions} open position(s) have no live mark${
+              (balance.unmarkedStrategies || []).length
+                ? ` (${balance.unmarkedStrategies.join(', ')})`
+                : ''
+            }, so equity is withheld rather than shown with them valued at zero.`
+          : ''}
+      </Typography>
+      {withheld ? (
+        <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mt: 1.5 }}>
+          Equity cannot be computed, so the next scan would size nothing and say
+          why. B12 divides total equity by the slot count.
+        </Alert>
+      ) : null}
+    </Paper>
   );
 }
 
@@ -399,7 +774,7 @@ function Metric({ label, value, hint }) {
 
 /** Ticks LOCALLY off the absolute timestamp the server sent, rather than
  *  re-fetching every second. A countdown that cannot be computed says so. */
-function Countdown({ iso }) {
+function Countdown({ iso, prefix = '' }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -408,7 +783,7 @@ function Countdown({ iso }) {
   if (!iso) return 'not scheduled';
   const seconds = Math.round((new Date(iso).getTime() - now) / 1000);
   if (Number.isNaN(seconds)) return 'unknown';
-  return formatCountdownLong(seconds);
+  return `${prefix}${formatCountdownLong(seconds)}`;
 }
 
 function HoldingsCard({ holdings, theme }) {
@@ -417,6 +792,11 @@ function HoldingsCard({ holdings, theme }) {
       <Typography variant="subtitle1" sx={{ mb: 1 }}>
         Held overnight
       </Typography>
+      {/* No separate ranking table, deliberately. The rotation has one because
+          it holds ten names for weeks and the rank is what decides which; this
+          holds up to five for eighteen hours, the Signals tab IS the ranking,
+          and what is worth knowing about a position already open is the
+          measurement that qualified it — which is on this row. */}
       {holdings.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
           Nothing is held. At about half a signal a session this is the ordinary
@@ -431,6 +811,7 @@ function HoldingsCard({ holdings, theme }) {
                 <TableCell align="right">Qty</TableCell>
                 <TableCell align="right">Entry</TableCell>
                 <TableCell>Entered</TableCell>
+                <TableCell>Why it was bought</TableCell>
                 <TableCell>State</TableCell>
                 <TableCell align="right">Overnight gap</TableCell>
               </TableRow>
@@ -446,6 +827,41 @@ function HoldingsCard({ holdings, theme }) {
                     {formatPrice(one.entryPrice)}
                   </TableCell>
                   <TableCell>{one.entrySessionDate}</TableCell>
+                  <TableCell sx={{ maxWidth: 320 }}>
+                    {/* Null is not "no reason": a position entered by hand, or
+                        one whose order id was never recorded, has no decision
+                        row to explain it, and that reads differently. */}
+                    {one.entry ? (
+                      <Stack spacing={0.25}>
+                        <Typography variant="caption">
+                          {one.entry.reason}
+                        </Typography>
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                          {one.entry.rank !== null && one.entry.rank !== undefined ? (
+                            <Chip size="small" variant="outlined" label={`rank ${one.entry.rank}`} />
+                          ) : null}
+                          {one.entry.volRatio !== null && one.entry.volRatio !== undefined ? (
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={`${Number(one.entry.volRatio).toFixed(1)}× volume`}
+                            />
+                          ) : null}
+                          {one.entry.clv !== null && one.entry.clv !== undefined ? (
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={`CLV ${Number(one.entry.clv).toFixed(2)}`}
+                            />
+                          ) : null}
+                        </Stack>
+                      </Stack>
+                    ) : (
+                      <Typography variant="caption" color="text.disabled">
+                        no decision record for this entry
+                      </Typography>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       size="small"

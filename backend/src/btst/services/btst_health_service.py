@@ -98,6 +98,7 @@ class BtstHealthService:
             "feed": self._feed(),
             "schedule": self._schedule(),
             "data": await self._data(),
+            "money": await self._money(portfolio_id),
             "rules": self._rules(),
             "problems": self._problems(),
             "notes": [
@@ -134,12 +135,34 @@ class BtstHealthService:
         last_exit = await sessions.latest(self.definition.key, RUN_EXIT)
 
         overdue = []
+        # Every open position with WHEN ITS EXIT IS DUE, which is the health
+        # question the Live tab's book does not answer: that one says what is
+        # held and why it was bought, this one says whether each is still
+        # inside the window it is supposed to leave in. The due moment is
+        # computed here once and sent absolute, so the tab can say "in 40
+        # minutes" without a second opinion about the calendar.
+        rows = []
         for holding in open_holdings:
             due_at = schedule.exit_alarm_at(
                 holding.entry_session_date + timedelta(days=1)
             ).replace(tzinfo=now.tzinfo)
-            if now > due_at:
+            late = now > due_at
+            if late:
                 overdue.append(holding)
+            rows.append(
+                {
+                    "symbol": holding.symbol,
+                    "quantity": holding.quantity,
+                    "entrySessionDate": holding.entry_session_date.isoformat(),
+                    "exitStatus": holding.exit_status,
+                    "exitReason": holding.exit_reason,
+                    "dueAtIst": due_at.isoformat(),
+                    "overdue": late,
+                    "minutesLate": (
+                        int((now - due_at).total_seconds() // 60) if late else None
+                    ),
+                }
+            )
 
         if overdue:
             tone = "bad"
@@ -167,6 +190,7 @@ class BtstHealthService:
             "verdict": verdict,
             "openCount": len(open_holdings),
             "overdueCount": len(overdue),
+            "holdings": rows,
             "overdue": [
                 {
                     "symbol": one.symbol,
@@ -403,6 +427,73 @@ class BtstHealthService:
                 "the 55-day high, both 20-day averages, the 200-day SMA and the "
                 "six-month momentum. They are shared with the swing rotation, "
                 "whose nightly job refreshes them."
+            ),
+        }
+
+    # --- can it afford to trade tomorrow? -----------------------------------
+    async def _money(self, portfolio_id: Optional[int]) -> Dict[str, Any]:
+        """The four figures, and what this strategy would deploy against them.
+
+        A health question rather than a decoration: B12 sizes each position at
+        total equity divided by the slot count, and the funds check happens
+        again at the fill, so a book whose equity cannot be computed buys
+        nothing and a book without the cash buys less than it decided to. Both
+        are worth knowing at 15:19 rather than at 15:21.
+
+        `BalanceService` is the only place cash, blocked margin, available and
+        equity are computed (root `CLAUDE.md` section 3a); this reads it and
+        adds nothing of its own.
+        """
+        if portfolio_id is None:
+            return {
+                "tone": "off",
+                "verdict": (
+                    "No portfolio is in scope, so there is no book to report "
+                    "on. Pick one in the header."
+                ),
+                "balance": None,
+                "slots": self.parameters.slots,
+                "positionSizeDivisor": self.parameters.position_size_divisor,
+                "note": None,
+            }
+
+        from src.portfolios.services.balance_service import BalanceService
+
+        balance = (await BalanceService(self.session).balance_for(portfolio_id)).as_dict()
+        withheld = balance.get("equity") is None
+        return {
+            # Withheld equity is not a fault of this strategy's -- it means a
+            # position somewhere in the book has no live mark -- but it DOES
+            # stop this strategy sizing an entry, so it is reported as
+            # something to look at rather than as normal.
+            "tone": "bad" if withheld else "ok",
+            "verdict": (
+                (
+                    "Equity cannot be computed: "
+                    + (
+                        ", ".join(balance.get("unmarkedStrategies") or [])
+                        or "an open position"
+                    )
+                    + " has no live mark. B12 sizes every entry as total equity "
+                    "divided by the slot count, so the next scan would buy "
+                    "nothing and say why."
+                )
+                if withheld
+                else (
+                    f"Equity {balance['equity']}, of which {balance['available']} "
+                    f"is available. B12 would size each of "
+                    f"{self.parameters.slots} slot(s) at equity divided by "
+                    f"{self.parameters.position_size_divisor}."
+                )
+            ),
+            "balance": balance,
+            "slots": self.parameters.slots,
+            "positionSizeDivisor": self.parameters.position_size_divisor,
+            "note": (
+                "Blocked margin is a configured approximation, never what a "
+                "broker would hold. Funds are checked at placement AND again "
+                "at the fill, so an entry that became unaffordable is refused "
+                "rather than part-filled to fit."
             ),
         }
 
