@@ -42,6 +42,7 @@ import TelegramIcon from '@mui/icons-material/Telegram';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { Link as RouterLink } from 'react-router-dom';
 import { connectionsApi } from '../api/connections';
 import { usersApi } from '../api/users';
@@ -243,8 +244,18 @@ function ConnectionCardTile({ card, now, onOpen }) {
   );
 }
 
-/** Live countdown off the absolute expiry, the Settings-page trick. */
-function TokenExpiry({ token }) {
+/**
+ * Live countdown off the absolute expiry, the Settings-page trick.
+ *
+ * **The countdown is DECLARED validity, and `verdict` is OBSERVED.** They are
+ * different questions and they can disagree: on 2026-09-19 a token four hours
+ * into a twenty-four hour life was being refused by every Dhan endpoint while
+ * this component cheerfully counted down twenty more hours. A JWT has no way
+ * to say "revoked", so the countdown alone is not an answer — when Dhan is
+ * refusing the token, that is said first, loudly, and the countdown is greyed
+ * out rather than removed, because how long it had left is still a fact.
+ */
+function TokenExpiry({ token, verdict }) {
   const theme = useTheme();
   const [now, setNow] = useState(() => Date.now());
 
@@ -265,9 +276,12 @@ function TokenExpiry({ token }) {
 
   const remaining = Math.floor((new Date(token.expiresAt).getTime() - now) / 1000);
   const expired = remaining <= 0;
+  const refused = verdict?.verdict === 'REFUSED';
   const critical = remaining > 0 && remaining < 6 * 3600;
   const fraction = Math.max(0, Math.min(1, remaining / (24 * 3600)));
-  const colour = expired
+  // A refused token is red whatever the clock says. Showing it green with
+  // twenty hours left is the exact failure this was added to stop.
+  const colour = expired || refused
     ? theme.market.down
     : critical
       ? theme.palette.warning.main
@@ -275,12 +289,20 @@ function TokenExpiry({ token }) {
 
   return (
     <Stack spacing={1}>
+      {refused ? (
+        <Alert severity="error" icon={<WarningAmberIcon />}>
+          <strong>Dhan is refusing this token</strong> — whatever the countdown
+          below says. {verdict?.note}
+        </Alert>
+      ) : null}
       <Stack direction="row" spacing={1.5} alignItems="baseline">
         <Typography variant="h4" className="numeric" sx={{ color: colour }}>
           {expired ? 'Expired' : formatCountdown(remaining)}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          {expired ? 'expired at' : 'expires at'}{' '}
+          {/* "would expire at" when Dhan has already refused it: the claim is
+              still true of the token and no longer true of the account. */}
+          {expired ? 'expired at' : refused ? 'would expire at' : 'expires at'}{' '}
           {new Date(token.expiresAt).toLocaleString('en-IN', { hour12: false })}
         </Typography>
       </Stack>
@@ -438,7 +460,7 @@ function DhanDetail({ card, onSaved, onRefresh }) {
           <Divider />
           <Stack spacing={1}>
             <Typography variant="subtitle2">Token validity</Typography>
-            <TokenExpiry token={card.detail.token} />
+            <TokenExpiry token={card.detail.token} verdict={card.detail.dhanVerdict} />
             {/* Three outcomes, kept apart: renewed, will retry, and needs a
                 human. Only the third is a problem somebody has to act on. */}
             <Typography variant="caption" color="text.secondary">

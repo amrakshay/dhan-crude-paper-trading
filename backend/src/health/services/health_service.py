@@ -315,11 +315,19 @@ def _credentials_health(stored: Optional[Dict[str, Optional[str]]] = None) -> Di
     would actually use -- not what is saved in the database. Where the two
     differ, `storedSettings` says so.
     """
+    from src.market.services import dhan_auth_state
     from src.market.services.dhan_feed_client import DhanFeedClient
     from src.settings.services.settings_service import inspect_token
 
     client_id, token = DhanFeedClient.credentials()
     info = inspect_token(token)
+    # TWO DIFFERENT QUESTIONS, reported as two. `inspect_token` answers "when
+    # does this expire", read locally out of the JWT; `dhan_auth_state` answers
+    # "does Dhan still accept it", remembered from the last real call. On
+    # 2026-09-19 they disagreed for four hours -- a revoked token showing a
+    # comfortable twenty-hour countdown -- and a page that reported only the
+    # first was confidently wrong.
+    accepted = dhan_auth_state.state_for(token)
 
     return {
         "storedSettings": _stored_settings_health(stored),
@@ -335,6 +343,8 @@ def _credentials_health(stored: Optional[Dict[str, Optional[str]]] = None) -> Di
             "expiresAt": info.expires_at.isoformat() if info.expires_at else None,
             "secondsRemaining": info.seconds_remaining,
             "expired": info.expired,
+            # The countdown above is DECLARED validity. This is observed.
+            "dhanVerdict": accepted.as_dict(),
         },
         "syntheticFeed": config_utils.get_property_value_boolean(
             "market_feed.synthetic_feed", True
@@ -613,7 +623,15 @@ def summarise(health: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     token = (health.get("credentials") or {}).get("token") or {}
-    if token.get("expired"):
+    # Refusal first: a revoked token is a live outage, and its declared
+    # expiry is irrelevant to it. Reporting "expires in 20h" while every Dhan
+    # call is being refused is the failure this ordering exists to prevent.
+    if (token.get("dhanVerdict") or {}).get("verdict") == "REFUSED":
+        problems.append(
+            "Dhan is REFUSING the access token, whatever its declared expiry "
+            "says. Generate a new one on Dhan Web and save it on Connections."
+        )
+    elif token.get("expired"):
         problems.append("The Dhan access token has expired")
     elif token.get("secondsRemaining") is not None and token["secondsRemaining"] < 2 * 3600:
         problems.append("The Dhan access token expires in under two hours")

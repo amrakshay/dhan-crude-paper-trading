@@ -55,6 +55,7 @@ CATEGORY_LABELS = {
 # --- the health events, named once and used by the watcher -----------------
 EVENT_MISSING_TASKS = "missing-tasks"
 EVENT_TOKEN_LAPSED = "token-lapsed"
+EVENT_TOKEN_REJECTED = "token-rejected"
 EVENT_TOKEN_RENEWAL_FAILED = "token-renewal-failed"
 EVENT_FEED_DOWN = "feed-down"
 EVENT_FEED_STALE = "feed-stale"
@@ -156,6 +157,39 @@ RULES: Tuple[AlertRule, ...] = (
         kind=KIND_HEALTH,
         dedupe_prefix=_health(EVENT_TOKEN_LAPSED),
         collapsing="One message per de-duplication window while it stays expired.",
+    ),
+    AlertRule(
+        key=EVENT_TOKEN_REJECTED,
+        title="Dhan is refusing the access token, though it has not expired",
+        trigger=(
+            "A real Dhan request came back with an authentication failure -- a "
+            "401, or a 400 carrying DH-906 'Invalid Token' -- while the "
+            "token's own `exp` claim is still in the future."
+        ),
+        why=(
+            "This is the failure the expiry countdown cannot see. A token can "
+            "be revoked server-side long before it expires: generating a new "
+            "one for the same client id invalidates the previous one, and a "
+            "lapsed Data APIs subscription has the same effect. It happened on "
+            "2026-09-19, four hours into a twenty-four hour token, while every "
+            "surface in this application went on showing twenty hours "
+            "remaining. Without this rule the first symptom is a strategy "
+            "quietly deciding nothing."
+        ),
+        severity=SEVERITY_CRITICAL,
+        category=CATEGORY_SYSTEM,
+        kind=KIND_HEALTH,
+        dedupe_prefix=_health(EVENT_TOKEN_REJECTED),
+        collapsing=(
+            "A CONDITION, so one message when Dhan starts refusing and silence "
+            "while it keeps refusing -- not one per request."
+        ),
+        caveat=(
+            "It reports what Dhan SAID, not why. Dhan answers a revoked token, "
+            "an unpaid Data APIs subscription and a mistyped client id with "
+            "the same 808, so the fix is to generate a fresh token and, if "
+            "that does not work, to check the subscription."
+        ),
     ),
     AlertRule(
         key=EVENT_TOKEN_RENEWAL_FAILED,

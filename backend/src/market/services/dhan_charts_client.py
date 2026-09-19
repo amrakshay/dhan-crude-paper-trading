@@ -41,6 +41,7 @@ import httpx
 
 from src import config_utils
 from src.logging_config import get_logger
+from src.market.services import dhan_auth_state
 
 logger = get_logger("market.charts")
 
@@ -273,6 +274,16 @@ class DhanChartsClient:
                 "Chart request failed: HTTP %s from %s (body=%s): %s",
                 response.status_code, url, body, response.text[:300],
             )
+            # Remember whether DHAN REFUSED THE TOKEN, as against refusing this
+            # particular request. A revoked token is invisible to the local
+            # `exp` check, so this is the only place the application can learn
+            # it -- and it learns it from a call it was making anyway.
+            if dhan_auth_state.is_authentication_failure(
+                response.status_code, response.text
+            ):
+                dhan_auth_state.record_refused(
+                    self._credentials()[1], endpoint, response.text[:300]
+                )
             raise ChartsError(
                 f"Chart request failed: HTTP {response.status_code} {response.text[:300]}"
             )
@@ -282,6 +293,9 @@ class DhanChartsClient:
             self.error_count += 1
             logger.error("Dhan rejected the chart request for %s: %s", body, payload)
             raise ChartsError(f"Chart request rejected: {payload}")
+        # A 200 is proof Dhan still accepts this token, which is the other
+        # half of the same question.
+        dhan_auth_state.record_accepted(self._credentials()[1], endpoint)
         logger.debug("%s responded 200 in %.0f ms", endpoint, elapsed_ms)
         return payload if isinstance(payload, dict) else {}
 

@@ -2037,6 +2037,31 @@ once, in a document nobody opens, is a limitation that gets lost.
   **unverified in production**.
 * **All gains are short-term and every figure is pre-tax.**
 
+### The Dhan connection
+
+* **A token can be dead long before it expires, and the countdown cannot see
+  it.** `inspect_token()` reads the `exp` claim locally, which is the right
+  answer to "when does this expire" and no answer at all to "does Dhan still
+  accept it". On 2026-09-19 a token four hours into a twenty-four hour life was
+  refused by every Dhan endpoint while every surface here showed twenty hours
+  remaining in green. Since then the application also records how Dhan answered
+  the LAST real call (`dhan_auth_state`), and the Connections card, the system
+  health page and the alert catalogue all distinguish "expires in 20h" from
+  "Dhan is refusing this". **It is still a record of the last call, not a
+  live check**: nothing polls Dhan to find out, so a token that was revoked
+  since the last request reads as ACCEPTED until something next calls.
+* **Dhan reports a refusal in at least two shapes** -- `401` with `808
+  "Authentication Failed - Client ID or Token invalid"`, and `400` with
+  `DH-906 "Invalid Token"` -- from the same token on the same afternoon. There
+  may be more; `is_authentication_failure` recognises those two and treats any
+  401/403 as a refusal.
+* **Why a token gets revoked is not something this application can know.**
+  Generating a new token for the same client id invalidates the previous one,
+  and a lapsed Data APIs subscription looks identical from here. The alert says
+  what Dhan said and names both possibilities rather than guessing.
+* **Token renewal has never been seen to succeed** -- see the swing section
+  below for the full account.
+
 ### NSE Swing Momentum
 
 * **It has no live track record, and neither does the strategy.** Zero rupees

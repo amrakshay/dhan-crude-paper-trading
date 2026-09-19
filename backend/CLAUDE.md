@@ -260,6 +260,34 @@ by-expiry / by-strike slices and the equity curve possible at all.
   raising, so a rotated secret cannot block startup.
 - **Never return a token to the browser.** Return `crypto_service.mask()` plus
   the metadata from `inspect_token()`.
+- **`inspect_token()` answers WHEN IT EXPIRES; `dhan_auth_state` answers
+  WHETHER DHAN STILL ACCEPTS IT.** Two different questions, and on 2026-09-19
+  they disagreed for four hours: a token issued at 15:31 with a declared
+  24-hour life was refused by every Dhan endpoint from about 19:18, while the
+  Connections card and the health page both showed a comfortable twenty-hour
+  countdown in green. A JWT has no way to say "revoked", so nothing local ever
+  could -- generating a new token for the same client id invalidates the
+  previous one, and a lapsed Data APIs subscription has the same effect.
+
+  `src/market/services/dhan_auth_state.py` is a RECORD, not a probe: the chart
+  and option-chain clients already made those requests and already classified
+  their failures, so it costs nothing and cannot itself become load. That shape
+  was deliberate -- the incident involved 329 connection attempts in an
+  afternoon, and a health check that generated traffic to diagnose a traffic
+  problem would have been the wrong answer.
+
+  Three properties are load-bearing. It is **keyed on the token**, so pasting a
+  fresh one clears the verdict immediately instead of leaving the page accusing
+  it of what the old one did (the same rule `token_refresh_service` follows).
+  It reports the **last** answer rather than the worst, so a refusal that has
+  since started working again does not leave the page permanently red. And
+  UNKNOWN is a third state, not a synonym for healthy: a restart lands there.
+
+  `is_authentication_failure` lives in that module rather than in each client,
+  because Dhan says it in more than one way -- `401 808 "Authentication
+  Failed"` on the option chain and `400 DH-906 "Invalid Token"` on the charts,
+  from the same revoked token on the same afternoon. A 400 is normally a
+  business error, which is why the status code alone is not enough.
 - `inspect_token()` decodes the JWT **without verifying the signature** — Dhan
   signed it with a key we do not hold, and we are reading metadata, not trusting
   it. Do not "fix" this by verifying.

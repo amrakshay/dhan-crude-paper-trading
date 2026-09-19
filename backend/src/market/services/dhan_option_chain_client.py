@@ -35,6 +35,7 @@ import httpx
 
 from src import config_utils
 from src.logging_config import get_logger
+from src.market.services import dhan_auth_state
 
 logger = get_logger("market.optionchain")
 
@@ -290,6 +291,15 @@ class DhanOptionChainClient:
                 "Option chain request failed: HTTP %s from %s (body=%s): %s",
                 response.status_code, url, body, response.text[:300],
             )
+            # See `dhan_auth_state`: a refusal OF THE TOKEN is remembered, so
+            # the health page and the Connections card can say "Dhan is
+            # refusing this" instead of a countdown that only knows `exp`.
+            if dhan_auth_state.is_authentication_failure(
+                response.status_code, response.text
+            ):
+                dhan_auth_state.record_refused(
+                    self._credentials()[1], endpoint, response.text[:300]
+                )
             raise OptionChainError(
                 f"Option chain request failed: HTTP {response.status_code} {response.text[:300]}"
             )
@@ -301,6 +311,8 @@ class DhanOptionChainClient:
                 "Dhan rejected the option chain request for %s: %s", body, payload
             )
             raise OptionChainError(f"Option chain request rejected: {payload}")
+        # Proof Dhan still accepts this token.
+        dhan_auth_state.record_accepted(self._credentials()[1], endpoint)
         logger.debug("%s responded 200 in %.0f ms", endpoint, elapsed_ms)
         return payload
 

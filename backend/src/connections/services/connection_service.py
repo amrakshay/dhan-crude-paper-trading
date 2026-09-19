@@ -408,10 +408,13 @@ class ConnectionService:
         """The Dhan card: the token's own expiry and the renewal state.
 
         Nothing here contacts Dhan. `inspect_token()` reads the `exp` claim
-        LOCALLY, and the renewal counters are a `status()` dict the task
-        already keeps.
+        LOCALLY, the renewal counters are a `status()` dict the task already
+        keeps, and `dhan_auth_state` is a record of how the LAST real call went
+        rather than a fresh one -- so the card can say that Dhan is refusing
+        the token without asking Dhan whether it is.
         """
         from src import config_utils
+        from src.market.services import dhan_auth_state
         from src.settings.services.settings_service import (
             KEY_ACCESS_TOKEN,
             KEY_CLIENT_ID,
@@ -452,9 +455,25 @@ class ConnectionService:
             "autoRenew": get_token_refresh_monitor().status(),
             "expired": expired,
             "expiringSoon": expiring,
+            # OBSERVED, as against the declared expiry above. A token can be
+            # revoked server-side long before `exp` -- it happened on
+            # 2026-09-19, four hours into a twenty-four hour token -- and
+            # nothing local can see that, so the card would otherwise show a
+            # comfortable countdown for a token Dhan was refusing outright.
+            "dhanVerdict": dhan_auth_state.state_for(token).as_dict(),
             "metricValue": await self._instruments_on_the_feed(),
         }
-        if info.expired:
+        if dhan_auth_state.state_for(token).refused:
+            # BEFORE the expiry notes, and instead of them: when Dhan is
+            # refusing the token, how long it had left is not the useful fact.
+            detail["expiryNote"] = (
+                "DHAN IS REFUSING THIS TOKEN, whatever the countdown says. A "
+                "token can be revoked long before it expires -- generating a "
+                "new one for the same client id invalidates the previous one, "
+                "and a lapsed Data APIs subscription does the same. Generate a "
+                "fresh token on Dhan Web and save it here."
+            )
+        elif info.expired:
             detail["expiryNote"] = (
                 "The token has expired. Automatic renewal cannot recover from "
                 "this -- Dhan renews only an active token, and this application "

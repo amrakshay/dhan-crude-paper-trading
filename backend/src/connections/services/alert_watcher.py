@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional
 
 from src import config_utils
 from src.connections.services.alert_catalogue import (
+    EVENT_TOKEN_REJECTED,
     EVENT_DEFERRED_STOPS,
     EVENT_FEED_DOWN,
     EVENT_FEED_STALE,
@@ -240,6 +241,32 @@ class AlertWatcher:
         info = inspect_token(token)
         if not info.present:
             return None
+
+        # REFUSAL FIRST. A revoked token is a live outage and its declared
+        # expiry is beside the point; checking `expired` first would stay
+        # silent for the twenty hours the countdown still had.
+        from src.market.services import dhan_auth_state
+
+        verdict = dhan_auth_state.state_for(token)
+        if verdict.refused and not info.expired:
+            await service.record_health(
+                event=EVENT_TOKEN_REJECTED,
+                title="Dhan is refusing the access token",
+                body=(
+                    f"Dhan refused this token on its last request"
+                    f"{f' to {verdict.endpoint}' if verdict.endpoint else ''}, "
+                    f"even though its own expiry claim says it is valid until "
+                    f"{info.expires_at.isoformat() if info.expires_at else 'an unknown time'}. "
+                    f"A token can be revoked long before it expires: "
+                    f"generating a new one for the same client id invalidates "
+                    f"the previous one, and a lapsed Data APIs subscription "
+                    f"does the same. The live feed, the chart, the option "
+                    f"chain and the overnight bar refresh are all stopped "
+                    f"until a working token is saved on the Connections page."
+                ),
+                severity=SEVERITY_CRITICAL,
+            )
+            return EVENT_TOKEN_REJECTED
 
         if info.expired:
             # The one that needs a human. Dhan renews only an ACTIVE token, so
