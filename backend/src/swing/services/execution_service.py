@@ -644,6 +644,9 @@ class SwingExecutionService:
                 is_close_order=True,
                 portfolio_id=portfolio_id,
                 reason=intent.reason,
+                # The Nifty 500 is traded by two strategies, so an instrument
+                # no longer decides which. Said explicitly rather than inferred.
+                strategy_key=self.definition.key,
             )
         except OrderValidationError as error:
             outcome.notes.append(f"{intent.symbol}: {error}")
@@ -722,6 +725,7 @@ class SwingExecutionService:
                 lots=int(intent.quantity),
                 portfolio_id=portfolio_id,
                 reason=intent.reason,
+                strategy_key=self.definition.key,
             )
         except OrderValidationError as error:
             outcome.notes.append(f"{intent.symbol}: {error}")

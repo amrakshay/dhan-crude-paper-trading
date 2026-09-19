@@ -893,3 +893,93 @@ fills by that module, and the two agree by construction (section 6).
   (`test_a_resting_buy_does_not_fill_when_the_ask_merely_touches_it`).
 - When a test fails, check whether the *expectation* is wrong before changing
   the code — that happened twice here, both times the test was wrong.
+
+---
+
+## 10h. The overnight hold
+
+`src/btst/` is the strategy-specific half of
+`conf/strategies/nse-btst-overnight.yaml`. Its own `README.md` has the full
+list; these are the ones that will bite a future change.
+
+- **It decides on the SESSION SO FAR, which nothing else here does.** Three of
+  its seven filters read the live book -- the price against the 55-day high,
+  the cumulative volume against a 20-day average, and the close location within
+  the day's running range -- and none of those numbers exists an hour later.
+  That is why `scan_service.evaluate()` takes quotes as an ARGUMENT rather than
+  fetching them, why it is pure, and why the journal stores every one of them.
+- **Nothing accumulates ticks.** Dhan's Quote/Full packet already carries the
+  session's running high, low and cumulative volume, so `hi_sofar`, `lo_sofar`
+  and `vol_sofar` are reads from `MarketBook`. Root `CLAUDE.md` section 4
+  forbids building bars out of the feed and this strategy does not need to.
+- **`scan_service` has TWO conventions and the difference is deliberate.**
+  `include_last_in_averages=False` is the live path: today is not among the
+  bars, and `advq`/`adv20` are means of completed sessions, which is what
+  specification section 3 prescribes for automating this. `True` is the
+  reconstruction, where day T IS the last bar and the averages include it --
+  which is what `scan.py::build` does and what section 13's table was produced
+  with. `tests/test_btst_specification_signals.py` is the only caller of the
+  second, and it reproduces the specification's twelve dated signals on real
+  bars shipped as a fixture.
+- **`Quote.usable` is the transposed-mapping guard, not a validation nicety.**
+  See root `CLAUDE.md` section 5: B6 inverts if high and low are swapped. A
+  quote whose high is below its low, or whose last trade is outside its own
+  session range, is REFUSED rather than computed through.
+- **The exit is bounded only at the bottom, and every other job here is bounded
+  at both ends.** That asymmetry is the module. A scan that missed its window
+  has nothing useful left to do; an exit that missed its window has the entire
+  position still to sell. `_mark_succeeded` is deliberately NOT called while
+  anything is still open.
+- **`btst_holdings` is the one table in this package that is UPDATED.** It
+  holds the open question "did the exit run", which is answered by changing it;
+  the append-only record of what happened is `btst_decisions`. It still refuses
+  `delete`, because removing a row would take the realised overnight gap out of
+  every report with it.
+- **The due date for an exit is the next TRADING day.** `entry_session + 1
+  calendar day` puts a Friday entry's exit on the Saturday and reports the
+  Monday sale as two days late -- a LATE status and an alert on every Friday
+  signal. Not holiday-aware, and that is the same trade this application makes
+  everywhere else: a holiday reads as one day late, which errs towards
+  reporting something that is fine.
+- **No `stop_service`, no `stop_monitor`, and their absence is asserted.** B15
+  is "none" and the YAML says so in words; a value other than "none" is
+  refused. The only risk window is one in which no order can execute at any
+  price.
+
+## 10i. Two strategies, one universe
+
+The rotation and BTST both trade the Nifty 500, which is the first time
+anything here has shared an instrument. Three pieces of shared code changed on
+2026-09-19 and `tests/test_btst_does_not_disturb_swing.py` is the file that
+fails with a name saying why if one of them regresses.
+
+- **`OrderService._resolve_strategy` is where ownership is now decided.** Four
+  cases in order: the caller said; exactly one strategy claims it; several
+  claim it and this CLOSES a position, so the position answers; several claim
+  it and nobody said, which is REFUSED. Root `CLAUDE.md` section 3a has the
+  reasoning.
+- **`InstrumentSet.ingestion_signature()` is what makes sharing safe.** It is
+  everything that changes the resulting `instruments` row and nothing that does
+  not -- `symbols` and `from_universe` decide WHICH rows are claimed, not what
+  they become, and `role` is a tag the framework never interprets.
+- **`strategy_modules.hooks_for()` is the per-strategy lookup the swing code
+  asked for in a comment.** `src.strategies` must stay import-light, so it
+  resolves to a MODULE PATH imported inside the call. A module that is not
+  listed has no policies and no settings, which is a real answer:
+  `mcx-crude-options` is discretionary.
+- **`ModuleRuleRefused` is declared in the framework, not in each module.** The
+  seam has to tell "this operator asked for something this strategy cannot run"
+  (a 400 with the module's own sentence) from "this module is broken" (a 500
+  nobody should see as a validation message). Catching bare `Exception` there
+  would ship a bug looking like a rule.
+- **`SwingScheduler` is still the only clock and still called that.** It
+  dispatches per module now; the TASK name `swing-scheduler` is a key in
+  `TASK_DESCRIPTIONS` and `expected_task_names`, both health surfaces judge the
+  task against it, and renaming it would make a live installation report a task
+  gone missing and a new one unexpected. The rotation's job bodies were not
+  moved, not rewritten and not wrapped -- only their caller changed.
+- **A strategy's health tab narrows `expected` to ITSELF.** The scheduler is
+  process-wide, so `task_inspector` expects it whenever ANY automated strategy
+  is enabled -- right for the system health page, wrong for one strategy's tab.
+  With BTST on and the rotation off, saying the clock is expected on the
+  rotation's tab would paint it red for a task it is not using.

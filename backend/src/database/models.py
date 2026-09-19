@@ -2,6 +2,11 @@
 
 Alembic autogenerate and DatabaseManager.create_tables both import this module.
 """
+from src.btst.database.db_models.btst_session_model import (  # noqa: F401
+    BtstDecision,
+    BtstHolding,
+    BtstSession,
+)
 from src.chart_trading.database.db_models.chart_trade_model import ChartTrade  # noqa: F401
 from src.connections.database.db_models.alert_model import Alert  # noqa: F401
 from src.connections.database.db_models.connection_model import (  # noqa: F401
@@ -39,6 +44,9 @@ from src.users.database.db_models.user_model import User  # noqa: F401
 
 __all__ = [
     "Alert",
+    "BtstDecision",
+    "BtstHolding",
+    "BtstSession",
     "ChartTrade",
     "Connection",
     "ConnectionSetting",

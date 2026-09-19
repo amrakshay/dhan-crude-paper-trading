@@ -390,7 +390,7 @@ async def _open_stop(db_session, definition, portfolio_id, stop_price="90"):
     )
     order = await orders.submit_paper_order(
         security_id=SECURITY_ID, side="BUY", order_type="MARKET",
-        lots=100, portfolio_id=portfolio_id,
+        lots=100, portfolio_id=portfolio_id, strategy_key=STRATEGY,
     )
     service = _stop_service(db_session, definition)
     stop = await service.open_for_entry(

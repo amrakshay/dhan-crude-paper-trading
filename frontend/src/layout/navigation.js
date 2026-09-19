@@ -10,6 +10,7 @@ import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import TuneIcon from '@mui/icons-material/Tune';
 import AutoModeIcon from '@mui/icons-material/AutoMode';
+import NightsStayIcon from '@mui/icons-material/NightsStay';
 import HubIcon from '@mui/icons-material/Hub';
 
 /**
@@ -36,6 +37,7 @@ export const navigationItems = [
   { path: '/reports', label: 'P&L Reports', icon: AssessmentIcon },
   { path: '/notes', label: 'Trade Notes', icon: StickyNote2Icon },
   { path: '/swing', label: 'Swing Momentum', icon: AutoModeIcon },
+  { path: '/btst', label: 'BTST Overnight', icon: NightsStayIcon },
   { path: '/users', label: 'Users', icon: GroupIcon },
   { path: '/strategies', label: 'Strategies & Features', icon: TuneIcon },
   // Anything this application authenticates to and calls over the network.

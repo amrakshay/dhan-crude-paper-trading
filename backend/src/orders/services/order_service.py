@@ -109,6 +109,85 @@ class OrderService:
             return int(configured)
         return config_utils.get_property_value_int("trading.max_lots_per_order", 100)
 
+    async def _resolve_strategy(
+        self,
+        instrument,
+        strategy_key: Optional[str],
+        portfolio_id: int,
+        is_close_order: bool,
+    ):
+        """Which strategy is this trade under? Asked once, then stored.
+
+        Four cases, in order, and the last one is the point:
+
+        1. **The caller said.** An automated module always does, because it
+           knows what it is. The key still has to be one of the strategies that
+           actually claims the instrument -- a caller naming an unrelated
+           strategy is a bug, not a preference.
+        2. **Exactly one strategy claims it.** MCX crude, and every equity name
+           before a second NSE module existed. Nothing changed for these.
+        3. **Several claim it and this CLOSES a position.** The position
+           already carries the strategy it was opened under, which is the only
+           correct answer -- a close must land under the same strategy as its
+           open or the two halves of a round trip end up in different books.
+        4. **Several claim it and nobody said.** REFUSED. Returning the
+           alphabetically first would silently put the trade under the wrong
+           rate card, the wrong arming switch and the wrong journal, and
+           nothing downstream would ever notice.
+        """
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        registry = get_strategy_registry()
+        matches = registry.strategies_for_instrument(
+            instrument.exchange_segment, instrument.underlying_symbol
+        )
+        if not matches:
+            raise OrderValidationError(
+                f"{instrument.trading_symbol} ({instrument.exchange_segment} "
+                f"{instrument.underlying_symbol}) belongs to no configured "
+                f"strategy module, so there is nothing to trade it under."
+            )
+
+        if strategy_key:
+            chosen = next(
+                (one for one in matches if one.key == str(strategy_key)), None
+            )
+            if chosen is None:
+                raise OrderValidationError(
+                    f"Strategy {strategy_key!r} does not trade "
+                    f"{instrument.trading_symbol} "
+                    f"({instrument.exchange_segment} "
+                    f"{instrument.underlying_symbol}). It is traded by "
+                    f"{', '.join(one.key for one in matches)}."
+                )
+            return chosen
+
+        if len(matches) == 1:
+            return matches[0]
+
+        if is_close_order:
+            from src.positions.database.db_operations.position_repository import (
+                PositionRepository,
+            )
+
+            position = await PositionRepository(
+                self.orders.session
+            ).get_open_for_security(int(portfolio_id), str(instrument.security_id))
+            if position is not None and position.strategy_key:
+                return next(
+                    (one for one in matches if one.key == position.strategy_key),
+                    matches[0],
+                )
+
+        raise OrderValidationError(
+            f"{instrument.trading_symbol} is traded by more than one strategy "
+            f"({', '.join(one.key for one in matches)}), so the order must say "
+            f"which. An instrument does not decide this: the same share can be "
+            f"held by two strategies with different rules, and putting the "
+            f"trade under the wrong one would give it the wrong journal and "
+            f"the wrong arming switch."
+        )
+
     # --- placement ---------------------------------------------------------
     # Named submit_paper_order / cancel_paper_order rather than the broker-SDK
     # spellings place_order / cancel_order. Those names are banned outright by
@@ -125,6 +204,7 @@ class OrderService:
         quantity_override: Optional[int] = None,
         portfolio_id: Optional[int] = None,
         reason: Optional[str] = None,
+        strategy_key: Optional[str] = None,
     ) -> Order:
         """Submit a paper order into one portfolio.
 
@@ -147,6 +227,12 @@ class OrderService:
         order through `SwingDecision.order_id`; `order_events.message` is where
         it surfaces on the order itself. A `strategy_reason` column on `orders`
         would be a third copy of one sentence, null for every human order.
+
+        `strategy_key` says WHICH STRATEGY is trading, for the instruments that
+        belong to more than one. The Nifty 500 belongs to two, so an automated
+        module passes its own key; a discretionary order on an unambiguous
+        contract passes nothing and is resolved from the instrument as before.
+        An ambiguous instrument with no key is refused, never guessed.
         """
         side = str(side).upper()
         order_type = str(order_type).upper()
@@ -180,19 +266,26 @@ class OrderService:
                 f"{instrument.trading_symbol} is no longer active (expired series)."
             )
 
-        # Resolved HERE, once, from the contract's own segment and underlying,
-        # and then stored on the order. Never re-derived at read time -- the
-        # instrument row this came from will be deactivated when the series
-        # expires.
-        strategy = get_strategy_registry().for_instrument(
-            instrument.exchange_segment, instrument.underlying_symbol
+        # Resolved HERE, once, and then stored on the order. Never re-derived
+        # at read time -- the instrument row this came from will be deactivated
+        # when the series expires.
+        #
+        # AN INSTRUMENT NO LONGER DETERMINES A STRATEGY. Until 2026-09-19 it
+        # did, and this read the contract's segment and underlying and was
+        # done. Then a second NSE equity module arrived: the swing rotation and
+        # BTST Overnight both trade the Nifty 500, and SUNTV belongs to both.
+        #
+        # So `strategy_key` is now passed in by a caller that knows, exactly
+        # the way `portfolio_id` is, and for exactly the reason
+        # `frontend/CLAUDE.md` section 2a gives for that one -- a trade landing
+        # under the wrong strategy is silent and carries the wrong rate card,
+        # the wrong arming switch and the wrong journal with it. Where the
+        # instrument is unambiguous nothing changed and no caller had to move;
+        # where it is not, and nobody said, this REFUSES rather than picking
+        # the alphabetically first.
+        strategy = await self._resolve_strategy(
+            instrument, strategy_key, portfolio.id, is_close_order
         )
-        if strategy is None:
-            raise OrderValidationError(
-                f"{instrument.trading_symbol} ({instrument.exchange_segment} "
-                f"{instrument.underlying_symbol}) belongs to no configured "
-                f"strategy module, so there is nothing to trade it under."
-            )
         # A disabled strategy refuses with a SPECIFIC message rather than a
         # 404 that reads like a routing bug. Closing an existing position is
         # still allowed: switching a strategy off must not trap a trader in a
@@ -899,9 +992,15 @@ class OrderService:
         indicative_price = result.average_price or limit
         charges = None
         if indicative_price is not None:
-            strategy = get_strategy_registry().for_instrument(
+            # A PREVIEW, so the first claimant is good enough and a refusal
+            # would be worse than an approximation: both NSE equity modules are
+            # charged under the same rate card, and a preview that silently
+            # showed no charges because two strategies claim the share would
+            # teach the operator nothing. The ORDER itself still refuses.
+            claimants = get_strategy_registry().strategies_for_instrument(
                 instrument.exchange_segment, instrument.underlying_symbol
             )
+            strategy = claimants[0] if claimants else None
             engine = (
                 ChargesEngine.for_strategy(strategy) if strategy else self.charges
             )
@@ -971,11 +1070,14 @@ class OrderService:
         from src.portfolios.services.balance_service import BalanceService
         from src.strategies.services.strategy_registry import get_strategy_registry
 
-        strategy = get_strategy_registry().for_instrument(
+        # Same reasoning as the charges preview above: affordability is the
+        # question and the first claimant answers it.
+        claimants = get_strategy_registry().strategies_for_instrument(
             instrument.exchange_segment, instrument.underlying_symbol
         )
-        if strategy is None:
+        if not claimants:
             return {}
+        strategy = claimants[0]
 
         try:
             available = await BalanceService(

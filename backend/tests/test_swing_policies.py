@@ -502,6 +502,7 @@ async def test_the_performance_report_splits_by_the_regime_at_entry(
             lots=int(position.net_quantity),
             is_close_order=True,
             portfolio_id=portfolio_id,
+            strategy_key=STRATEGY,
         )
     await db_session.commit()
 

@@ -261,35 +261,37 @@ class StrategyStateService:
 
     # A strategy's own module owns both the meaning of its policies and the
     # prose in front of the switch, because the prose is about the rule rather
-    # than about the framework. Only automated modules have policies and only
-    # one automated module exists; a SECOND one needs a lookup by strategy key
-    # here rather than a second import.
+    # than about the framework. The lookup by strategy key that this comment
+    # used to ask for arrived with the second automated module on 2026-09-19:
+    # `strategy_modules.hooks_for`.
     @staticmethod
     def _policy_warnings(definition, policy: str, enforced: bool):
-        from src.swing.services.gate_policy import policy_warnings
+        from src.strategies.services.strategy_modules import hooks_for
 
-        return policy_warnings(definition, policy, enforced)
+        hooks = hooks_for(definition)
+        if hooks is None:
+            return []
+        return hooks.policy_warnings(definition, policy, enforced)
 
     @staticmethod
     def _validate_policy(definition, policy: str, enforced: bool) -> None:
-        from src.swing.services.gate_policy import (
-            GatePolicyError,
-            resolve_gate_policy,
+        """Let the strategy's own module refuse a combination it cannot run.
+
+        The refusal happens HERE, before anything is written, rather than on
+        the page: a stored row, a script or a future caller would walk straight
+        past a check that lived in the UI.
+        """
+        from src.strategies.services.strategy_modules import (
+            ModuleRuleRefused,
+            hooks_for,
         )
 
-        registry = get_strategy_registry()
-        overrides = {}
-        from src.strategies.services.strategy_definition import KNOWN_POLICIES
-
-        for known in KNOWN_POLICIES:
-            stored = registry.policy_override(definition.key, known)
-            if stored is not None:
-                overrides[known] = stored
-        overrides[policy] = bool(enforced)
-
+        hooks = hooks_for(definition)
+        if hooks is None:
+            return
         try:
-            resolve_gate_policy(definition, overrides=overrides)
-        except GatePolicyError as error:
+            hooks.validate_policy_change(definition, policy, enforced)
+        except ModuleRuleRefused as error:
             raise StrategyConfigError(str(error)) from error
 
     async def set_strategy_setting(
@@ -374,24 +376,35 @@ class StrategyStateService:
         }
 
     # Same arrangement as the policy warnings: the strategy's own module owns
-    # what a setting means, what is legal and the prose in front of it. A
-    # SECOND automated module needs a lookup by strategy key here.
+    # what a setting means, what is legal and the prose in front of it. The
+    # two modules constrain their times in OPPOSITE directions -- the
+    # rotation's analysis may not run inside the session, BTST's scan may only
+    # run inside it -- which is why the validator is per module rather than one
+    # shared rule with a branch in it.
     @staticmethod
     def _setting_warnings(definition, setting: str, value: str) -> List[str]:
-        from src.swing.services.schedule_settings import setting_warnings
+        from src.strategies.services.strategy_modules import hooks_for
 
-        return setting_warnings(definition, setting, value)
+        hooks = hooks_for(definition)
+        if hooks is None:
+            return []
+        return hooks.setting_warnings(definition, setting, value)
 
     @staticmethod
     def _validate_setting(definition, setting: str, value: str) -> str:
-        from src.swing.services.schedule_settings import (
-            ScheduleSettingError,
-            validate,
+        from src.strategies.services.strategy_modules import (
+            ModuleRuleRefused,
+            hooks_for,
         )
 
+        hooks = hooks_for(definition)
+        if hooks is None:
+            raise StrategyConfigError(
+                f"{definition.label} has no runtime settings."
+            )
         try:
-            return validate(definition, setting, value)
-        except ScheduleSettingError as error:
+            return hooks.validate_setting(definition, setting, value)
+        except ModuleRuleRefused as error:
             raise StrategyConfigError(str(error)) from error
 
     async def set_capability_enabled(

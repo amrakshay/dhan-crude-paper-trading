@@ -128,6 +128,77 @@ def average_daily_value(
     return sma(turnover, window)
 
 
+def rolling_max_prior(
+    values: Sequence[float], window: int
+) -> List[Optional[float]]:
+    """`series.rolling(window).max().shift(1)`. BTST B4's `hi55`.
+
+    THE SHIFT IS THE RULE, not a detail. `high.rolling(55).max()` including
+    today compares today's price against a window today is itself setting, so
+    a breakout can never happen: on the day a stock makes a new high, its own
+    high IS the maximum. Shifting by one is what makes it "the PRIOR day's
+    55-day high", which is what B4 says.
+
+    `None` until a full prior window exists, matching pandas' NaN.
+    """
+    if window <= 0:
+        raise ValueError("window must be positive")
+    out: List[Optional[float]] = []
+    for index in range(len(values)):
+        start = index - window
+        if start < 0:
+            out.append(None)
+            continue
+        out.append(max(float(one) for one in values[start:index]))
+    return out
+
+
+def average_share_volume(
+    volumes: Sequence[Optional[float]], window: int = 20
+) -> List[Optional[float]]:
+    """`advq`: `volume.rolling(20).mean()`, in SHARES.
+
+    The sibling of `average_daily_value`, and the specification warns about the
+    pair by name (BTST section 4): `advq` is share volume and gates the volume
+    surge (B5), `adv20` is rupee turnover and gates liquidity (B2). They are
+    different columns with different roles and conflating them silently changes
+    which stocks qualify.
+
+    Lives here rather than in a BTST-only module because it is an indicator,
+    and this is where the indicators are -- the rotation simply never needed
+    this one.
+    """
+    return sma(volumes, window)
+
+
+def close_location_value(
+    price: float, low: float, high: float
+) -> Optional[float]:
+    """`CLV = (price - low) / (high - low)`, 0..1. BTST B6.
+
+    One bar rather than a series, because the only caller measures the session
+    SO FAR from the live book: `high` and `low` are the running extremes, not a
+    finished bar's.
+
+    `None` on a zero range, matching the backtest's
+    `(df.high - df.low).replace(0, np.nan)`. A stock that has not moved all day
+    has no close location, and treating that as 1.0 would buy every untraded
+    name -- undefined is not one, the same way it is not zero.
+
+    ** THE INPUTS ARE UNVERIFIED WHERE THEY COME FROM THE FEED. ** Root
+    `CLAUDE.md` section 5 records that the Quote/Full packet's four price
+    fields are mapped open/close/high/low per the SDK and have never been
+    checked against a live feed. If high and low are transposed this function
+    is not merely wrong, it is INVERTED. `scan_service` refuses a quote whose
+    high is below its low rather than computing through it; the standing
+    verification is `scripts/verify_feed_session_fields.py`.
+    """
+    span = float(high) - float(low)
+    if span <= 0:
+        return None
+    return (float(price) - float(low)) / span
+
+
 def momentum(
     closes: Sequence[float], lookback: int = 126, skip: int = 5
 ) -> List[Optional[float]]:

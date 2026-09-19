@@ -194,16 +194,41 @@ class StrategyRegistry:
         self._ensure()
         return self._definitions[sorted(self._definitions)[0]]
 
+    def strategies_for_instrument(
+        self, exchange_segment: str, underlying_symbol: str
+    ) -> List[StrategyDefinition]:
+        """EVERY strategy that claims a contract, by segment and underlying.
+
+        Usually one. Since 2026-09-19 it can be two: the swing rotation and
+        BTST Overnight both trade the Nifty 500 out of `NSE_EQ`, and an
+        instrument no longer determines a strategy.
+        """
+        self._ensure()
+        return [
+            self._definitions[key]
+            for key in sorted(self._definitions)
+            if self._definitions[key].owns_instrument(
+                exchange_segment, underlying_symbol
+            )
+        ]
+
     def for_instrument(
         self, exchange_segment: str, underlying_symbol: str
     ) -> Optional[StrategyDefinition]:
-        """Which strategy owns a contract, by its segment and underlying."""
-        self._ensure()
-        for key in sorted(self._definitions):
-            definition = self._definitions[key]
-            if definition.owns_instrument(exchange_segment, underlying_symbol):
-                return definition
-        return None
+        """The strategy that owns a contract -- when exactly one does.
+
+        **`None` ALSO MEANS "more than one", and callers must handle that.**
+        Returning the alphabetically first would be a trade landing under the
+        wrong strategy: silently, with the wrong rate card, the wrong arming
+        switch and the wrong journal. That is the same failure the portfolio
+        picker exists to prevent, and `frontend/CLAUDE.md` section 2a settles
+        it the same way -- the selection is sent explicitly and never inferred.
+
+        Use `strategies_for_instrument` when the difference matters; this stays
+        for the callers where a single owner is genuinely the question.
+        """
+        matches = self.strategies_for_instrument(exchange_segment, underlying_symbol)
+        return matches[0] if len(matches) == 1 else None
 
     # --- enabled state -----------------------------------------------------
     def apply_state(

@@ -355,9 +355,89 @@ class FeedManager:
         self, strategy: StrategyDefinition, repository: InstrumentRepository
     ) -> Tuple[List[Tuple[str, str]], Dict[str, Dict[str, Any]]]:
         """One strategy's contribution to the single upstream connection."""
+        if strategy.subscription.kind == SubscriptionPolicy.UNIVERSE:
+            return await self._resolve_universe_targets(strategy, repository)
         if strategy.subscription.kind == SubscriptionPolicy.POSITIONS:
             return await self._resolve_position_targets(strategy, repository)
         return await self._resolve_option_chain_targets(strategy, repository)
+
+    async def _resolve_universe_targets(
+        self, strategy: StrategyDefinition, repository: InstrumentRepository
+    ) -> Tuple[List[Tuple[str, str]], Dict[str, Dict[str, Any]]]:
+        """Every tradable name the strategy claims -- but only in its window.
+
+        THIS INVERTS `_resolve_position_targets`' REASONING, and both are right
+        about their own strategy. A rotation decides overnight on daily bars
+        fetched over REST, so subscribing its universe would spend the one
+        connection's budget on instruments nobody reads. BTST decides at 15:20
+        on the session's own running high, low and cumulative volume for every
+        candidate at once -- for which the feed is not an optimisation, it is
+        the only mechanism that fits in the window. The specification's own
+        section 8 measures the alternative: REST-polling ~480 symbols at Dhan's
+        0.6 s rate limit takes about five minutes.
+
+        **Outside the window this behaves exactly like `positions`**, which is
+        what keeps the cost bounded: the universe joins the feed in the
+        afternoon and leaves again after the scan, and the rest of the day the
+        strategy subscribes only what it holds. Dhan's packet carries the
+        session AGGREGATE rather than a delta, so a subscription opened at
+        14:45 should still report the whole session -- a claim that is
+        UNVERIFIED against a live feed and that
+        `scripts/verify_feed_session_fields.py` exists to settle. If it turns
+        out to be false, the fix is to widen the window in the YAML, not to
+        change this.
+
+        The window is evaluated per resync rather than scheduled, so nothing
+        new runs on a clock: the feed already resyncs, and this simply answers
+        differently depending on the time.
+        """
+        from src.core.time_utils import ist_now
+
+        state = self.state_for(strategy.key)
+        held, meta = await self._resolve_position_targets(strategy, repository)
+
+        if not strategy.subscription.window_is_open(ist_now().time()):
+            logger.debug(
+                "Universe window closed for %s; subscribing %s held/pinned "
+                "instrument(s) only.",
+                strategy.key, len(held),
+            )
+            return held, meta
+
+        if strategy.universe is None:
+            logger.warning(
+                "Strategy %s declares a universe subscription and no universe; "
+                "subscribing what it holds instead.",
+                strategy.key,
+            )
+            return held, meta
+
+        targets: List[Tuple[str, str]] = list(held)
+        seen = {security_id for _, security_id in held}
+        instruments = await repository.list_by_symbols(
+            sorted(strategy.universe.symbols), strategy.exchange_segment
+        )
+        for instrument in instruments:
+            if not instrument.is_active:
+                continue
+            security_id = str(instrument.security_id)
+            if security_id in seen:
+                continue
+            seen.add(security_id)
+            targets.append((instrument.exchange_segment, security_id))
+            meta[security_id] = self._meta_for(instrument, strategy)
+
+        state.near_future_security_id = None
+        state.subscribed_expiries = []
+        state.instrument_count = len(targets)
+        logger.info(
+            "Universe window open for %s: %s instrument(s) subscribed (%s "
+            "held or pinned). The window is %s-%s IST.",
+            strategy.key, len(targets), len(held),
+            strategy.subscription.window_opens_at,
+            strategy.subscription.window_closes_at,
+        )
+        return targets, meta
 
     async def _resolve_position_targets(
         self, strategy: StrategyDefinition, repository: InstrumentRepository

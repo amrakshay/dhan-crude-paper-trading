@@ -360,6 +360,10 @@ class SwingStopMonitor:
                 is_close_order=True,
                 portfolio_id=stop.portfolio_id,
                 reason=reason,
+                # The Nifty 500 is traded by two strategies, so an instrument
+                # no longer decides which. This one is the rotation's watcher
+                # and the stop row says whose position it is.
+                strategy_key=stop.strategy_key,
             )
         except OrderValidationError as error:
             stop.note = f"Exit refused: {error}"[:500]

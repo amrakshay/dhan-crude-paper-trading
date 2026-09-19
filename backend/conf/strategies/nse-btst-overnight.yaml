@@ -1,0 +1,388 @@
+# ---------------------------------------------------------------------------
+# STRATEGY MODULE: NSE BTST Overnight (breakout-close overnight hold).
+#
+# BUY TODAY, SELL TOMORROW. At ~15:20 IST buy Nifty 500 names making a fresh
+# 55-day high, closing in the top 20% of the day's range, on at least twice
+# their average share volume, that are also six-month momentum leaders above
+# their 200-day SMA. Sell every position at the next morning's open. NO STOP --
+# an overnight gap cannot be stopped.
+#
+# The rules, the parameters and the backtested results live in the strategy
+# specification, not here:
+#   ~/Workarea/local/pullback/backend/intrday_test_strategy/research2/
+#     BTST_OVERNIGHT_HANDOFF.md
+# This file carries only what THIS application needs to know to run it.
+#
+# WHAT MAKES THIS DIFFERENT FROM nse-swing-momentum.yaml, in one sentence:
+# swing decides at 18:15 on finished daily bars, and this decides at 15:20 on
+# LIVE INTRADAY STATE. Almost everything below that looks unusual follows from
+# that sentence -- the universe subscription, the in-session scan time, and the
+# absence of any stop at all.
+#
+# THE EDGE IS THE OVERNIGHT GAP AND NOTHING ELSE. Held to the next OPEN the
+# specification measures +0.617% gross at a 71.4% win rate; held to the next
+# CLOSE, the same signals give +0.428% at a 49.0% win rate (section 10.1).
+# Exit timing is not a preference here, it is the strategy.
+#
+# IT SHIPS ON, AND NOT ARMED, like the rotation before it. Enabling it starts
+# the journal; arming is what lets it spend anything. That matters more here
+# than it did there, because the specification's own recommendation
+# (section 16) is to PAPER-TRADE THIS FOR 8-12 WEEKS BEFORE FUNDING IT. Running
+# it in this application IS that recommendation being followed, which sets the
+# bar: the job is an honest record, not a flattering one.
+# ---------------------------------------------------------------------------
+
+key: "nse-btst-overnight"
+label: "NSE BTST Overnight"
+description: >-
+  Buy today, sell tomorrow. Buys Nifty 500 names breaking to a fresh 55-day
+  high on twice their average volume, closing in the top fifth of the day's
+  range, that are also six-month momentum leaders in an uptrend -- and sells
+  every one of them at the next morning's open. The edge is the overnight gap;
+  there is no stop, because an overnight gap cannot be stopped.
+enabled_by_default: true
+
+underlying:
+  # No single underlying, exactly as the rotation has none. `symbol` names the
+  # BOOK; ownership resolves against the universe below.
+  symbol: "NIFTY500"
+  exchange_segment: "NSE_EQ"
+  exchange_segment_code: 1
+  exchange_id: "NSE"
+
+universe:
+  # THE SAME FILE THE ROTATION USES, deliberately. Same index, same segment,
+  # same quarterly manual refresh from NSE's own archive. Two copies of the
+  # Nifty 500 would be two things to keep in step.
+  name: "nifty500"
+  file: "universes/nifty500.csv"
+
+instrument_sets:
+  # Identical to the rotation's: the master's LOT_SIZE=1.0 is CORRECT for NSE
+  # equity (a delivery trade is one share), EQ and BE are both wanted and D1
+  # (listed debentures under the same UNDERLYING_SYMBOL) is not, and the
+  # ticker rather than the company's long name is what a table wants to show.
+  - instrument_type: "EQUITY"
+    exchange_segment: "NSE_EQ"
+    exchange_segment_code: 1
+    symbols: "universe"
+    lot_size_source: "master"
+    series: ["EQ", "BE"]
+    trading_symbol_source: "underlying_symbol"
+
+reference_instruments:
+  regime_index:
+    # B9. Read from this index's daily CLOSE; no live tick is subscribed.
+    symbol: "NIFTY"
+    label: "NIFTY 50"
+    security_id: "13"
+    exchange_segment: "IDX_I"
+    exchange_segment_code: 0
+    instrument: "INDEX"
+
+contract_specs:
+  # Dhan publishes NSE TICK_SIZE in paise, as it does on MCX.
+  tick_size_divisor: 100
+
+market_hours:
+  timezone: "Asia/Kolkata"
+  open: "09:15"
+  close: "15:30"
+  trading_days: [0, 1, 2, 3, 4]
+
+  # ---------------------------------------------------------------------------
+  # The Closing Auction Session, live since 3 August 2026, and the reason the
+  # `fno.exclude` policy below exists.
+  #
+  # For F&O-eligible names continuous trading ends at 15:15 and a call auction
+  # runs to 15:35. THE SCAN TIME IS 15:20. So for those names an order placed
+  # at the scan is COLLECTED, not filled, and executes at the auction's
+  # equilibrium price during 15:30-15:35 -- and their `hi_sofar`, `lo_sofar`
+  # and `vol_sofar` stopped moving at 15:15, against a close the auction has
+  # not set yet.
+  #
+  # This simulator has no model of a call auction (specification section 5a),
+  # so the honest answer is not to trade those names. See `fno.exclude`.
+  # source: NSE circular, CAS live 3 Aug 2026
+  # ---------------------------------------------------------------------------
+  closing_auction:
+    applies_to: "fno_eligible"
+    continuous_close: "15:15"
+    auction_close: "15:35"
+
+subscription:
+  # ---------------------------------------------------------------------------
+  # `universe` -- and this INVERTS the rotation's reasoning, on purpose, so the
+  # inversion is written down rather than left implicit.
+  #
+  # nse-swing-momentum.yaml argues against subscribing the universe: its
+  # decisions come from daily bars fetched over REST, so subscribing all 500
+  # would spend the one process-wide connection's budget on 490 instruments
+  # nobody reads. Every word of that is true OF THAT STRATEGY.
+  #
+  # This one decides at 15:20 on live intraday state. `hi_sofar`, `lo_sofar`
+  # and `vol_sofar` for every candidate are exactly what it needs, for the
+  # whole universe at once, at one moment in the afternoon. Specification
+  # section 8 measures the alternative: REST-polling ~480 symbols at Dhan's
+  # 0.6 s rate limit takes about five minutes and would overrun the decision
+  # window entirely.
+  #
+  # AND IT SUBSCRIBES LATE. Dhan's Quote/Full packet carries the session's
+  # AGGREGATE high, low and cumulative volume -- not a delta -- so a
+  # subscription opened in the afternoon should still report the whole
+  # session. `window_opens_at` is when the universe joins the feed and
+  # `window_closes_at` is when it leaves again; outside that window this
+  # strategy subscribes what it HOLDS, exactly like the rotation.
+  #
+  # ** THAT AGGREGATE CLAIM IS UNVERIFIED AGAINST A LIVE FEED. ** It is the
+  # second of the two things scripts/verify_feed_session_fields.py exists to
+  # settle. If it turns out Dhan accumulates from the moment of subscription
+  # instead, move `window_opens_at` to 09:15 and accept the cost; the scan
+  # refuses a symbol whose session fields look partial rather than trading on
+  # them (see src/btst/services/scan_service.py).
+  # ---------------------------------------------------------------------------
+  kind: "universe"
+  window_opens_at: "14:45"
+  window_closes_at: "15:35"
+
+charges:
+  # The same card the rotation uses, and it already models what section 5 of
+  # this specification needs: STT on BOTH legs (0.10% each, which is the single
+  # most important economic fact about a one-day delivery hold), a flat
+  # depository charge on every sell, stamp duty on the buy only, and GST on the
+  # commercial components.
+  #
+  # Two DELIBERATE divergences from the specification's own cost model, both
+  # already documented in the card with their primary sources: it uses NSE's
+  # pre-March-2026 transaction charge (0.00297%), and its Rs 16.00 DP charge is
+  # a figure no primary source supports -- Dhan publishes Rs 12.50 + GST. The
+  # card is right and the backtest is stale. The difference is reported, never
+  # tuned away.
+  rate_card: "nse-equity-delivery"
+
+margin:
+  # Long delivery, paid for in full. Nothing is ever sold to open, so there is
+  # no margin to block. Declared anyway, and declared an approximation, so that
+  # a short position appearing here would be blocked at 100% of notional rather
+  # than at zero -- a wrong number in the safe direction.
+  # as-of: 2026-09-19
+  # confidence: NOT APPLICABLE (no short leg exists in this strategy)
+  model: "percent_of_notional"
+  short_option_percent_of_notional: 1.00
+
+capabilities:
+  - "price-chart"
+  - "trade-notes"
+  - "pnl-reports"
+
+# ---------------------------------------------------------------------------
+# STRATEGY PARAMETERS -- B1 to B16 of the specification.
+#
+# Root CLAUDE.md section 7: no number that affects a trade is hardcoded in
+# Python. Every parameter the specification names is here, under the name the
+# specification gives it, so the two can be grepped against each other.
+#
+# WARNING, and it is a sharper one than the rotation's. These were selected by
+# scanning 22 candidate signals x 2 exit timings over 726,209 symbol-days and
+# then applying 7 refinements, ALL ON THE FULL PERIOD. There is no holdout
+# (specification section 15.2). The edge has decayed -- +0.69%/trade in 2021
+# against +0.13% in 2025 -- and the one genuinely no-look-ahead test returned
+# +1.6% over 13 months at a 37% win rate (section 10.3). These are not knobs to
+# turn until the numbers improve.
+# ---------------------------------------------------------------------------
+parameters:
+  # B2 -- liquidity floor. `adv20` is RUPEE TURNOVER:
+  # mean(close x volume, 20 sessions) >= Rs 10 crore.
+  #
+  # TRAP, and the specification calls it out by name in section 4: `adv20` and
+  # `advq` are DIFFERENT COLUMNS with different roles. This one is rupees and
+  # gates liquidity; `volume_window_sessions` below is shares and gates the
+  # volume surge. Conflating them passes every penny stock and fails every
+  # expensive one.
+  liquidity_floor_rupees: 100000000
+  liquidity_window_sessions: 20
+
+  # B3 -- price floor, rupees.
+  price_floor: 50.0
+
+  # B4 -- the breakout: price above the PRIOR day's 55-session high, i.e.
+  # `high.rolling(55).max().shift(1)`. The shift is what makes it "prior"; a
+  # rolling max that included today would compare today's price against a
+  # window it is itself setting, and nothing would ever break out.
+  breakout_lookback_sessions: 55
+
+  # B5 -- the volume surge, against average SHARE volume (`advq`).
+  #
+  # At 15:20 only about 95% of the day's volume has traded, and the ratio is
+  # computed on what has traded SO FAR rather than scaled up to a projected
+  # full day. That makes the test stricter than the backtest's, therefore
+  # conservative, and it is what the section 10.3 validation did -- 83.4%
+  # precision. Do not "fix" it by extrapolating.
+  volume_window_sessions: 20
+  volume_multiple: 2.0
+
+  # B6 -- close strength. CLV = (price - low) / (high - low), measured on the
+  # session SO FAR, must exceed this.
+  #
+  # ** THIS IS THE PARAMETER THAT DEPENDS ON AN UNVERIFIED FACT. ** Root
+  # CLAUDE.md section 5 records that the Quote/Full packet's four price fields
+  # are mapped open/close/high/low per the SDK and have never been checked
+  # against a live feed. If high and low are transposed, CLV is not merely
+  # wrong -- it is INVERTED, and this strategy buys the weakest closes in the
+  # market instead of the strongest. See scripts/verify_feed_session_fields.py.
+  close_location_minimum: 0.8
+
+  # B7 -- trend qualifier: price above its own 200-session SMA.
+  trend_sma_sessions: 200
+
+  # B8 -- momentum: close[t-5] / close[t-126] - 1 > +0.15. Six months with the
+  # most recent week skipped. Section 12 measures this as the largest single
+  # improvement of the seven refinements (+0.068pp).
+  #
+  # Both lookbacks read COMPLETED bars, so unlike B4/B6/B7 nothing has to be
+  # substituted at 15:20 -- section 14 item 4.
+  momentum_lookback_sessions: 126
+  momentum_skip_sessions: 5
+  momentum_floor: 0.15
+
+  # B10 -- ranking, volume ratio descending.
+  #
+  # The specification contradicts itself here and the disagreement is recorded
+  # rather than silently resolved: B10's own table says `vol_ratio`, and
+  # section 16's funding recommendation says `mom126`, which section 9.3
+  # measured as the better MAR (2.12 against 2.05). B10 ships, on the owner's
+  # decision of 2026-09-19, because section 9.3 also shows ranking is worth at
+  # most 0.9pp of CAGR over ranking alphabetically and binds on only 5.7% of
+  # signal-days -- so deviating from the specified rule buys almost nothing and
+  # costs comparability with every other number in the document. The finding is
+  # in the explainer.
+  ranking: "vol_ratio"            # vol_ratio | mom126
+
+  # B11 -- slots.
+  #
+  # 5, which is section 5a's non-F&O row: 13.3% CAGR, -7.2% maximum drawdown,
+  # 59.2% win rate, +0.396% per trade, 33% of capital deployed. The best win
+  # rate and the smallest drawdown of the non-F&O cuts, and it leaves the most
+  # capital free beside the swing book -- which matters, because section 14
+  # flags that these two strategies compete for the same rupees.
+  #
+  # NOT section 9.2's K=8 recommendation: that row is measured on ALL names,
+  # including the 210 the closing auction now governs, and this module trades
+  # the non-F&O half.
+  slots: 5
+
+  # B12 -- position size is total equity divided by this, whole shares,
+  # floored. Equal to `slots`, unlike the rotation where the two deliberately
+  # differ: there a narrow market holds cash rather than concentrating, and
+  # here there is no breadth ramp to narrow anything.
+  position_size_divisor: 5
+
+  # B15 -- THERE IS NO STOP, and none is possible. This key exists to say so
+  # where somebody will look for it. A position is opened at ~15:20 and closed
+  # at the next open; the only risk window is overnight, and an overnight gap
+  # cannot be stopped at any price. Specification section 10.4 measures it: gap
+  # p5 -1.19%, p1 -2.70%, worst observed -6.04%, which at a fifth of equity is
+  # -1.2% of the book.
+  #
+  # src/btst/ wires up neither stop_service nor stop_monitor, and a future
+  # change that adds one is changing the strategy rather than configuring it.
+  stop: "none"
+
+  # Warm-up. Section 6: the panel requires at least this many rows per symbol,
+  # which is what produced its 479-symbol universe out of 501 files.
+  minimum_sessions: 300
+
+regime:
+  # B9 -- NIFTY 50 close above its own 200-session SMA.
+  #
+  # NEAR-OPTIONAL HERE, unlike the rotation where it is load-bearing, and the
+  # reason is worth stating: only 259 of 3,016 signals ever fire while NIFTY is
+  # below its 200-SMA (section 11), because a stock making a 55-day high on 2x
+  # volume as a six-month momentum leader is ITSELF evidence of a healthy tape.
+  # Gate ON and gate OFF measure 18.98% and 19.27% CAGR -- essentially
+  # identical -- and the gate wins on MAR (2.05 against 1.84).
+  #
+  # There is NO entry-return filter: the rotation's P9 has no counterpart in
+  # this specification, so `regime.enforce_entry_return` is not declared and
+  # the switch is not offered.
+  index_role: "regime_index"
+  sma_sessions: 200
+
+  # WHETHER THE RULE IS OBEYED -- not what it is. The 200 sessions above are
+  # the rule and are editable from nowhere; this is a DEFAULT, overlaid at
+  # runtime by a `feature_toggles` row under the POLICY scope. Ships enforced,
+  # which is section 11's recommendation.
+  enforcement: "enforce"
+
+fno:
+  # ---------------------------------------------------------------------------
+  # EXCLUDE F&O-ELIGIBLE NAMES. A policy, so it is a switch with a recorded
+  # reason rather than a hidden assumption.
+  #
+  # Two independent reasons, and they point the same way:
+  #
+  #   1. The closing auction. For the 210 F&O names in this universe there is
+  #      no continuous market between 15:15 and 15:30, so an order at the
+  #      15:20 scan lands in an auction this simulator cannot model, and their
+  #      session high/low/volume froze at 15:15 against a close the auction
+  #      has not set yet.
+  #   2. The non-F&O half simply carries the larger edge, and did so before
+  #      CAS forced anybody to ask: +0.722% against +0.512% gross per signal,
+  #      a 59.2% win rate against 57.1%, and a smaller drawdown
+  #      (specification section 5a).
+  #
+  # The cost is signal frequency: about 0.54 a session rather than 1.07. Most
+  # days produce nothing, and nothing is the normal state.
+  #
+  # The F&O set is `instruments.fno_eligible`, derived from the master's own
+  # FUTSTK rows on every refresh. It is not a list maintained here.
+  #
+  # Switching this OFF does not add a 15:14 pre-auction scan -- that path was
+  # considered on 2026-09-19 and deliberately not built. It would make the F&O
+  # names trade at 15:20 in the auction window, which is the thing this
+  # excludes them for.
+  # ---------------------------------------------------------------------------
+  exclude: true
+
+schedule:
+  # IST. Both are runtime SETTINGS -- values overlaid by a `strategy_settings`
+  # row -- and both are validated by src/btst/services/btst_schedule.py, which
+  # refuses each of them for its own reason.
+  #
+  # scan_at MUST BE INSIDE THE SESSION. That is the opposite of the rotation's
+  # constraint and it is why the validator is per module rather than shared:
+  # the rotation's analysis refreshes daily bars and would store a forming bar
+  # as a finished one, while this strategy reads the forming session ON PURPOSE
+  # and is useless outside it.
+  scan_at: "15:20"
+
+  # WHEN IT SELLS, and this is the most defended moment in the module.
+  #
+  # 09:16 rather than 09:15, for the same reason the rotation rebalances at
+  # 09:16: at 09:15:00 there is no depth book yet and the fill simulator would
+  # have nothing honest to price against. The book is warmed beforehand.
+  #
+  # The backtest assumes `open x (1 - 0.05%)`; this places a market order into
+  # the real depth a minute later. That divergence is stated in the explainer
+  # and in the README's known gaps, not hidden.
+  exit_at: "09:16"
+
+  # How far after `exit_at` a position still being open stops being lateness
+  # and starts being an ALARM. Specification section 10.1 is the whole reason:
+  # holding to the next close instead of the open takes the win rate from 71.4%
+  # to 49.0% and the net edge from +0.317% to +0.128%. A missed exit does not
+  # cost a session's decision the way a missed rotation run does -- it costs
+  # the trade thesis.
+  exit_alarm_after_minutes: 15
+
+automation:
+  # Declaring this block is what makes a strategy automated: it is what gets it
+  # a scheduler, an arming switch and policy controls.
+  armed_by_default: false
+
+  # Overrides the global `trading.max_lots_per_order`. An NSE delivery "lot" is
+  # one share, so the cap has to be a share count: a position is equity / 5
+  # (B12), bounded by equity / 5 / price_floor -- 4,000 shares on a Rs
+  # 10,00,000 book. 50,000 leaves room for the book to grow 12x and is a rail
+  # rather than a ceiling anyone reaches.
+  max_lots_per_order: 50000

@@ -283,10 +283,34 @@ class InstrumentMasterService:
             )
 
         # (EXCH_ID, INSTRUMENT, UNDERLYING_SYMBOL) -> who claims those rows.
+        # The value is the FIRST claimant; co-claimants are tracked separately
+        # below, because they would produce the identical row.
         claims: Dict[tuple, tuple] = {}
-        # (EXCH_ID, UNDERLYING_SYMBOL) -> strategy key, so two strategies
-        # cannot own the same name through different instrument types.
-        symbol_owner: Dict[tuple, str] = {}
+        # (EXCH_ID, INSTRUMENT, UNDERLYING_SYMBOL) -> every strategy key that
+        # claims it, so a shared name is credited to all of them rather than to
+        # whichever was loaded first.
+        co_claimants: Dict[tuple, set] = {}
+        # (EXCH_ID, UNDERLYING_SYMBOL) -> (strategy key, ingestion signature).
+        #
+        # TWO STRATEGIES MAY SHARE A NAME, AND MAY NOT DISAGREE ABOUT IT.
+        # Until 2026-09-19 this held one owner per symbol and refused a second
+        # outright, which was right while one strategy traded the Nifty 500 and
+        # wrong the moment two did: BTST Overnight and the swing rotation trade
+        # the same universe in the same segment, and the `instruments` row
+        # either would ingest is identical -- same series filter, same lot-size
+        # source, same trading-symbol source.
+        #
+        # There is nothing to disambiguate, because an `instruments` row does
+        # not record who may trade it: the claim decides how a MASTER ROW IS
+        # PARSED, and ownership of a TRADE is `strategy_key`, stored on the
+        # order and the position at placement (root `CLAUDE.md` section 3a).
+        #
+        # What is still refused is two strategies claiming one name with
+        # DIFFERENT ingestion rules, because then the row genuinely depends on
+        # which of them won -- a lot size from the master against one from
+        # config, or a ticker against a company name -- and "whichever was
+        # loaded first" is not an answer.
+        symbol_owner: Dict[tuple, tuple] = {}
         needs_series = False
         claimed_symbols: Dict[str, set] = {}
 
@@ -304,19 +328,40 @@ class InstrumentMasterService:
                     symbols = strategy.universe.symbols
                 else:
                     symbols = instrument_set.symbols
+                signature = instrument_set.ingestion_signature()
                 for symbol in symbols:
-                    owner = symbol_owner.get((strategy.exchange_id, symbol))
-                    if owner is not None and owner != strategy.key:
-                        raise InstrumentMasterError(
-                            f"Strategies {owner!r} and {strategy.key!r} both claim "
-                            f"{strategy.exchange_id} {symbol}; a contract may "
-                            f"belong to only one strategy."
+                    owner_key, owner_signature = symbol_owner.get(
+                        (strategy.exchange_id, symbol), (None, None)
+                    )
+                    if owner_key is not None and owner_key != strategy.key:
+                        if owner_signature != signature:
+                            raise InstrumentMasterError(
+                                f"Strategies {owner_key!r} and {strategy.key!r} "
+                                f"both claim {strategy.exchange_id} {symbol}, "
+                                f"and they disagree about how to ingest it. "
+                                f"Sharing a name is allowed -- the swing "
+                                f"rotation and BTST Overnight share the whole "
+                                f"Nifty 500 -- but only when the resulting "
+                                f"`instruments` row would be identical. These "
+                                f"two differ: {owner_signature} against "
+                                f"{signature}. Make the instrument sets match, "
+                                f"or narrow one strategy's universe."
+                            )
+                        # Same name, same rules: harmless, and the row is
+                        # ingested once rather than twice.
+                    else:
+                        symbol_owner[(strategy.exchange_id, symbol)] = (
+                            strategy.key,
+                            signature,
                         )
-                    symbol_owner[(strategy.exchange_id, symbol)] = strategy.key
                     claimed_symbols[strategy.key].add(symbol)
-                    claims[
-                        (strategy.exchange_id, instrument_set.instrument_type, symbol)
-                    ] = (strategy, instrument_set)
+                    claim_key = (
+                        strategy.exchange_id,
+                        instrument_set.instrument_type,
+                        symbol,
+                    )
+                    claims.setdefault(claim_key, (strategy, instrument_set))
+                    co_claimants.setdefault(claim_key, set()).add(strategy.key)
 
                 # Only a set that does NOT trust the master's lot size needs one
                 # configured. For NSE EQUITY the master is right and demanding
@@ -403,7 +448,15 @@ class InstrumentMasterService:
                         f"prices. Narrow one strategy's instrument sets."
                     )
                 seen_security_ids[security_id] = segment
-                matched_symbols[strategy.key].add(underlying_symbol)
+                # Credited to EVERY strategy that claims the name, not only to
+                # the one whose set parsed it. Otherwise a shared universe
+                # would report the second strategy's five hundred symbols as
+                # unresolved.
+                for claimant in co_claimants.get(
+                    (record_exchange, record_instrument, underlying_symbol),
+                    {strategy.key},
+                ):
+                    matched_symbols[claimant].add(underlying_symbol)
 
                 tick_divisor = self._tick_divisor(strategy)
 

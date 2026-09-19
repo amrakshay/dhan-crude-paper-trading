@@ -219,7 +219,9 @@ async def test_the_rebalance_runs_after_its_time_and_the_nightly_does_not(
     await _seed_calendar(db_session)
 
     ran = await SwingScheduler().tick(now=AFTER_REBALANCE)
-    kinds = {run.kind for run in ran}
+    # Scoped to THIS strategy: one clock now serves several strategies, and
+    # what BTST does at 09:20 is not this test's business.
+    kinds = {run.kind for run in ran if run.strategy_key == STRATEGY}
     assert kinds == {RUN_REBALANCE}
 
 
@@ -322,10 +324,15 @@ async def test_the_status_names_the_schedule_and_the_arming_state(db_session):
 
 
 async def test_a_discretionary_strategy_is_never_scheduled(db_session):
-    """MCX crude declares no automation block, so the scheduler ignores it."""
+    """MCX crude declares no automation block, so the scheduler ignores it.
+
+    The assertion is about the DISCRETIONARY module, not about how many
+    automated ones exist -- BTST Overnight joined the list on 2026-09-19 and
+    will not be the last.
+    """
     registry = get_strategy_registry()
     automated = {definition.key for definition in registry.automated()}
-    assert automated == {STRATEGY}
+    assert STRATEGY in automated
     assert "mcx-crude-options" not in automated
 
 

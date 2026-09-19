@@ -1309,3 +1309,116 @@ async def test_validating_an_UNSAVED_bot_token_does_not_log_it(
     assert log_redaction.REDACTED in captured_logs.text
     _assert_clean(captured_logs, unsaved)
     assert unsaved not in response.text
+
+
+async def test_the_btst_health_endpoint_serves_records_without_serving_a_secret(
+    auth_client, captured_logs
+):
+    """`GET /api/btst/health`, the second endpoint in this codebase that serves
+    LOG RECORDS.
+
+    Every new endpoint gets an assertion in the same change (root
+    `CLAUDE.md`), and this one earns a test of its own rather than a line in
+    the list above for the same reason the rotation's health tab does: a
+    warning can carry whatever a developer interpolated into it, which is the
+    exposure `/api/healthcheck/problems` is admin-only for.
+
+    It also reaches the feed manager, the scheduler, the instrument master and
+    the charge rate card, all of which sit beside the Dhan credentials in the
+    same config tree.
+    """
+    import os
+
+    from src import log_buffer, log_redaction
+
+    token = _sentinel_token()
+    saved = await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    portfolios = await auth_client.get("/api/portfolios")
+    portfolio_id = portfolios.json()["portfolios"][0]["id"]
+
+    buffered = "btst-buffered-secret-DO-NOT-SHOW-4e91af"
+    log_redaction.register_secret(buffered)
+    try:
+        get_logger("btst.execution").warning("could not exit using %s", buffered)
+
+        responses = [
+            await auth_client.get("/api/btst/health"),
+            await auth_client.get(f"/api/btst/health?portfolioId={portfolio_id}"),
+        ]
+
+        for response in responses:
+            assert response.status_code == 200, response.text
+            assert buffered not in response.text
+            assert token not in response.text
+            for part in token.split("."):
+                if len(part) >= 9:
+                    assert part not in response.text
+            assert SENTINEL_CLIENT_ID not in response.text
+            for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+                value = os.environ.get(name)
+                if value and len(value) >= 9:
+                    assert value not in response.text, (
+                        f"{name} reached the BTST health payload"
+                    )
+            assert "jwt_secret" not in response.text
+            assert "encryption_key" not in response.text
+            assert "access_token" not in response.text
+
+        # The record IS served -- redacted, not dropped.
+        records = responses[0].json()["problems"]["records"]
+        assert any("could not exit" in one["message"] for one in records)
+        assert log_redaction.REDACTED in responses[0].text
+    finally:
+        log_redaction.clear_secrets()
+        handler = log_buffer.get_handler()
+        if handler is not None:
+            handler.clear()
+
+    _assert_clean(captured_logs, token)
+
+
+async def test_the_other_btst_reads_carry_no_secret_either(auth_client):
+    """The rest of the BTST router, in one pass.
+
+    None of these serves log records, but every one of them reaches the
+    strategy definition, the schedule and the policy state -- all read from the
+    same config tree the Dhan credentials live in.
+    """
+    import os
+
+    token = _sentinel_token()
+    saved = await auth_client.put(
+        "/api/settings",
+        json={
+            "syntheticFeed": True,
+            "clientId": SENTINEL_CLIENT_ID,
+            "accessToken": token,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    for path in (
+        "/api/btst/status",
+        "/api/btst/signals",
+        "/api/btst/history",
+        "/api/btst/performance",
+        "/api/btst/configuration",
+        "/api/btst/explain",
+    ):
+        response = await auth_client.get(path)
+        assert response.status_code == 200, f"{path}: {response.text}"
+        assert token not in response.text, path
+        assert SENTINEL_CLIENT_ID not in response.text, path
+        for name in ("APP_JWT_SECRET", "APP_ENCRYPTION_KEY", "APP_ADMIN_PASSWORD"):
+            value = os.environ.get(name)
+            if value and len(value) >= 9:
+                assert value not in response.text, f"{name} reached {path}"

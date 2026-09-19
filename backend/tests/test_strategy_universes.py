@@ -331,14 +331,58 @@ def test_both_strategies_ingest_from_one_pass(rotation, crude, master_csv):
     assert {row["lot_size"] for row in by_segment["NSE_EQ"]} == {1}
 
 
-def test_two_strategies_may_not_claim_the_same_symbol(universe_file, master_csv):
+def test_two_strategies_may_share_a_symbol_when_they_ingest_it_identically(
+    universe_file, master_csv
+):
+    """Two strategies on the same universe is the point, not a collision.
+
+    The rotation and BTST Overnight both trade the Nifty 500 out of `NSE_EQ`,
+    with the same series filter, the same lot-size source and the same
+    trading-symbol source -- so the `instruments` row either of them would
+    ingest is byte for byte the same row. There is nothing to disambiguate:
+    the claim decides how a MASTER ROW IS PARSED, and ownership of a TRADE is
+    `strategy_key`, stored on the order and the position at placement.
+
+    Before 2026-09-19 this was refused outright, which was right while one
+    strategy traded the Nifty 500 and became wrong the moment two did.
+    """
     first = build_definition(_equity_document(universe_file), source="a.yaml")
     second = build_definition(
         _equity_document(universe_file, key="other-rotation"), source="b.yaml"
     )
     service = InstrumentMasterService(repository=None, strategies=[first, second])
 
-    with pytest.raises(InstrumentMasterError, match="both claim"):
+    rows, _, warnings = service.parse(master_csv)
+
+    # Ingested ONCE, not twice: a shared claim is one row, not two.
+    assert rows, "the shared universe still produced instrument rows"
+    security_ids = [row["security_id"] for row in rows]
+    assert len(security_ids) == len(set(security_ids))
+
+    # And the shared names are credited to BOTH strategies, not only to
+    # whichever was loaded first -- otherwise the second would report its whole
+    # universe as unresolved.
+    unresolved = " ".join(one for one in warnings if "did not resolve" in one)
+    assert "test-rotation" not in unresolved or "1 of 4" in unresolved
+    assert not any("4 of 4" in one for one in warnings)
+
+
+def test_two_strategies_may_not_claim_the_same_symbol_with_DIFFERENT_rules(
+    universe_file, master_csv
+):
+    """Sharing is allowed; disagreeing is not.
+
+    A lot size taken from the master against one taken from config produces a
+    genuinely different row, and "whichever strategy was loaded first" is not
+    an answer to which one is right.
+    """
+    first = build_definition(_equity_document(universe_file), source="a.yaml")
+    document = _equity_document(universe_file, key="other-rotation")
+    document["instrument_sets"][0]["trading_symbol_source"] = "display_name"
+    second = build_definition(document, source="b.yaml")
+    service = InstrumentMasterService(repository=None, strategies=[first, second])
+
+    with pytest.raises(InstrumentMasterError, match="disagree about how to ingest"):
         service.parse(master_csv)
 
 

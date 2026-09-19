@@ -522,3 +522,66 @@ than anywhere except the health page.
   origin — that is what makes the session cookie work on the WebSocket
   handshake. Keep relative URLs.
 - `npm run build` must pass before committing.
+
+---
+
+## 5e. The BTST Overnight page
+
+`src/pages/BtstOvernightPage.jsx`, with `BtstSignals`, `BtstConfiguration`,
+`BtstHealth`, `BtstExplainer` and the shared `BtstFunnel`. The second strategy
+that trades with nobody watching, so section 3's honesty rules apply as hard
+here as on `/swing` — plus two that are specific to this one.
+
+- **FIVE tabs, where the rotation has four**, and the extra one is Signals.
+  That is not symmetry for its own sake: the rotation's decision happens
+  overnight in one shot, while this one forms over the afternoon, and between
+  14:30 and 15:20 the funnel filling up is the most interesting thing on the
+  screen. The tab is a live read that journals nothing and places nothing.
+- **"NOTHING QUALIFIED TODAY" IS THE NORMAL STATE**, and the page has to read
+  that way. At about half a signal a session most days produce nothing, so a
+  page that could only say "no candidates" would look broken far more often
+  than it looked right. `BtstFunnel` is always on screen for exactly that
+  reason: "289 tradable, 284 measured, 31 above their 55-day high, 6 on 2×
+  volume, 0 closing strong" reads as a working scan and a bare zero does not.
+  It is a shared component because both the Live tab's history and the Signals
+  tab render it from the same server-side stage list — two copies would drift
+  into describing the same filters differently.
+- **A LATE EXIT IS SHOWN AS LATE, in the colour of a problem.** Holding past
+  the open is not a delay, it is a different strategy: the same positions held
+  to the next close measure a 49.0% win rate against 71.4%. `EXITED_LATE` and
+  `FAILED` are their own chips, the delay in minutes is beside them, and the
+  Live tab carries a banner when anything did not leave.
+- **An overnight gap on a position that has not been sold renders "not sold
+  yet", never 0.00%.** Section 3's rule, pointed at the one number this
+  strategy is a bet on.
+- **The performance card shows this book's figures BESIDE the backtest's**,
+  with the server's own note about why they will differ: the fill simulator
+  pays the far touch and walks the book, against the backtest's flat 0.05% a
+  side. That gap is the most valuable number the exercise produces and the page
+  reports it rather than hiding it.
+- **The "How it works" tab restates no number.** `BtstExplainer` renders
+  `GET /api/btst/explain`, which reads every threshold and lookback out of the
+  strategy's YAML. It leads with the specification's own recommendation NOT to
+  fund this yet and with the year-by-year decay table, above the rules rather
+  than below them — a reader who stops half way should have seen both. It also
+  states, in the page, that the specification contradicts itself about B10.
+- **The Configuration tab is a FORM: nothing takes effect until Save**, the
+  draft holds only the fields actually changed, the dialog shows the server's
+  warnings and refusal before the confirm button, and a half-applied save says
+  which half. All of that is the rotation's tab's contract and the reasons are
+  the same; §5d has them.
+- **The Health tab is the only ADMIN-ONLY part of this page**, and its FIRST
+  panel is "did the exit run" — before the clock, before the bars. Its second
+  is "is the universe subscribed", because this is the only strategy whose
+  decision needs live prices for ~289 instruments at one moment and it
+  subscribes them for a window rather than all session. `Verdict` takes three
+  tones, not a boolean: off is not broken.
+- **The stop watcher's ABSENCE is stated rather than left blank.** This
+  strategy has no stop and none is possible, and a row reading "not running"
+  would invite somebody to fix it.
+- **The tab is in the URL** (`?tab=signals`, `?tab=health`, …), so "read this
+  page" is a link somebody can send. `?tab=health` falls back to Live for a
+  `ROLE_USER`, which is presentation — the endpoint 403s them regardless.
+- **The page is NOT gated by the strategy toggle**, like `/swing`: a journal is
+  history, and switching the strategy off must not hide the record of what it
+  did.

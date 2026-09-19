@@ -212,8 +212,8 @@ class SwingHealthService:
         )
         by_name = {row["name"]: row for row in table["tasks"]}
         jobs = [
-            self._job_row(by_name, "swing-scheduler", "the clock"),
-            self._job_row(by_name, "swing-stop-monitor", "the stop watcher"),
+            self._job_row(by_name, "swing-scheduler", "the clock", enabled),
+            self._job_row(by_name, "swing-stop-monitor", "the stop watcher", enabled),
         ]
 
         manager = get_feed_manager()
@@ -258,18 +258,33 @@ class SwingHealthService:
 
     @staticmethod
     def _job_row(
-        by_name: Dict[str, Dict[str, Any]], name: str, role: str
+        by_name: Dict[str, Dict[str, Any]],
+        name: str,
+        role: str,
+        strategy_enabled: bool = True,
     ) -> Dict[str, Any]:
         """One background task, judged against whether it SHOULD be running.
 
         A task absent from `asyncio.all_tasks()` while expected is what "it
         died" looks like -- there is no other signal, because a task that
         raised and finished simply stops appearing.
+
+        **`expected` is narrowed to THIS strategy**, and that became necessary
+        on 2026-09-19 when a second automated module arrived. These tasks are
+        process-wide: `task_inspector` expects the scheduler whenever ANY
+        automated strategy is enabled, which is right for the system health
+        page. It is wrong for a strategy's own tab. With BTST on and the
+        rotation off, the shared scheduler is genuinely expected -- and saying
+        so HERE would paint the rotation's tab red for a task it is not using,
+        which is exactly the "off is not broken" rule this tab already follows
+        for everything else. Red stays reserved for a job that should be
+        running FOR THIS STRATEGY and is not.
         """
         row = by_name.get(name)
         if row is None:
-            # Neither running nor expected: the strategy is off, or the task's
-            # own config switch is off. Not a failure, and not a running task.
+            # Neither running nor expected: nothing automated is on, or the
+            # task's own config switch is off. Not a failure, and not a running
+            # task.
             return {
                 "name": name,
                 "role": role,
@@ -282,7 +297,7 @@ class SwingHealthService:
             "name": name,
             "role": role,
             "state": row["state"],
-            "expected": row["expected"],
+            "expected": bool(row["expected"] and strategy_enabled),
             "instances": row["instances"],
             "description": row["description"],
         }

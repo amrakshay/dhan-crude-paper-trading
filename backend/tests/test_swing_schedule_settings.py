@@ -80,7 +80,18 @@ def test_only_the_two_times_are_editable(definition):
     specification's own table and root CLAUDE.md section 3a has stopped being
     true.
     """
-    assert set(KNOWN_SETTINGS) == {SETTING_NIGHTLY_AT, SETTING_REBALANCE_AT}
+    # `KNOWN_SETTINGS` is the FRAMEWORK's whole vocabulary across every
+    # strategy, so a second automated module adds to it -- BTST's scan and exit
+    # times joined on 2026-09-19. What must not grow is the set offered for
+    # THIS strategy, which is the assertion below and the one that carries the
+    # rule: a momentum floor, an ATR multiple, a lookback or the rebalance
+    # cadence appearing there is what would break section 3a.
+    assert {SETTING_NIGHTLY_AT, SETTING_REBALANCE_AT} <= set(KNOWN_SETTINGS)
+    assert not any(
+        word in setting
+        for setting in KNOWN_SETTINGS
+        for word in ("floor", "atr", "lookback", "cadence", "multiple", "rank")
+    )
     keys = {row["key"] for row in describe_settings(definition)["settings"]}
     assert keys == {SETTING_NIGHTLY_AT, SETTING_REBALANCE_AT}
 

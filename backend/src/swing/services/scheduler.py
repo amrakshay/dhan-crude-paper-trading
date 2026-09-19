@@ -30,7 +30,6 @@ own database session, and does its work there -- the same arrangement as
 `OrderMatcher` and the two stop monitors.
 """
 import asyncio
-from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -39,11 +38,18 @@ from src.core.time_utils import ist_now, parse_hhmm
 from src.database.session import session_scope
 from src.logging_config import get_logger
 from src.strategies.services import market_clock
+from src.strategies.services.scheduling import JobRun, MissedRun
 from src.strategies.services.strategy_definition import StrategyDefinition
 from src.swing.database.db_models.swing_session_model import (
     RUN_NIGHTLY,
     RUN_REBALANCE,
 )
+
+# Re-exported: `JobRun` and `MissedRun` moved to `src/strategies/services/
+# scheduling.py` on 2026-09-19 so a second automated module could return them
+# without importing this package. Every existing import of them from here still
+# works, which is the point.
+__all__ = ["SwingScheduler", "JobRun", "MissedRun", "TASK_NAME", "RETRY_AFTER"]
 
 logger = get_logger("swing.scheduler")
 
@@ -62,45 +68,23 @@ TASK_NAME = "swing-scheduler"
 RETRY_AFTER = timedelta(minutes=15)
 
 
-@dataclass
-class JobRun:
-    """What one attempt did, for the status dict and the log."""
-
-    strategy_key: str
-    kind: str
-    at: datetime
-    portfolios: int = 0
-    ok: bool = True
-    detail: str = ""
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "strategyKey": self.strategy_key,
-            "kind": self.kind,
-            "atIst": self.at.isoformat(),
-            "portfolios": self.portfolios,
-            "ok": self.ok,
-            "detail": self.detail,
-        }
-
-
-@dataclass
-class MissedRun:
-    strategy_key: str
-    kind: str
-    sessions: List[date] = field(default_factory=list)
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "strategyKey": self.strategy_key,
-            "kind": self.kind,
-            "sessions": [one.isoformat() for one in self.sessions],
-            "count": len(self.sessions),
-        }
-
-
 class SwingScheduler:
-    """One task, two jobs, every automated strategy."""
+    """The only clock in this application, and every automated strategy's.
+
+    THE NAME IS HISTORY, AND IS KEPT ON PURPOSE. It was written for the
+    rotation and ran only the rotation until 2026-09-19; it now also runs
+    BTST. Renaming the class would be cosmetic, but the TASK name
+    (`swing-scheduler`) is load-bearing -- it is a key in `TASK_DESCRIPTIONS`
+    and `expected_task_names`, both health surfaces judge the task against it,
+    and nothing is gained by making a live installation's health page report a
+    task that has "gone missing" and a new one that is "unexpected".
+
+    What each strategy DOES on the clock is not here. `tick` resolves the
+    strategy's own module through `strategy_modules.hooks_for` and asks it, so
+    the run kinds are per module rather than the hardcoded NIGHTLY/REBALANCE
+    pair they used to be. The rotation's job bodies below are untouched by
+    that change; only their caller moved.
+    """
 
     def __init__(self) -> None:
         self._task: Optional[asyncio.Task] = None
@@ -205,10 +189,30 @@ class SwingScheduler:
         ran: List[JobRun] = []
         registry = get_strategy_registry()
 
+        from src.strategies.services.strategy_modules import hooks_for
+
         for definition in registry.automated():
             if not registry.is_enabled(definition.key):
                 continue
-            ran.extend(await self._tick_strategy(definition, now))
+            # WHAT this strategy does on the clock belongs to its own module.
+            # Until 2026-09-19 there was one automated module and this loop
+            # called the rotation's jobs directly; the run kinds are per module
+            # now. The rotation's `_tick_strategy` below is unchanged and is
+            # what its hook calls.
+            hooks = hooks_for(definition)
+            if hooks is None or not hasattr(hooks, "tick_strategy"):
+                continue
+            try:
+                ran.extend(await hooks.tick_strategy(self, definition, now))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - one module must not stop another
+                self.last_error = f"{definition.key}: {type(exc).__name__}: {exc}"
+                logger.exception(
+                    "Scheduled work for %s failed; other strategies are "
+                    "unaffected.",
+                    definition.key,
+                )
 
         # Once a day, after the nightly window, check that nothing was missed.
         if self._should_check_missed(now):
@@ -631,10 +635,8 @@ class SwingScheduler:
         from src.daily_bars.database.db_operations.daily_bar_repository import (
             DailyBarRepository,
         )
+        from src.strategies.services.strategy_modules import hooks_for
         from src.strategies.services.strategy_registry import get_strategy_registry
-        from src.swing.database.db_operations.swing_session_repository import (
-            SwingSessionRepository,
-        )
 
         registry = get_strategy_registry()
         lookback = self._missed_lookback()
@@ -642,7 +644,6 @@ class SwingScheduler:
 
         async with session_scope() as session:
             bars = DailyBarRepository(session)
-            sessions = SwingSessionRepository(session)
 
             for definition in registry.automated():
                 reference = self._regime_reference(definition)
@@ -659,32 +660,23 @@ class SwingScheduler:
                 if not expected:
                     continue
 
-                # Nothing before the journal existed can be missing from it.
-                live_from = await self._accountable_from(
-                    sessions, definition.key, calendar
-                )
-                if live_from is None:
-                    # Never completed a run. Not a gap -- no history at all,
-                    # which is a different state and not this detector's
-                    # business.
+                # WHICH RUN KINDS a strategy owes a record for is the strategy's
+                # own question, and so is which journal answers it. The
+                # calendar above is not -- a date NSE published a bar for is a
+                # date NSE traded, whoever is asking.
+                hooks = hooks_for(definition)
+                if hooks is None or not hasattr(hooks, "detect_missed"):
                     continue
-                expected = [one for one in expected if one >= live_from]
-                if not expected:
-                    continue
-
-                for kind in (RUN_NIGHTLY, RUN_REBALANCE):
-                    decided = set(
-                        await sessions.decided_session_dates(
-                            definition.key, kind, expected[0]
-                        )
+                try:
+                    found.extend(
+                        await hooks.detect_missed(definition, session, expected)
                     )
-                    gaps = [one for one in expected if one not in decided]
-                    if gaps:
-                        found.append(
-                            MissedRun(
-                                strategy_key=definition.key, kind=kind, sessions=gaps
-                            )
-                        )
+                except Exception:  # noqa: BLE001 - one module must not stop another
+                    logger.exception(
+                        "Could not check %s for missed runs; other strategies "
+                        "are unaffected.",
+                        definition.key,
+                    )
 
         self.missed = found
         self.checked_for_missed_at = ist_now()
@@ -722,13 +714,18 @@ class SwingScheduler:
 
     @staticmethod
     def _regime_reference(definition: StrategyDefinition):
-        from src.swing.services.swing_parameters import SwingParameters
+        """The index whose bar dates ARE this application's trading calendar.
 
-        try:
-            role = SwingParameters.from_definition(definition).regime.index_role
-        except Exception:  # noqa: BLE001 - a module without one is not an error here
+        Read straight off the YAML's `regime.index_role` rather than through a
+        module's parameters class. Both automated modules declare one and mean
+        the same thing by it, and going through `SwingParameters` would make
+        the calendar lookup fail for every strategy that is not the rotation --
+        silently, because the failure is caught and returns None.
+        """
+        role = (definition.module_section("regime") or {}).get("index_role")
+        if not role:
             return None
-        return definition.reference_instrument(role)
+        return definition.reference_instrument(str(role))
 
     # --- wiring -------------------------------------------------------------
     @staticmethod

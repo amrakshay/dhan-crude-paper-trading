@@ -131,12 +131,13 @@ class StrategyController:
         is nothing to enforce when a person is in front of every order. Only an
         automated module has rules it applies by itself.
         """
-        if not definition.automation.automated:
-            return {"policies": [], "contradiction": None}
-        from src.swing.services.gate_policy import describe_policies
+        from src.strategies.services.strategy_modules import hooks_for
 
         try:
-            return describe_policies(definition)
+            hooks = hooks_for(definition)
+            if hooks is None:
+                return {"policies": [], "contradiction": None}
+            return hooks.describe_policies(definition)
         except Exception:  # noqa: BLE001 - the page must still render
             logger.exception(
                 "Could not describe the policies for %s", definition.key
@@ -156,14 +157,15 @@ class StrategyController:
     def _settings_for(definition) -> List[SettingResponse]:
         """The runtime values an operator may move. Empty for a discretionary
         module: nothing schedules it, so it has no times."""
-        if not definition.automation.automated:
-            return []
-        from src.swing.services.schedule_settings import describe_settings
+        from src.strategies.services.strategy_modules import hooks_for
 
         try:
+            hooks = hooks_for(definition)
+            if hooks is None:
+                return []
             return [
                 SettingResponse(**row)
-                for row in describe_settings(definition)["settings"]
+                for row in hooks.describe_settings(definition)["settings"]
             ]
         except Exception:  # noqa: BLE001 - the page must still render
             logger.exception(

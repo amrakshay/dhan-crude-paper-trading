@@ -44,14 +44,20 @@ def only_crude_is_running():
     """This file's subject is what switching a strategy OFF does.
 
     So it starts from a state where the strategy being switched off is
-    actually running. Crude ships off since 2026-09-18 and the swing rotation
-    ships on; these tests were written when there was one module and they mean
-    "the strategy", so they pin the starting state explicitly instead of
-    inheriting whichever default is current. conftest restores the defaults.
+    actually running. Crude ships off since 2026-09-18 and the NSE modules ship
+    on; these tests were written when there was one module and they mean "the
+    strategy", so they pin the starting state explicitly instead of inheriting
+    whichever default is current. conftest restores the defaults.
+
+    **Everything that is not crude is switched off, by name of none of them.**
+    Listing the others was fine while there was one; a second NSE module
+    arrived on 2026-09-19 and silently broke the isolation, because a strategy
+    nobody had thought to disable still contributed per-strategy feed state to
+    assertions that expect none.
     """
     registry = get_strategy_registry()
-    registry.set_enabled(CRUDE, True)
-    registry.set_enabled("nse-swing-momentum", False)
+    for definition in registry.all():
+        registry.set_enabled(definition.key, definition.key == CRUDE)
     yield
 
 

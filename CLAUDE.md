@@ -218,6 +218,33 @@ Rules that are not negotiable:
   withheld -- not zeroed -- when any open position has no mark.
 - **Funds are checked at placement AND at the fill.** A resting order that
   became unaffordable is rejected, never partially filled to fit.
+- **AN INSTRUMENT NO LONGER DETERMINES A STRATEGY.** Added 2026-09-19, when a
+  second NSE equity module arrived: the swing rotation and BTST Overnight both
+  trade the Nifty 500, so SUNTV belongs to both. Two consequences, and both are
+  the same rule the portfolio picker already follows.
+
+  `submit_paper_order(strategy_key=...)` -- the caller SAYS which, the way it
+  already says which portfolio. An ambiguous instrument with no key is REFUSED,
+  never resolved to the alphabetically first: a trade under the wrong strategy
+  carries the wrong rate card, the wrong arming switch and the wrong journal,
+  and nothing downstream would ever notice. A CLOSE resolves from the POSITION,
+  which already carries the strategy it was opened under, so the two halves of
+  a round trip cannot land in different books.
+
+  And the instrument master's exclusivity rule is now "one INGESTION RULE per
+  symbol", not "one strategy per symbol". Two strategies may claim a name when
+  the `instruments` row either would produce is identical -- same series
+  filter, same lot-size source, same trading-symbol source. Two that DISAGREE
+  are still refused, because then the row genuinely depends on which won.
+
+- **A MISSED RUN DOES NOT COST THE SAME THING IN EVERY STRATEGY.** The rotation
+  treats a missed session as reportable and harmless: the next run re-decides.
+  BTST's EXIT is the edge -- the same positions held to the next close instead
+  of the next open measure a 49.0% win rate against 71.4% -- so its exit job is
+  bounded only at the BOTTOM, sells late rather than waiting, records a late
+  sale as its own status, leaves a position that could not be sold OPEN, and
+  raises an alert. Do not "harmonise" the two jobs; the asymmetry is the point.
+
 - **ENABLED and ARMED are two switches.** Enabling a strategy makes it compute,
   decide and write a decision record; ARMING is what lets it submit an order of
   its own accord. Only a module that declares an `automation` block in its YAML
@@ -463,8 +490,32 @@ depends on them without re-verifying will produce silently wrong numbers.
 | Exchange transaction charge | 0.0418% (MCX circular MCX/F&A/631/2024). The 0.053% figure appears in no MCX circular. |
 | CTT vs STT | Commodity options attract **CTT**, on the sell side of the premium. The 0.125% entry in the same statute is for *options in goods* — a different transaction. |
 
-Unverified, flagged in code: the Quote/Full packet maps its four price fields as
-open, close, high, low per the SDK. Never checked against a live feed.
+**Unverified, flagged in code, and now LOAD-BEARING:** the Quote/Full packet
+maps its four price fields as open, close, high, low per the SDK. Never checked
+against a live feed.
+
+It stopped being cosmetic on 2026-09-19. NSE BTST Overnight's B6 is
+`CLV = (price - low) / (high - low) > 0.8` measured on the session so far, so a
+transposition does not make that filter drift -- it INVERTS it, and the strategy
+buys the weakest closes in the market while every number it produces looks
+plausible.
+
+`scripts/verify_feed_session_fields.py` is the standing answer: it subscribes a
+few names mid-session and compares the packet's session high and low against
+`/charts/intraday` for the same day. **It has not been run yet** -- it must run
+during a session with a working token, and it refuses outside market hours
+because the comparison would mean nothing. WHEN IT IS RUN, RECORD THE FINDING
+IN THE TABLE ABOVE and delete this note.
+
+Until then `scan_service.Quote.usable` refuses a quote whose high is below its
+low, or whose last trade is outside its own session range. That does not verify
+the mapping; it makes the failure a scan that qualifies nothing and says why,
+instead of a book of inverted trades.
+
+The same script settles a second unverified claim, the one BTST's subscription
+window rests on: that the packet carries the session AGGREGATE high, low and
+volume rather than a delta since subscription. If it is a delta, the fix is to
+open the window at 09:15 in the strategy YAML rather than at 14:45.
 
 ---
 
@@ -484,6 +535,18 @@ backend/src/chart_trading/                         one-click trading from the ch
 backend/src/chart_trading/services/bracket_monitor.py   server-side SL/TP watcher
 backend/src/swing/                 the NSE rotation: ranking, planner, execution,
                                    stops, scheduler, journal -- see its README
+backend/src/btst/                  the NSE overnight hold: the 15:20 scan, the
+                                   defended exit, its own journal -- see its README
+backend/src/btst/services/scan_service.py   the filter funnel, B2-B8
+backend/src/btst/services/execution_service.py  the scan, and THE EXIT
+backend/scripts/verify_feed_session_fields.py   settles root CLAUDE.md's
+                                   unverified high/low mapping, against a live feed
+backend/src/strategies/services/strategy_modules.py  which package owns a
+                                   strategy's own rules, looked up by key
+backend/src/strategies/services/scheduling.py   JobRun and MissedRun, so two
+                                   modules can return them without importing each other
+frontend/src/pages/BtstOvernightPage.jsx       its five tabs
+frontend/src/components/BtstSignals.jsx        today's scan, watchable live
 backend/src/swing/services/gate_policy.py          whether a RULE is enforced
 backend/src/swing/services/schedule_settings.py   WHEN it wakes up, and the two
                                                   times it refuses

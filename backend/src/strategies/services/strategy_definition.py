@@ -108,20 +108,30 @@ CAPABILITY_DESCRIPTIONS: Dict[str, str] = {
 # They are offered only for a module that declares an `automation` block, the
 # same way the arming switch is. A discretionary module has a person in front of
 # every order and needs no policy switch.
+#
+# `regime.enforce` is deliberately SHARED between the two automated modules.
+# Both mean the identical thing by it -- the regime index's close against its
+# own 200-session SMA -- and what differs is only how much it does: it is
+# load-bearing for the rotation and near-optional for BTST, where only 259 of
+# 3,016 signals ever fire below the SMA. A second name for the same rule would
+# make the switch look like two different facts.
 POLICY_REGIME_ENFORCE = "regime.enforce"
 POLICY_REGIME_ENFORCE_ENTRY_RETURN = "regime.enforce_entry_return"
 POLICY_OFF_GATE_ENABLED = "off_gate.enabled"
+POLICY_FNO_EXCLUDE = "fno.exclude"
 
 KNOWN_POLICIES: Tuple[str, ...] = (
     POLICY_REGIME_ENFORCE,
     POLICY_REGIME_ENFORCE_ENTRY_RETURN,
     POLICY_OFF_GATE_ENABLED,
+    POLICY_FNO_EXCLUDE,
 )
 
 POLICY_LABELS: Dict[str, str] = {
     POLICY_REGIME_ENFORCE: "Enforce the regime gate",
     POLICY_REGIME_ENFORCE_ENTRY_RETURN: "Enforce the entry-return filter",
     POLICY_OFF_GATE_ENABLED: "Trade the off-gate variant",
+    POLICY_FNO_EXCLUDE: "Exclude F&O-eligible names",
 }
 
 # What ON and OFF should be CALLED for each switch. Two of these are about
@@ -132,6 +142,7 @@ POLICY_STATE_LABELS: Dict[str, tuple] = {
     POLICY_REGIME_ENFORCE: ("ENFORCED", "NOT ENFORCED"),
     POLICY_REGIME_ENFORCE_ENTRY_RETURN: ("ENFORCED", "NOT ENFORCED"),
     POLICY_OFF_GATE_ENABLED: ("ENABLED", "DISABLED"),
+    POLICY_FNO_EXCLUDE: ("EXCLUDED", "INCLUDED"),
 }
 
 POLICY_DESCRIPTIONS: Dict[str, str] = {
@@ -149,6 +160,14 @@ POLICY_DESCRIPTIONS: Dict[str, str] = {
         "The V3b variant: hold a smaller book at its own momentum floor while "
         "the gate is off, instead of holding cash. The owner's own research "
         "tested thirteen such variants and not one beat holding cash."
+    ),
+    POLICY_FNO_EXCLUDE: (
+        "On: only names WITHOUT listed derivatives are traded. For the 210 "
+        "F&O names continuous trading ends at 15:15, so a 15:20 order lands "
+        "in a closing auction this simulator cannot model -- and the non-F&O "
+        "half carries the larger edge anyway (+0.722% against +0.512% gross "
+        "per signal). Off: the whole universe is scanned, at roughly twice the "
+        "signal frequency and with F&O orders refused after 15:15."
     ),
 }
 
@@ -174,15 +193,27 @@ POLICY_DESCRIPTIONS: Dict[str, str] = {
 # module -- see `src/swing/services/schedule_settings.py`.
 SETTING_NIGHTLY_AT = "schedule.nightly_at"
 SETTING_REBALANCE_AT = "schedule.rebalance_at"
+# BTST's two. Named separately from the rotation's rather than reused, because
+# they are constrained in OPPOSITE directions and a shared name would make one
+# validator have to ask which strategy it was looking at. The rotation's
+# analysis may not run inside the session -- it would store a forming bar as a
+# finished one; BTST's scan may only run inside it, because reading the forming
+# session is the entire mechanism.
+SETTING_SCAN_AT = "schedule.scan_at"
+SETTING_EXIT_AT = "schedule.exit_at"
 
 KNOWN_SETTINGS: Tuple[str, ...] = (
     SETTING_NIGHTLY_AT,
     SETTING_REBALANCE_AT,
+    SETTING_SCAN_AT,
+    SETTING_EXIT_AT,
 )
 
 SETTING_LABELS: Dict[str, str] = {
     SETTING_NIGHTLY_AT: "Analysis of stocks",
     SETTING_REBALANCE_AT: "Order placement time",
+    SETTING_SCAN_AT: "Afternoon scan",
+    SETTING_EXIT_AT: "Morning exit",
 }
 
 SETTING_DESCRIPTIONS: Dict[str, str] = {
@@ -198,6 +229,19 @@ SETTING_DESCRIPTIONS: Dict[str, str] = {
         "buy. It must be inside continuous trading: an order sent outside the "
         "session is refused, so a time outside it would mean a strategy that "
         "decides and never trades."
+    ),
+    SETTING_SCAN_AT: (
+        "IST. When it reads the session so far -- each name's high, low and "
+        "cumulative volume -- decides which qualify, and buys them. It must be "
+        "INSIDE the session, because the forming session is what it measures. "
+        "Moving it earlier measures less of the day and moving it later leaves "
+        "less room to fill."
+    ),
+    SETTING_EXIT_AT: (
+        "IST. When it sells everything it is holding, unconditionally. This is "
+        "the whole edge: the same signals held to the next CLOSE instead of "
+        "the next OPEN take the win rate from 71.4% to 49.0%. It must be "
+        "inside continuous trading and early in it."
     ),
 }
 
@@ -298,15 +342,56 @@ class SubscriptionPolicy:
                       whole universe would spend the connection's budget on
                       500 symbols whose decisions are taken from daily bars
                       fetched over REST.
+      universe     -- every tradable name the strategy claims, but only
+                      between `window_opens_at` and `window_closes_at`, and
+                      `positions` the rest of the day.
+
+    THE THIRD KIND INVERTS THE SECOND'S REASONING, and both are right about
+    their own strategy. A rotation decides overnight on daily bars, so a live
+    universe subscription is 490 instruments nobody reads. BTST decides at
+    15:20 on the session's own high, low and cumulative volume for every
+    candidate at once -- for which the feed is not an optimisation, it is the
+    only mechanism that fits in the window (specification section 8 measures
+    REST-polling ~480 symbols at ~5 minutes).
+
+    The window is what keeps the cost bounded. Dhan's Quote/Full packet carries
+    the session AGGREGATE rather than a delta, so a subscription opened in the
+    afternoon should still report the whole session -- which would mean paying
+    for ~289 extra instruments for forty minutes a day instead of six hours.
+    That claim is UNVERIFIED against a live feed; see
+    `scripts/verify_feed_session_fields.py`. If it is wrong, the fix is to move
+    `window_opens_at` to the open, which is configuration rather than code.
     """
 
     kind: str
     strike_window: int = 0
     expiries_to_subscribe: int = 0
     resubscribe_move_strikes: int = 3
+    # UNIVERSE only. None on the other two kinds, which are all-day.
+    window_opens_at: Optional[time] = None
+    window_closes_at: Optional[time] = None
 
     OPTION_CHAIN = "option_chain"
     POSITIONS = "positions"
+    UNIVERSE = "universe"
+
+    KINDS = (OPTION_CHAIN, POSITIONS, UNIVERSE)
+
+    def window_is_open(self, at: time) -> bool:
+        """Is the universe due on the feed at this moment?
+
+        False for any kind that has no window, so a caller need not ask what
+        kind it is holding. A window with only one end configured is treated as
+        unbounded at the other, which is the reading that keeps a half-filled
+        block from silently subscribing nothing.
+        """
+        if self.kind != self.UNIVERSE:
+            return False
+        if self.window_opens_at is not None and at < self.window_opens_at:
+            return False
+        if self.window_closes_at is not None and at > self.window_closes_at:
+            return False
+        return True
 
 
 @dataclass(frozen=True)
@@ -379,6 +464,32 @@ class InstrumentSet:
 
     def trusts_master_lot_size(self) -> bool:
         return self.lot_size_source == self.LOT_SIZE_FROM_MASTER
+
+    def ingestion_signature(self) -> Tuple[Any, ...]:
+        """HOW this set turns a master row into an `instruments` row.
+
+        Everything that changes the resulting row, and nothing that does not:
+        `symbols` and `from_universe` decide WHICH rows are claimed, not what
+        they become, and `role` is a tag the framework never interprets.
+
+        It exists so that two strategies claiming the SAME name can be told
+        apart from two strategies claiming it DIFFERENTLY. The NSE Swing
+        Momentum rotation and BTST Overnight both trade the Nifty 500 out of
+        `NSE_EQ`, with the same series filter, the same lot-size source and the
+        same trading-symbol source -- so the row either of them would ingest is
+        byte for byte the same row, and insisting one of them own it would mean
+        two strategies could never share a universe. Two sets that disagree
+        about the series or the lot size WOULD produce different rows, and that
+        is still refused.
+        """
+        return (
+            self.instrument_type,
+            self.exchange_segment,
+            self.exchange_segment_code,
+            tuple(sorted(self.series)),
+            self.lot_size_source,
+            self.trading_symbol_source,
+        )
 
     def accepts_series(self, series: Optional[str]) -> bool:
         if not self.series:
@@ -943,15 +1054,35 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
             else SubscriptionPolicy.POSITIONS
         )
     )
-    if subscription_kind not in (
-        SubscriptionPolicy.OPTION_CHAIN,
-        SubscriptionPolicy.POSITIONS,
-    ):
+    if subscription_kind not in SubscriptionPolicy.KINDS:
         raise StrategyConfigError(
-            f"{source}: subscription.kind {subscription_kind!r} is not "
-            f"{SubscriptionPolicy.OPTION_CHAIN!r} or "
-            f"{SubscriptionPolicy.POSITIONS!r}."
+            f"{source}: subscription.kind {subscription_kind!r} is not one of "
+            f"{', '.join(repr(one) for one in SubscriptionPolicy.KINDS)}."
         )
+    window_opens_at = None
+    window_closes_at = None
+    if subscription_kind == SubscriptionPolicy.UNIVERSE:
+        # REQUIRED, not defaulted. A universe subscription with no window is
+        # the whole universe on the feed all session, which is precisely the
+        # cost this kind exists to bound -- and it would be an expensive thing
+        # to acquire by leaving a key out.
+        window_opens_at = _parse_hhmm(
+            _require(subscription, "window_opens_at", source),
+            source,
+            "subscription.window_opens_at",
+        )
+        window_closes_at = _parse_hhmm(
+            _require(subscription, "window_closes_at", source),
+            source,
+            "subscription.window_closes_at",
+        )
+        if window_closes_at <= window_opens_at:
+            raise StrategyConfigError(
+                f"{source}: subscription.window_closes_at "
+                f"({window_closes_at.strftime('%H:%M')}) must be after "
+                f"window_opens_at ({window_opens_at.strftime('%H:%M')}); the "
+                f"universe would never reach the feed."
+            )
     if subscription_kind == SubscriptionPolicy.OPTION_CHAIN:
         _require(subscription, "strike_window", source)
         _require(subscription, "expiries_to_subscribe", source)
@@ -1052,6 +1183,8 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
             resubscribe_move_strikes=int(
                 subscription.get("resubscribe_move_strikes", 3)
             ),
+            window_opens_at=window_opens_at,
+            window_closes_at=window_closes_at,
         ),
         greeks_expiries_to_poll=int(
             (document.get("greeks") or {}).get("expiries_to_poll", 2)

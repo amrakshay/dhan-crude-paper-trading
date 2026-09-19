@@ -1612,6 +1612,80 @@ auditable. Making it generic later means a per-strategy policy read from the
 YAML with the MCX module's behaviour unchanged;
 `backend/tests/test_swing_does_not_disturb_crude.py` pins exactly that.
 
+## NSE BTST Overnight — a third strategy module
+
+**Buy today, sell tomorrow.** At ~15:20 IST it buys Nifty 500 names making a
+fresh 55-day high, closing in the top fifth of the day's range, on twice their
+average volume, that are also six-month momentum leaders above their 200-day
+SMA — and it sells every one of them at the next morning's open. There is no
+stop, and none is possible.
+
+**Read "Known gaps" before arming it.** Its own author does not recommend
+funding it yet; §16 of the specification says paper-trade it for 8–12 weeks
+first, and that is exactly what this is for.
+
+### What makes it different from the rotation
+
+The rotation decides at 18:15 on finished daily bars. This decides at **15:20
+on live intraday state** — three of its seven filters read the session so far,
+from the feed, for the whole universe at once. Almost every design difference
+follows from that one sentence, and `backend/src/btst/README.md` has the table.
+
+The consequence that matters most: **the exit is the edge.** Held to the next
+OPEN the specification measures +0.617% gross at a 71.4% win rate; the identical
+signals held to the next CLOSE measure +0.428% at **49.0%**. So the exit job is
+the most defended thing in the module — it is bounded only at the bottom, sells
+late rather than waiting, records a late sale as its own status, leaves a
+position it could not sell OPEN so the next pass retries, and raises an alert.
+
+### Where it runs
+
+* **Its own portfolio**, `BTST Overnight`, with ₹10,00,000. §14 flags that this
+  strategy deploys about a third of its capital on a daily cycle while the swing
+  book holds for weeks and *"they compete for the same rupees"*. Separate books
+  mean they cannot.
+* **Its own journal** — `btst_sessions`, `btst_decisions` and `btst_holdings` —
+  because the rotation's tables are a breadth-ramped rotation's record and this
+  strategy wants volume ratios, close locations and realised overnight gaps.
+* **The same universe, the same `daily_bars` and the same rate card** as the
+  rotation. It adds no new data source and no new outbound host.
+* **`/btst`**, with five tabs: Live, **Signals**, Configuration, Health and How
+  it works. Signals is the one the rotation has no equivalent of — today's
+  filter funnel, watchable while the session runs.
+
+### Two strategies now share the Nifty 500
+
+Which is the first time anything here has shared an instrument, and it changed
+three pieces of shared code. `submit_paper_order` now takes a `strategy_key`
+(an ambiguous instrument with no key is refused, never guessed); the instrument
+master's exclusivity rule became "one ingestion rule per symbol" rather than
+"one strategy per symbol"; and `registry.for_instrument` returns `None` when
+several claim a name. Root `CLAUDE.md` §3a has the reasoning and
+`backend/tests/test_btst_does_not_disturb_swing.py` is what fails if any of it
+regresses.
+
+### Verifying it
+
+The specification's §13 lists twelve dated signals and says the same code on the
+same data must reproduce them. It does:
+`backend/tests/test_btst_specification_signals.py` runs the scan over **real
+bars** shipped as a fixture and asserts each one's symbol, close, volume ratio,
+CLV and six-month momentum — plus seven large liquid control names that must
+NOT fire, because reproducing the twelve alone is satisfied by a rule that
+fires on everything.
+
+```bash
+cd backend
+.venv/bin/python -m pytest tests/test_btst_specification_signals.py -q
+
+# During a session, with a working token: settle the feed's high/low mapping,
+# on which B6 entirely depends.
+CONFIG_PATH=conf .venv/bin/python scripts/verify_feed_session_fields.py \
+    --symbols RELIANCE,TCS,INFY,SBIN,ITC --late-subscribe
+```
+
+---
+
 ## Switching SQLite → MySQL
 
 Change one line in `.env`:
@@ -1889,6 +1963,79 @@ not carried over.
 ---
 
 ## Known gaps
+
+### NSE BTST Overnight
+
+Everything the specification's own §15 lists, carried across rather than
+summarised — the whole point of that section is that a limitation written down
+once, in a document nobody opens, is a limitation that gets lost.
+
+* **It has no live track record, and neither does the strategy.** Zero rupees
+  have traded this rule anywhere. Its author does **not** recommend funding it:
+  §16 says paper-trade it for 8–12 weeks first, and running it here IS that
+  recommendation being followed. The bar is an honest record, not a flattering
+  one.
+* **THE EDGE HAS DECAYED.** Net per trade: **+0.69% (2021) → +0.19% (2024) →
+  +0.13% (2025) → +0.14% (2026)**. The last three years average +0.171%, 58% of
+  the full-period +0.295%, with the win rate down from 57% to 50%. **2021 alone
+  contributed +101.3%** of a strategy whose whole-period CAGR is 19.0%. Whether
+  that is permanent decay or a lull is the open question this paper record
+  exists to answer.
+* **There is no holdout.** The rule was selected by scanning 22 candidate
+  signals × 2 exit timings over 726,209 symbol-days, then refined seven times,
+  all on the full period. Selection bias is present and unquantified.
+* **The one genuinely no-look-ahead test returned +1.6% over 13 months at a 37%
+  win rate** (§10.3). It is the most honest single number in the specification —
+  and that window is also its weakest patch, so it is not conclusive either way.
+* **Survivorship bias**: today's Nifty 500 looked at backwards. No point-in-time
+  index membership is available, and none of the vendors checked serves it.
+* **IT DIES AT +0.30% OF EXTRA SLIPPAGE** (CAGR −0.6%, §10.2). This is the
+  tightest constraint in the whole specification, and the fill simulator here is
+  deliberately pessimistic — it pays the far touch, walks the book and fills
+  partially, against the backtest's flat 0.05% a side. **Expect this book to
+  look worse than the backtest, and do not tune the simulator to close the
+  gap.** The difference between the two is the most valuable number this
+  exercise can produce, and it is reported on the Live tab beside the
+  backtest's own figures.
+* **Costs are brutal at a one-day hold**: about 0.30% round trip against a gross
+  edge of ~0.62%, because delivery STT is charged on BOTH legs. Half the edge is
+  friction.
+* **No stop is possible.** Worst observed overnight gap −6.04%; a larger one
+  than anything in the sample can happen. At a fifth of equity that is −1.2% of
+  the book.
+* **No data exists for the post-CAS regime.** Every figure in the specification
+  describes pre-August-2026 market structure. The `fno.exclude` policy ships ON
+  precisely because of that, and it also takes the better half of the edge.
+* **Idle cash is not modelled.** The backtest assumes 6.5% a year on undeployed
+  capital — an assumption rather than a simulated instrument — and this
+  application has no liquid-fund instrument at all. This book's cash earns
+  nothing, so its returns are lower than the specification's by roughly that
+  amount on the ~67% that is not deployed.
+* **THE FEED'S HIGH/LOW MAPPING IS STILL UNVERIFIED, and B6 depends on it
+  entirely.** Root `CLAUDE.md` §5 has the detail. `CLV = (price − low) / (high −
+  low)` inverts if the two are transposed, which would make this strategy buy
+  the weakest closes in the market while every number looked plausible. Run
+  `backend/scripts/verify_feed_session_fields.py` during a session with a
+  working token; until then the scan refuses a quote whose high is below its
+  low rather than computing through it.
+* **Whether a late subscription reports the whole session is also unverified.**
+  The universe joins the feed at 14:45 rather than 09:15 on the strength of
+  Dhan's packet carrying session AGGREGATES. The same script settles it; if it
+  is wrong, widen the window in the strategy YAML.
+* **The exit places a market order once the session is open**, not a
+  market-on-open order. §14 says "pre-open or market-on-open"; this simulator
+  fills against the depth book and has no pre-open model, so the backtest's
+  `open × (1 − 0.05%)` is not what this book gets.
+* **The rate card differs from the specification's cost model, deliberately.**
+  §5 uses NSE's pre-March-2026 transaction charge (0.00297%) and a ₹16.00 DP
+  charge that no primary source supports; the card uses the current 0.0030699%
+  and Dhan's published ₹12.50 + GST. The card is right and the backtest is
+  stale. The difference is reported, never tuned away.
+* **A first trade has never been placed.** As of 2026-09-19 nothing has traded
+  in this module against live NSE quotes. The fill against the touch, the
+  holding row, the exit at the open and the realised overnight gap are all
+  **unverified in production**.
+* **All gains are short-term and every figure is pre-tax.**
 
 ### NSE Swing Momentum
 

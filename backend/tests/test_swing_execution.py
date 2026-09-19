@@ -375,7 +375,7 @@ async def test_with_the_gate_off_every_holding_is_sold_with_the_regime_reason(
     # Open a position by hand, the way any other order would.
     order = await service._order_service().submit_paper_order(
         security_id=SECURITY_IDS["WELCORP"], side="BUY", order_type="MARKET",
-        lots=100, portfolio_id=portfolio_id,
+        lots=100, portfolio_id=portfolio_id, strategy_key=STRATEGY,
     )
     assert order.filled_quantity == 100
     await db_session.commit()
@@ -453,7 +453,7 @@ async def test_a_rotation_exit_fires_past_the_rank_and_the_order_carries_the_rea
     service = _service(db_session, definition)
     order = await service._order_service().submit_paper_order(
         security_id=SECURITY_IDS["BHEL"], side="BUY", order_type="MARKET",
-        lots=50, portfolio_id=portfolio_id,
+        lots=50, portfolio_id=portfolio_id, strategy_key=STRATEGY,
     )
     await db_session.commit()
 
@@ -552,7 +552,7 @@ async def test_equity_that_cannot_be_computed_blocks_sizing_rather_than_guessing
     service = _service(db_session, definition)
     await service._order_service().submit_paper_order(
         security_id=SECURITY_IDS["OFSS"], side="BUY", order_type="MARKET",
-        lots=10, portfolio_id=portfolio_id,
+        lots=10, portfolio_id=portfolio_id, strategy_key=STRATEGY,
     )
     await db_session.commit()
 
@@ -720,7 +720,7 @@ async def test_sells_are_executed_before_the_buys_are_sized(db_session, definiti
     # Spend almost everything on the name that is about to rotate out.
     await service._order_service().submit_paper_order(
         security_id=SECURITY_IDS["BHEL"], side="BUY", order_type="MARKET",
-        lots=8000, portfolio_id=portfolio_id,
+        lots=8000, portfolio_id=portfolio_id, strategy_key=STRATEGY,
     )
     await db_session.commit()
 

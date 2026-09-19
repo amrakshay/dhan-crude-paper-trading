@@ -61,6 +61,7 @@ EVENT_FEED_STALE = "feed-stale"
 EVENT_MISSED_SESSIONS = "missed-sessions"
 EVENT_STALE_BARS = "stale-bars"
 EVENT_DEFERRED_STOPS = "deferred-stops"
+EVENT_BTST_EXIT_INCOMPLETE = "btst-exit-incomplete"
 EVENT_APP_STARTED = "app-started"
 
 
@@ -291,6 +292,38 @@ RULES: Tuple[AlertRule, ...] = (
         dedupe_prefix=_health(EVENT_DEFERRED_STOPS),
         strategy_scoped=True,
         collapsing="One message per distinct set of waiting stops.",
+    ),
+    AlertRule(
+        key=EVENT_BTST_EXIT_INCOMPLETE,
+        title="An overnight position is still held after the exit ran",
+        trigger=(
+            "The BTST exit job ran at its configured time and one or more "
+            "positions were not sold -- the order was refused, the market was "
+            "not in continuous trading, or the book had no depth to fill "
+            "against."
+        ),
+        why=(
+            "For this strategy the exit IS the edge, which is not true of "
+            "anything else in this application. The same positions held to the "
+            "next close instead of the next open measure a 49.0% win rate "
+            "against 71.4%, and a net edge of +0.128% against +0.317%. A "
+            "missed rotation run costs a session's decision and is reported; a "
+            "missed BTST exit costs the trade thesis, so it is alerted."
+        ),
+        severity=SEVERITY_CRITICAL,
+        category=CATEGORY_STRATEGY,
+        kind=KIND_HEALTH,
+        dedupe_prefix=_health(EVENT_BTST_EXIT_INCOMPLETE),
+        strategy_scoped=True,
+        collapsing=(
+            "A CONDITION, so one message when a position gets stuck and "
+            "silence while it stays stuck -- not one per pass."
+        ),
+        caveat=(
+            "It reports that a position is still held, never that it was sold "
+            "late. A sale after the window succeeds and is recorded EXITED_LATE "
+            "with the delay on the row; look at the Live tab for those."
+        ),
     ),
     # --- trades -----------------------------------------------------------
     AlertRule(
