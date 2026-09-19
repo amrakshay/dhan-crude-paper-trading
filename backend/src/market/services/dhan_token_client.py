@@ -215,9 +215,24 @@ class DhanTokenClient:
         token = (payload or {}).get("accessToken")
         if not token:
             self.failures += 1
-            self.last_error = "Dhan returned no accessToken"
-            raise TokenRenewalError(
-                "Dhan accepted the renewal but returned no accessToken."
+            keys = ", ".join(sorted((payload or {}).keys())) or "nothing"
+            self.last_error = f"Dhan returned no accessToken (keys: {keys})"
+            # REFUSED, not "try later". A 200 carrying no token will not start
+            # carrying one on the next attempt, and classifying it as transient
+            # is the same mistake the 400 made on 2026-09-19 -- it retries
+            # until the token dies and nobody is told in time. Observed for
+            # real against a live, working token on 2026-09-19: one 200 with no
+            # accessToken, then DH-906 "Invalid Token" on every call after,
+            # while the same token went on serving market data perfectly.
+            raise TokenRenewalRefused(
+                f"Dhan accepted the renewal request but returned no access "
+                f"token (the response carried: {keys}). Dhan documents "
+                f"RenewToken as working only for tokens generated from Dhan "
+                f"Web -- a token created under an APPLICATION on the "
+                f"\"Generate Access Token / API Key\" screen appears not to "
+                f"qualify, even though it authenticates for market data. "
+                f"Renewal cannot recover this; the token has to be replaced by "
+                f"hand before it expires."
             )
 
         self.renewals += 1

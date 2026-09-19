@@ -425,3 +425,52 @@ def _patch_credentials(monkeypatch):
         "_credentials",
         staticmethod(lambda: ("1100003626", "a-token")),
     )
+
+
+async def test_a_200_carrying_no_token_is_a_refusal_not_a_retry(monkeypatch):
+    """Observed against a live working token on 2026-09-19.
+
+    Dhan answered the renewal 200 with a body that had no accessToken in it,
+    then DH-906 "Invalid Token" on every call after -- while the same token
+    went on serving market data perfectly. A 200 with no token will not start
+    carrying one on the next attempt, so classifying it as transient repeats
+    the exact mistake the 400 made: retry until the token dies, tell nobody in
+    time.
+    """
+    from src.market.services import dhan_token_client
+
+    class _Empty:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, *args, **kwargs):
+            class _Ok:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"dhanClientId": "1100003626", "status": "success"}
+
+            return _Ok()
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Empty)
+
+    client = dhan_token_client.DhanTokenClient()
+    _patch_credentials(monkeypatch)
+
+    import pytest as _pytest
+
+    with _pytest.raises(dhan_token_client.TokenRenewalRefused) as caught:
+        await client.renew()
+
+    # It names what DID come back, so the next person does not have to
+    # reproduce the call to find out.
+    assert "dhanClientId" in str(caught.value)
+    assert "status" in str(caught.value)
+    assert "replaced by hand" in str(caught.value)

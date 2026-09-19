@@ -1923,11 +1923,24 @@ not carried over.
   and a failure path that logged the status code without Dhan's own error
   message — which is why nineteen failures said nothing but "400".
 
-  With the `GET`, Dhan now answers with a meaningful `401` and the text
-  *"Client ID or user generated access token is invalid or expired"*, which is
-  the correct answer for a token that has already died. **That a renewal
-  actually returns a new token is still unverified** and will only be proven
-  the first time it runs against a live one.
+  **Tested against a live, working token on 2026-09-19, and it does not work
+  for this account.** The `GET` is accepted — Dhan answered `200` — but the
+  response carried **no `accessToken`**, and every call after it returned
+  `400 DH-906 "Invalid Token"` while that same token went on serving market
+  data perfectly. The token was not consumed: its expiry never moved.
+
+  The likely cause is Dhan's own documented restriction — *"You can use this
+  only for tokens generated from Dhan Web"* — and a token created under an
+  **application** on the "Generate Access Token / API Key" screen appears not
+  to qualify. That is a guess about Dhan's side and is **not confirmed**; what
+  is confirmed is the behaviour. The single `200` is unexplained.
+
+  **So the Dhan token must still be replaced by hand every 24 hours.** What
+  the renewal machinery now does is fail honestly and early: a refusal stops
+  the retries and raises an alert while the token still has hours left, rather
+  than after it has died. The only route to genuine automation is
+  `auth.dhan.co/app/generateAccessToken` with a stored PIN and TOTP secret,
+  which was considered on 2026-09-18 and declined.
 * **There is no audit HISTORY of the switches.** `feature_toggles` and
   `strategy_settings` carry the CURRENT value of each switch with whoever last
   set it and when — nothing more. "The gate was relaxed at 15:19 and
