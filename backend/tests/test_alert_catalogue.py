@@ -284,3 +284,61 @@ async def test_the_catalogue_is_read_only(auth_client):
     ):
         response = await call
         assert response.status_code == 405, response.text
+
+
+# --- the IPO dashboard's two rules ------------------------------------------
+def test_the_ipo_rules_are_in_the_catalogue_and_belong_to_no_strategy():
+    """The Alerts tab is documentation, so a rule that fires must be listed.
+
+    NOT `strategy_scoped`: no strategy owns an IPO, and `alerts.strategy_key`
+    stays NULL on these rows. A rule that appeared on a strategy's page would
+    promise that strategy cover it does not have.
+    """
+    from src.connections.database.db_models.alert_model import KIND_IPO
+
+    reminder = alert_catalogue.by_key(alert_catalogue.EVENT_IPO_CLOSING_REMINDER)
+    unreachable = alert_catalogue.by_key(alert_catalogue.EVENT_IPO_SOURCE_UNREACHABLE)
+
+    assert reminder is not None
+    assert unreachable is not None
+    assert reminder.strategy_scoped is False
+    assert unreachable.strategy_scoped is False
+    assert reminder.category == alert_catalogue.CATEGORY_IPO
+    assert unreachable.category == alert_catalogue.CATEGORY_IPO
+    # ITS OWN KIND, not KIND_HEALTH: "you have not accepted a UPI mandate" is
+    # not a health condition, and reusing HEALTH would file it beside a dead
+    # task.
+    assert reminder.kind == KIND_IPO
+
+    for rule in (reminder, unreachable):
+        assert rule.key not in {
+            item.key
+            for item in alert_catalogue.rules_for(alert_catalogue.STRATEGY_SWING)
+        }
+        assert rule.key not in {
+            item.key
+            for item in alert_catalogue.rules_for(alert_catalogue.STRATEGY_BTST)
+        }
+
+
+def test_the_ipo_reminder_declares_that_applied_alone_does_not_stop_it():
+    """The rule an operator most needs to read off the page, stated on it."""
+    reminder = alert_catalogue.by_key(alert_catalogue.EVENT_IPO_CLOSING_REMINDER)
+
+    assert "mandate" in reminder.why.lower()
+    assert "hour" in reminder.collapsing.lower()
+    # And what it will NOT do, where it could otherwise be assumed.
+    assert "all-clear" in reminder.caveat or "no " in reminder.caveat.lower()
+
+
+def test_the_ipo_reminders_dedupe_prefix_matches_what_the_service_writes():
+    """The catalogue matches stored rows on the prefix; a drift here would
+    make a rule that fires hourly look like one that has never fired."""
+    from datetime import datetime
+
+    from src.ipo.services.ipo_reminder_service import dedupe_key_for
+
+    reminder = alert_catalogue.by_key(alert_catalogue.EVENT_IPO_CLOSING_REMINDER)
+    written = dedupe_key_for(datetime(2026, 9, 21, 14, 0))
+
+    assert written.startswith(reminder.dedupe_prefix)

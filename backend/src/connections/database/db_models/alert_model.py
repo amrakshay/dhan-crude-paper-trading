@@ -40,6 +40,13 @@ KIND_ERROR = "ERROR"
 KIND_HEALTH = "HEALTH"
 KIND_COMMAND = "COMMAND"
 KIND_TEST = "TEST"
+# The IPO dashboard's hourly closing-day reminder. ITS OWN KIND rather than
+# KIND_HEALTH: nothing about it is a health condition -- the application is
+# working perfectly and is telling its operator to go and do something. Reusing
+# HEALTH would put "you have not accepted a UPI mandate" in the same bucket as
+# a dead task, which is the distinction the Alerts tab exists to draw.
+# `strategy_key` stays NULL on these rows; no strategy owns an IPO.
+KIND_IPO = "IPO"
 
 # --- severity -------------------------------------------------------------
 SEVERITY_INFO = "INFO"

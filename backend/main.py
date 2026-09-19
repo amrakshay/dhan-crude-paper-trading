@@ -307,6 +307,14 @@ async def lifespan(app: FastAPI):
         get_telegram_poller,
         shutdown_telegram_poller,
     )
+    # The IPO dashboard's own clock -- the SECOND clock in this application,
+    # and deliberately not the swing one. That clock drives live strategy
+    # decisions and did not ask to be touched to ship a page that places no
+    # orders; see `src/ipo/services/scheduler.py` for the full argument.
+    from src.ipo.services.scheduler import (
+        get_ipo_scheduler,
+        shutdown_ipo_scheduler,
+    )
 
     try:
         await get_feed_manager().start()
@@ -367,6 +375,14 @@ async def lifespan(app: FastAPI):
         )
 
     try:
+        await get_ipo_scheduler().start()
+    except Exception:
+        logger.exception(
+            "IPO scheduler failed to start; the daily GMP refresh and the "
+            "closing-day reminders will NOT run on their own"
+        )
+
+    try:
         if config_utils.get_property_value_boolean(
             "connections.telegram_commands_task_enabled", True
         ):
@@ -385,6 +401,7 @@ async def lifespan(app: FastAPI):
     logger.info("Crude paper-trading backend shutting down")
     try:
         await shutdown_telegram_poller()
+        await shutdown_ipo_scheduler()
         await shutdown_alert_watcher()
         await shutdown_alert_dispatcher()
         await shutdown_token_refresh_monitor()
@@ -525,6 +542,7 @@ async def health_check() -> JSONResponse:
 from src.auth import auth_main_router  # noqa: E402
 from src.btst import btst_main_router  # noqa: E402
 from src.instruments import instruments_main_router  # noqa: E402
+from src.ipo import ipo_main_router  # noqa: E402
 from src.charges import charges_main_router  # noqa: E402
 from src.connections import connections_main_router  # noqa: E402
 from src.health import health_main_router  # noqa: E402
@@ -553,6 +571,7 @@ app.include_router(portfolios_main_router, prefix="/api")
 app.include_router(strategies_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
+app.include_router(ipo_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")
 app.include_router(swing_main_router, prefix="/api")
 app.include_router(btst_main_router, prefix="/api")

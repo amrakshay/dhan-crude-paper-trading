@@ -333,3 +333,52 @@ swing:
   # 18:15 the next start has to notice and say so rather than carrying
   # yesterday's stops forward as though nothing happened.
   missed_run_lookback_sessions: 10
+
+ipo:
+  # The IPO dashboard. NOT a strategy and not a capability: it places no
+  # orders, touches no portfolio and reads no feed. It fetches a public IPO
+  # GMP page, stores what it said, shows it on /ipo and sends a Telegram
+  # reminder on a closing day.
+  #
+  # Because it is neither, it has deliberately NO feature_toggles row -- root
+  # CLAUDE.md section 3a's scopes are for strategies and their capabilities,
+  # and inventing a fifth meaning for a toggle to switch a page on is how a
+  # vocabulary stops meaning anything. This property is its on/off switch, the
+  # same shape `swing.scheduler_enabled` has: it stops the CLOCK. The page,
+  # its three tabs and every action stay reachable, because what has already
+  # been recorded is history and history never moves.
+  scheduler_enabled: true
+  scheduler_interval_seconds: 30
+
+  # The daily refresh of every non-listed IPO, IST. No upper bound: fetching
+  # the board is valid at any hour, and a process that came up at 22:00 should
+  # still do today's. What stops it running twice is the slot guard in
+  # `ipo_job_runs`, not a window -- root CLAUDE.md: a job that has done its
+  # work is DONE, not due for a retry.
+  daily_refresh_at: "13:00"
+
+  # The closing-day reminder window, IST, inclusive. One sweep on each hour:
+  # 10:00, 11:00 ... 17:00. Each one re-fetches ONLY the IPOs closing that day
+  # -- not the whole board -- so the message carries a current GMP.
+  #
+  # An IPO drops out of the sweep the moment it is marked Applied AND Accepted,
+  # or Rejected. Applied alone does NOT stop it: an unaccepted UPI mandate is a
+  # failed application, and the mandate is the step that gets forgotten.
+  reminder_from: "10:00"
+  reminder_to: "17:00"
+
+  # How old a GMP reading may be before every surface calls it stale. Two
+  # thresholds because there are two cadences: an IPO closing today is
+  # refreshed hourly, everything else once a day. A failed refresh must never
+  # let a stale number read as a fresh one.
+  gmp_stale_after_minutes: 90
+  gmp_stale_after_hours: 26
+
+  # The SOURCE's own figure can be stale while our fetch is fresh -- we read it
+  # successfully and the third party had not moved it. A different fact, so a
+  # different threshold.
+  gmp_source_stale_after_hours: 24
+
+  # How long to wait for the source before giving up. A slow page must not hold
+  # the sweep past its own hour.
+  source_timeout_seconds: 20

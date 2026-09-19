@@ -35,6 +35,13 @@ EXCLUDED_DIR_NAMES = {
 # not duplicated here; this is the answer to "what ELSE".
 OUTBOUND_HOSTS = {
     "api.telegram.org": "telegram_client.py",
+    # The IPO dashboard's GMP source. The page a human reads is at
+    # www.investorgain.com, but the table on it is built client-side from this
+    # JSON host -- established by fetching the page on 2026-09-19, not assumed.
+    # Only the host that is actually CALLED is listed: this file answers "what
+    # can this process talk to", and a host listed here but never contacted
+    # would weaken that answer. The display link is built in the browser.
+    "webnodejs.investorgain.com": "ipo_source_client.py",
 }
 
 # Anything that looks like an external http(s) URL in a string literal.
@@ -114,6 +121,36 @@ def test_only_the_telegram_client_names_the_bot_api():
         assert found <= {owner}, (
             f"{host} must be named in {owner} alone, found in {sorted(found)}"
         )
+
+
+def test_only_the_ipo_source_client_names_the_gmp_host():
+    """One module, one third party -- the general rule, not a Telegram one.
+
+    The test above already enforces this for every entry in OUTBOUND_HOSTS;
+    this one names the IPO source so that a change which quietly moved the URL
+    into a service or a route fails with a message about the IPO source rather
+    than a generic one.
+    """
+    naming = set()
+    for path in _iter_python_files(SRC_ROOT):
+        for _lineno, literal in _executable_string_literals(path):
+            if "webnodejs.investorgain.com" in literal:
+                naming.add(path.name)
+
+    assert naming <= {"ipo_source_client.py"}, (
+        "The IPO GMP host must be named in ipo_source_client.py alone, found "
+        f"in {sorted(naming)}"
+    )
+
+
+def test_the_ipo_client_declares_a_closed_set_of_urls():
+    """A set, not a pattern. Same rule the Dhan clients follow."""
+    from src.ipo.services import ipo_source_client
+
+    assert ipo_source_client.IPO_SOURCE_HOST == "webnodejs.investorgain.com"
+    assert ipo_source_client.GMP_REPORT_URL.startswith(
+        "https://webnodejs.investorgain.com/cloud/v2/report/data-read/331/"
+    )
 
 
 def test_the_telegram_client_declares_a_closed_set_of_methods():

@@ -71,6 +71,17 @@ would blur what it is for. The sibling guard is
 exactly ONE module and listed there, or the build fails. Same containment
 `dhan_token_client.py` gives `/RenewToken`, applied to the general case.
 
+On 2026-09-19 a SECOND outbound host arrived with the IPO dashboard:
+`webnodejs.investorgain.com`, the JSON endpoint behind investorgain.com's IPO
+GMP page, named in `src/ipo/services/ipo_source_client.py` and nowhere else.
+It is INBOUND data like Dhan's -- the application fetches and sends nothing --
+but it is not Dhan, so `test_outbound_hosts.py` owns it and
+`test_no_real_orders.py` is again UNCHANGED. Note that the host a human reads
+(`www.investorgain.com`) is a different one and is deliberately absent from
+Python: the backend never fetches it, the display link is built in the browser,
+and a host on that list which is never contacted would weaken what the list
+says.
+
 **Consequences for naming.** Local order operations are deliberately called
 `submit_paper_order` and `cancel_paper_order`, never `place_order` /
 `cancel_order`. Those names are banned outright so a genuine broker call can
@@ -107,7 +118,7 @@ Always run backend commands from `backend/` with `CONFIG_PATH=conf`.
 ```bash
 # backend
 cd backend
-.venv/bin/python -m pytest tests/ -q                      # full suite (875 tests, ~1 min)
+.venv/bin/python -m pytest tests/ -q                      # full suite (1,177 tests, ~1.7 min)
 .venv/bin/python -m pytest tests/ -q -n0                  # the same, serially (~6.5 min)
 .venv/bin/python -m pytest tests/test_no_real_orders.py -q # safety suite alone
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
@@ -245,6 +256,18 @@ Rules that are not negotiable:
   sale as its own status, leaves a position that could not be sold OPEN, and
   raises an alert. Do not "harmonise" the two jobs; the asymmetry is the point.
 
+- **NOT EVERYTHING WITH A PAGE IS A STRATEGY OR A CAPABILITY.** Added
+  2026-09-19 with the IPO dashboard (`/ipo`), which places no orders, touches
+  no portfolio and reads no feed -- it fetches a public page, stores it, shows
+  it and sends a reminder. It therefore has NO `feature_toggles` row of any
+  scope, and the page is gated on none: inventing a fifth meaning for a toggle
+  in order to switch a page on is how a vocabulary stops meaning anything. Its
+  on/off switch is the plain config property `ipo.scheduler_enabled`, the same
+  shape `swing.scheduler_enabled` has, and what it stops is the CLOCK. The
+  page, its three tabs and every action stay reachable with it off, for the
+  same reason a strategy's journal does: what has been recorded is history,
+  and history never moves.
+
 - **ENABLED and ARMED are two switches.** Enabling a strategy makes it compute,
   decide and write a decision record; ARMING is what lets it submit an order of
   its own accord. Only a module that declares an `automation` block in its YAML
@@ -317,6 +340,21 @@ keyed on when the job RAN, not on the session it decided -- for a restart,
 because a restart clears the memory and is how the same pull got repeated all
 evening. A run whose REFRESH FAILED is not marked done, so credentials fixed at
 18:30 still get bars at 18:45.
+
+**THERE ARE TWO CLOCKS, AND THEY ARE SEPARATE ON PURPOSE.** Until 2026-09-19
+`src/swing/services/scheduler.py` was the only one; it now drives every
+automated STRATEGY, and `src/ipo/services/scheduler.py` drives the IPO
+dashboard's daily GMP refresh and its hourly closing-day reminders. They do not
+import each other in either direction.
+
+The swing clock decides, arms and places (paper) orders on a live book. The IPO
+clock fetches a public page and sends a message; it reaches no strategy, no
+portfolio and no order path. Merging them would mean editing the clock that
+trades in order to ship a page that does not -- a change nothing about the IPO
+dashboard justifies asking of it. Duplicating a thirty-line tick loop is the
+accepted cost, and the lesson that actually matters is duplicated with it: a
+job that has done its work is DONE, guarded both in memory and against a
+persisted record of the SLOT it ran for.
 
 **The rotation decides on a clock, and a missed run is reported.** The nightly
 job (18:15 IST) refreshes the bars, decides, ratchets every trailing stop and
@@ -552,7 +590,14 @@ backend/src/swing/services/schedule_settings.py   WHEN it wakes up, and the two
                                                   times it refuses
 backend/src/swing/services/swing_health_service.py  is THIS strategy healthy
 frontend/src/components/SwingHealth.jsx           its Health tab, admin-only
-backend/src/swing/services/scheduler.py            the only clock in this app
+backend/src/swing/services/scheduler.py            every STRATEGY's clock
+backend/src/ipo/                   the IPO dashboard: the GMP source, the
+                                   three tabs, the actions and its own clock
+backend/src/ipo/services/ipo_source_client.py   the ONLY module naming
+                                   webnodejs.investorgain.com
+backend/src/ipo/services/scheduler.py   the SECOND clock; nothing to do with
+                                   a strategy, and deliberately separate
+frontend/src/pages/IpoDashboardPage.jsx           its three tabs
 backend/src/swing/services/stop_monitor.py         the chandelier stop watcher
 backend/src/reports/services/metrics_service.py    CAGR, drawdown, MAR, concentration
 backend/src/strategies/services/market_clock.py    is the market open, and may an

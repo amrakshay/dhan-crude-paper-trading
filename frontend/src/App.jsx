@@ -10,6 +10,7 @@ import PositionsPage from './pages/PositionsPage';
 import OrderHistoryPage from './pages/OrderHistoryPage';
 import ReportsPage from './pages/ReportsPage';
 import NotesPage from './pages/NotesPage';
+import IpoDashboardPage from './pages/IpoDashboardPage';
 import UsersPage from './pages/UsersPage';
 import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/portfolios" element={<RoleRoute path="/portfolios"><PortfoliosPage /></RoleRoute>} />
         <Route path="/reports" element={<RoleRoute path="/reports"><ReportsPage /></RoleRoute>} />
         <Route path="/notes" element={<RoleRoute path="/notes"><NotesPage /></RoleRoute>} />
+        <Route path="/ipo" element={<RoleRoute path="/ipo"><IpoDashboardPage /></RoleRoute>} />
         <Route path="/users" element={<RoleRoute path="/users"><UsersPage /></RoleRoute>} />
         <Route path="/profile" element={<RoleRoute path="/profile"><ProfilePage /></RoleRoute>} />
         <Route path="/strategies" element={<RoleRoute path="/strategies"><StrategiesPage /></RoleRoute>} />

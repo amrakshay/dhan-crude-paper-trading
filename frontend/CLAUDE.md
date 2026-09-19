@@ -733,3 +733,38 @@ plus several that are specific to this one.
   other — the shell's navigation rail does not collapse below `md`, so the
   content is squeezed into a narrow column. That is the shell's, not this
   page's, and it is not fixed here.
+
+
+---
+
+## 5f. The IPO dashboard
+
+`src/pages/IpoDashboardPage.jsx` with `IpoTable`, and `src/api/ipo.js`.
+
+**IT IS NOT A STRATEGY PAGE.** It places no orders and reads no socket; it
+polls at 30 s, because the GMP behind it refreshes hourly at best. Modelled on
+Trade Notes, not on /swing.
+
+- **Every GMP carries its age, and a stale one says so in a warning colour.**
+  The backend decides staleness (two cadences: hourly for an IPO closing today,
+  daily otherwise) and sends `isStale` with a reason; the page renders it and
+  does not compute its own. A premium with no age would let yesterday's number
+  read as this morning's, which is the one failure this page must not have.
+- **Unknown is not zero.** A GMP the source prints as `--` renders as "not
+  published"; a listing gain with no issue price renders as "not measurable".
+  Neither is ever 0.00.
+- **The three action buttons are HIDDEN for a ROLE_USER, not disabled.**
+  Offering a control that will be refused is worse than not offering it, and
+  `require_admin` on the action endpoints refuses it either way --
+  `tests/test_ipo_api.py` asserts the refusal directly.
+- **The empty Listed tab explains itself.** It is forward-only and nothing is
+  backfilled, so on day one it is empty; the empty state says that, because an
+  unexplained empty table reads as a bug.
+- **The Closing next tab admits it has no holiday calendar.** The caveat comes
+  from the server with the payload rather than being written into JSX, so the
+  page and the API cannot disagree about what it promises.
+- **The source link is built here**, from each IPO's stored relative path and
+  `IPO_SOURCE_BASE`. The host the backend CALLS is a different one and is named
+  in exactly one backend module; keeping the display host out of Python is what
+  keeps `tests/test_outbound_hosts.py` a list of things this process actually
+  talks to.

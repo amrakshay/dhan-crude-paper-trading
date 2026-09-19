@@ -50,6 +50,10 @@ TASK_DESCRIPTIONS = {
         "Evaluates the watched health conditions -- a dead task first among "
         "them -- and raises an alert for each"
     ),
+    "ipo-scheduler": (
+        "Refreshes IPO GMP daily and sends the hourly closing-day reminders; "
+        "the second clock, and nothing to do with any strategy"
+    ),
     "telegram-commands": (
         "Long-polls Telegram for commands, authorised by resolving the sender "
         "to an application user"
@@ -197,6 +201,13 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
     # on the page whose whole job is to surface real ones.
     if config_utils.get_property_value_boolean("connections.alerts_enabled", True):
         expected.update({"alert-dispatcher", "alert-watcher"})
+
+    # The IPO clock. Expected only when it is switched on, for the same reason
+    # the alerting pair is: switching it off must not make the health page
+    # report a missing task -- a false problem on the page whose whole job is
+    # to surface real ones.
+    if config_utils.get_property_value_boolean("ipo.scheduler_enabled", True):
+        expected.add("ipo-scheduler")
 
     # The command poller is different: it is expected whenever the TASK is
     # allowed to exist, not whenever commands are configured. It starts, reads

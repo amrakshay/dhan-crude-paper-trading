@@ -29,6 +29,7 @@ from src.connections.database.db_models.alert_model import (
     KIND_COMMAND,
     KIND_ERROR,
     KIND_HEALTH,
+    KIND_IPO,
     KIND_TEST,
     KIND_TRADE_BOUGHT,
     KIND_TRADE_SOLD,
@@ -43,6 +44,12 @@ CATEGORY_STRATEGY = "STRATEGY"
 CATEGORY_TRADE = "TRADE"
 CATEGORY_ERROR = "ERROR"
 CATEGORY_ADMIN = "ADMIN"
+# The IPO dashboard. Its own category rather than SYSTEM or ADMIN: these rules
+# are not about whether this process is well, and not about administering it --
+# they are about something the OPERATOR has to do today, on somebody else's
+# deadline. The Alerts tab groups by whatever categories exist, so adding one
+# costs nothing but says what it is.
+CATEGORY_IPO = "IPO"
 
 CATEGORY_LABELS = {
     CATEGORY_SYSTEM: "System health",
@@ -50,6 +57,7 @@ CATEGORY_LABELS = {
     CATEGORY_TRADE: "Trades",
     CATEGORY_ERROR: "Errors",
     CATEGORY_ADMIN: "Administration",
+    CATEGORY_IPO: "IPO dashboard",
 }
 
 # --- the health events, named once and used by the watcher -----------------
@@ -64,6 +72,10 @@ EVENT_STALE_BARS = "stale-bars"
 EVENT_DEFERRED_STOPS = "deferred-stops"
 EVENT_BTST_EXIT_INCOMPLETE = "btst-exit-incomplete"
 EVENT_APP_STARTED = "app-started"
+# The IPO dashboard's own two. Neither is `strategy_scoped`: no strategy owns
+# an IPO, and `alerts.strategy_key` stays NULL on both.
+EVENT_IPO_CLOSING_REMINDER = "ipo-closing-reminder"
+EVENT_IPO_SOURCE_UNREACHABLE = "ipo-source-unreachable"
 # The two modules whose rules are not interchangeable. Spelled here rather than
 # beside each rule so there is one place to look when a third arrives -- and
 # spelled at all because these two rules describe machinery the OTHER strategy
@@ -476,6 +488,60 @@ RULES: Tuple[AlertRule, ...] = (
         caveat=(
             "What a command CHANGED also carries the sender's application user "
             "id, exactly as a click does."
+        ),
+    ),
+    AlertRule(
+        key=EVENT_IPO_CLOSING_REMINDER,
+        title="A mainboard IPO closes today and a step is still outstanding",
+        trigger=(
+            "Every hour on the hour from 10:00 to 17:00 IST on an IPO's "
+            "closing day, for every mainboard IPO closing that day that is "
+            "still outstanding. The GMP is re-fetched immediately before each "
+            "sweep so the message carries a current figure."
+        ),
+        why=(
+            "An application with an unaccepted UPI mandate is a failed "
+            "application, and the mandate is the step that actually gets "
+            "forgotten -- so being marked Applied does NOT stop these. Only "
+            "Applied AND Accepted together, or an explicit Reject, does. The "
+            "deadline belongs to somebody else and does not move."
+        ),
+        severity=SEVERITY_WARNING,
+        category=CATEGORY_IPO,
+        kind=KIND_IPO,
+        dedupe_prefix="ipo|closing-reminder",
+        collapsing=(
+            "One message per hour slot. The dedupe key carries the IST date "
+            "and the hour, so the hourly cadence survives while a restart or a "
+            "double tick inside the same hour cannot produce two messages."
+        ),
+        caveat=(
+            "Nothing is sent when nothing is outstanding -- there is no "
+            "all-clear message. It reminds; it cannot apply for anything."
+        ),
+    ),
+    AlertRule(
+        key=EVENT_IPO_SOURCE_UNREACHABLE,
+        title="The IPO GMP source could not be read",
+        trigger=(
+            "A scheduled IPO refresh -- the 13:00 daily pass, or the targeted "
+            "one before an hourly closing-day reminder -- failed to fetch or "
+            "parse the source."
+        ),
+        why=(
+            "A failed refresh must not silently serve stale data as fresh. The "
+            "reminder still goes out, because the reminder is the point and "
+            "the GMP is context, but it goes out with the GMP labelled stale "
+            "and this says why."
+        ),
+        severity=SEVERITY_WARNING,
+        category=CATEGORY_IPO,
+        kind=KIND_HEALTH,
+        dedupe_prefix=_health(EVENT_IPO_SOURCE_UNREACHABLE),
+        collapsing=(
+            "A CONDITION: one message when the source goes unreachable, "
+            "silence while it stays that way, and a new one once it has "
+            "recovered and failed again."
         ),
     ),
     AlertRule(

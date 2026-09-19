@@ -12,6 +12,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import AutoModeIcon from '@mui/icons-material/AutoMode';
 import NightsStayIcon from '@mui/icons-material/NightsStay';
 import HubIcon from '@mui/icons-material/Hub';
+import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 
 /**
  * Every page the app has. Which of them a given role actually sees is decided
@@ -36,6 +37,10 @@ export const navigationItems = [
   { path: '/portfolios', label: 'Portfolios', icon: AccountBalanceIcon },
   { path: '/reports', label: 'P&L Reports', icon: AssessmentIcon },
   { path: '/notes', label: 'Trade Notes', icon: StickyNote2Icon },
+  // Not a strategy and not gated by any toggle: it places no orders and its
+  // record is history. Granted to both roles; the three actions on it are
+  // admin-only and the API enforces that independently.
+  { path: '/ipo', label: 'IPO Dashboard', icon: EventAvailableIcon },
   { path: '/swing', label: 'Swing Momentum', icon: AutoModeIcon },
   { path: '/btst', label: 'BTST Overnight', icon: NightsStayIcon },
   { path: '/users', label: 'Users', icon: GroupIcon },

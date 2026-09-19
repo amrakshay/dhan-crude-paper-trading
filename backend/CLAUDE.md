@@ -766,7 +766,11 @@ health page reads.
   session unaccountable and swallows the real gaps), and COMPLETED not any
   status (a rebalance refusing on stale bars stamps the STALE session's date --
   the live database held a SKIPPED row for 2026-07-14 written on 2026-09-18).
-- **`swing_scheduler`** is the only clock in this application. Idempotence is
+- **`swing_scheduler`** is every STRATEGY's clock -- and since 2026-09-19 not
+  the only clock in this application: `src/ipo/services/scheduler.py` is a
+  second, independent one for the IPO dashboard, which reaches no strategy and
+  places nothing. See root `CLAUDE.md` section 4 for why they are separate.
+  Idempotence is
   the JOURNAL's (`sessions_completed_on`), not a flag's; the in-memory attempt
   clock exists only so a failing job does not report one problem two thousand
   times before midnight.
@@ -1014,7 +1018,9 @@ fails with a name saying why if one of them regresses.
   (a 400 with the module's own sentence) from "this module is broken" (a 500
   nobody should see as a validation message). Catching bare `Exception` there
   would ship a bug looking like a rule.
-- **`SwingScheduler` is still the only clock and still called that.** It
+- **`SwingScheduler` is still every strategy's clock and still called that.**
+  (The IPO dashboard's own clock is a separate task, `ipo-scheduler`, and
+  imports nothing from this package.) It
   dispatches per module now; the TASK name `swing-scheduler` is a key in
   `TASK_DESCRIPTIONS` and `expected_task_names`, both health surfaces judge the
   task against it, and renaming it would make a live installation report a task

@@ -15,6 +15,12 @@ from src.connections.database.db_models.connection_model import (  # noqa: F401
 )
 from src.daily_bars.database.db_models.daily_bar_model import DailyBar  # noqa: F401
 from src.instruments.database.db_models.instrument_model import Instrument  # noqa: F401
+from src.ipo.database.db_models.ipo_model import (  # noqa: F401
+    Ipo,
+    IpoAction,
+    IpoGmpReading,
+    IpoJobRun,
+)
 from src.notes.database.db_models.trade_note_model import TradeNote  # noqa: F401
 from src.orders.database.db_models.order_model import (  # noqa: F401
     Order,
@@ -52,6 +58,10 @@ __all__ = [
     "ConnectionSetting",
     "DailyBar",
     "Instrument",
+    "Ipo",
+    "IpoAction",
+    "IpoGmpReading",
+    "IpoJobRun",
     "Order",
     "OrderEvent",
     "OrderFill",
