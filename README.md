@@ -355,7 +355,7 @@ trades unattended at 09:16 that is the difference between working and not.
 The application now renews it on its own. `dhan.auto_renew_token` (default
 `true`) starts a `dhan-token-refresh` task that reads the token's **own expiry**
 — Dhan issues JWTs and the `exp` claim is readable locally — and calls
-`POST /v2/RenewToken` when under `dhan.renew_token_before_hours` (6) remain.
+`GET /v2/RenewToken` when under `dhan.renew_token_before_hours` (6) remain.
 Reading the token rather than running on a clock makes it self-correcting: a
 token pasted in at an odd hour is renewed relative to itself, and a restart
 picks up wherever the token actually is.
@@ -1914,13 +1914,20 @@ not carried over.
   depth, the stop set at entry, the reason on the `PLACED` event and the cash
   ledger movement are all **unverified in production** and are the first things
   to check when one appears (specification §14.3).
-* **Token renewal has never been seen to succeed against Dhan.** As of
-  2026-09-18 the refresher has been exercised end to end against a live token
-  only to the point of correctly deciding *not* to renew (12.5 hours left,
-  threshold 6). The actual `POST /v2/RenewToken` call — its response shape, and
-  Dhan's documented refusal to renew a token that did not come from Dhan Web —
-  is **unverified in production** and is the first thing to check the morning
-  after it first fires.
+* **Token renewal has still never been seen to SUCCEED.** It first fired for
+  real on 2026-09-19 and failed nineteen times in a row, because it was sent as
+  a `POST` and Dhan documents `RenewToken` as a `GET` (the `curl` example
+  carries no `--request` and no `--data`). The token expired while it retried.
+  Three bugs came out of that morning and all three are fixed: the method, a
+  400 classified as transient so a refusal was retried instead of escalated,
+  and a failure path that logged the status code without Dhan's own error
+  message — which is why nineteen failures said nothing but "400".
+
+  With the `GET`, Dhan now answers with a meaningful `401` and the text
+  *"Client ID or user generated access token is invalid or expired"*, which is
+  the correct answer for a token that has already died. **That a renewal
+  actually returns a new token is still unverified** and will only be proven
+  the first time it runs against a live one.
 * **There is no audit HISTORY of the switches.** `feature_toggles` and
   `strategy_settings` carry the CURRENT value of each switch with whoever last
   set it and when — nothing more. "The gate was relaxed at 15:19 and

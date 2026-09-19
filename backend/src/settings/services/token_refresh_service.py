@@ -20,9 +20,12 @@ consequence of a decision taken on 2026-09-18, not an oversight: the
 alternative was storing the operator's PIN.
 
 THREE STATES, KEPT APART. Renewed, could-not-renew-yet (transient: retry), and
-will-never-renew (the token is dead: stop trying and say so). The third is why
-`TokenExpiredError` is a distinct type -- asking Dhan every fifteen minutes to
-renew a dead token is noise that hides the one message that matters.
+will-never-renew (Dhan refused: stop trying and say so). The third is why
+`TokenRenewalRefused` is a distinct type, and getting that distinction wrong is
+not hypothetical -- on 2026-09-19 a 400 was classified as transient, retried
+nineteen times over the six hours before the token expired, and the only alert
+arrived after the token was dead and could no longer be renewed by anyone. A
+refusal must reach a human WHILE THERE IS STILL TIME TO ACT.
 """
 import asyncio
 from dataclasses import dataclass
@@ -50,6 +53,11 @@ class RefreshOutcome:
     renewed: bool
     reason: str
     expires_at: Optional[datetime] = None
+    # Dhan will not renew this token and repeating the call will not change
+    # that. The monitor stops asking and the operator is told WHILE THE TOKEN
+    # IS STILL ALIVE -- which is the difference between six hours of warning
+    # and an alert that arrives after the session is already dead.
+    needs_human: bool = False
 
 
 class TokenRefreshService:
@@ -77,8 +85,8 @@ class TokenRefreshService:
         problem into an outage.
         """
         from src.market.services.dhan_token_client import (
-            TokenExpiredError,
             TokenRenewalError,
+            TokenRenewalRefused,
             get_token_client,
         )
         from src.settings.database.db_operations.app_setting_repository import (
@@ -122,8 +130,9 @@ class TokenRefreshService:
                 False,
                 "The stored token has already expired. Dhan renews only an "
                 "active token, so a new one has to be generated on Dhan Web "
-                "and saved on the Settings page.",
+                "and saved on the Connections page.",
                 expires_at=info.expires_at,
+                needs_human=True,
             )
 
         hours_left = info.seconds_remaining / 3600
@@ -137,9 +146,18 @@ class TokenRefreshService:
 
         try:
             payload = await get_token_client().renew()
-        except TokenExpiredError as error:
-            logger.error("Dhan will not renew the stored token: %s", error)
-            return RefreshOutcome(False, str(error), expires_at=info.expires_at)
+        except TokenRenewalRefused as error:
+            # Caught BEFORE TokenRenewalError, which it subclasses. A refusal
+            # is final for this token: say so once, loudly, with how long is
+            # left to act.
+            logger.error(
+                "Dhan will not renew the stored token (%.1f hour(s) of validity "
+                "left). This needs a person: %s",
+                hours_left, error,
+            )
+            return RefreshOutcome(
+                False, str(error), expires_at=info.expires_at, needs_human=True
+            )
         except TokenRenewalError as error:
             logger.warning("Dhan token renewal failed, will try again: %s", error)
             return RefreshOutcome(False, str(error), expires_at=info.expires_at)
@@ -184,6 +202,14 @@ class TokenRefreshMonitor:
         self.last_pass_at: Optional[datetime] = None
         self.last_outcome: Optional[str] = None
         self.last_error: Optional[str] = None
+        self.needs_human = False
+        # The token Dhan last REFUSED, as a fingerprint. While the stored token
+        # is still that one there is nothing to gain by asking again -- but the
+        # moment a new one is pasted in, the refusal no longer applies and the
+        # monitor picks straight back up. A fingerprint rather than the token
+        # itself: this is held in memory and reported nowhere, and a secret
+        # that need not exist should not.
+        self._refused_fingerprint: Optional[str] = None
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -217,12 +243,33 @@ class TokenRefreshMonitor:
         while not self._stopping:
             try:
                 async with session_scope() as session:
-                    outcome = await TokenRefreshService(session).refresh_if_due()
+                    service = TokenRefreshService(session)
+                    fingerprint = await self._token_fingerprint(session)
+                    if (
+                        self._refused_fingerprint is not None
+                        and fingerprint == self._refused_fingerprint
+                    ):
+                        # Already refused, and the token has not changed. Say
+                        # nothing further until somebody pastes a new one.
+                        outcome = RefreshOutcome(
+                            False,
+                            "Dhan refused to renew this token and it has not "
+                            "changed since. Waiting for a new one.",
+                            needs_human=True,
+                        )
+                    else:
+                        self._refused_fingerprint = None
+                        outcome = await service.refresh_if_due()
+                        if outcome.needs_human:
+                            self._refused_fingerprint = fingerprint
+
                 self.passes += 1
                 self.last_pass_at = utc_now()
                 self.last_outcome = outcome.reason
+                self.needs_human = outcome.needs_human
                 if outcome.renewed:
                     self.renewals += 1
+                    self._refused_fingerprint = None
                     await self._reconfigure_feed()
                 self.last_error = None
             except asyncio.CancelledError:
@@ -235,6 +282,32 @@ class TokenRefreshMonitor:
                 await asyncio.sleep(CHECK_INTERVAL_SECONDS)
             except asyncio.CancelledError:
                 raise
+
+    @staticmethod
+    async def _token_fingerprint(session) -> Optional[str]:
+        """A short, non-reversible stand-in for the stored token.
+
+        Used only to notice that the token CHANGED. A hash rather than the
+        token so that nothing here holds a credential it has no use for.
+        """
+        import hashlib
+
+        from src.settings.database.db_operations.app_setting_repository import (
+            AppSettingRepository,
+        )
+        from src.settings.services.settings_service import (
+            KEY_ACCESS_TOKEN,
+            SettingsService,
+        )
+
+        settings = SettingsService(AppSettingRepository(session))
+        stored = await settings.load_stored()
+        token = stored.get(KEY_ACCESS_TOKEN) or settings.env_fallbacks().get(
+            KEY_ACCESS_TOKEN
+        )
+        if not token:
+            return None
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
     async def _reconfigure_feed() -> None:
@@ -268,6 +341,9 @@ class TokenRefreshMonitor:
             "lastPassAt": self.last_pass_at.isoformat() if self.last_pass_at else None,
             "lastOutcome": self.last_outcome,
             "lastError": self.last_error,
+            # True when renewal cannot succeed without somebody pasting a new
+            # token. The health page and the alerts read this.
+            "needsHuman": self.needs_human,
         }
 
 

@@ -504,7 +504,7 @@ async def test_renewing_the_token_never_logs_either_token(captured_logs, monkeyp
         async def __aexit__(self, *args):
             return False
 
-        async def post(self, *args, **kwargs):
+        async def get(self, *args, **kwargs):
             return _Response()
 
     monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Client)
@@ -545,7 +545,7 @@ async def test_a_failed_renewal_does_not_log_the_url_it_called(
         async def __aexit__(self, *args):
             return False
 
-        async def post(self, *args, **kwargs):
+        async def get(self, *args, **kwargs):
             raise RuntimeError(f"connection failed for access-token={token}")
 
     monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Exploding)

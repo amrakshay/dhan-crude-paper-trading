@@ -2,7 +2,7 @@
 
 ONE ENDPOINT, and the narrowest one Dhan offers:
 
-    POST /v2/RenewToken    exchange an ACTIVE token for a fresh 24-hour one
+    GET /v2/RenewToken    exchange an ACTIVE token for a fresh 24-hour one
 
 This is the first module in the project to name a Dhan URL that is not market
 data, so it is worth being exact about what it can and cannot do.
@@ -32,7 +32,7 @@ unattended strategy and one that needs a human every morning.
 Request/response per https://dhanhq.co/docs/v2/authentication/, read
 2026-09-18:
 
-    request   headers: access-token: {JWT}, dhanClientId: {client id}
+    request   GET, headers only: access-token: {JWT}, dhanClientId: {client id}
     response  {"dhanClientId": str, "dhanClientName": str, "dhanClientUcc": str,
                "givenPowerOfAttorney": bool, "accessToken": str,
                "expiryTime": "YYYY-MM-DDTHH:MM:SS"}
@@ -60,7 +60,20 @@ class TokenRenewalError(Exception):
     """The token could not be renewed. Never fatal to the application."""
 
 
-class TokenExpiredError(TokenRenewalError):
+class TokenRenewalRefused(TokenRenewalError):
+    """Dhan will not renew this token, and a retry will not change that.
+
+    Distinct from `TokenRenewalError` -- which means "something went wrong,
+    try later" -- because the remedy is a HUMAN one and the window to apply it
+    is finite. Renewal first runs six hours before the token dies; a refusal
+    that is quietly retried every fifteen minutes burns all six of those hours
+    and then the token expires anyway. That is exactly what happened on
+    2026-09-19: nineteen identical 400s, no escalation, and the only alert
+    arrived after the token was already dead and unrecoverable.
+    """
+
+
+class TokenExpiredError(TokenRenewalRefused):
     """The stored token has already lapsed, so there is nothing to renew.
 
     A distinct type because the remedy is different and is a HUMAN one: Dhan
@@ -76,6 +89,7 @@ class DhanTokenClient:
     def __init__(self) -> None:
         self.renewals = 0
         self.failures = 0
+        self.rate_limited = 0
         self.last_error: Optional[str] = None
 
     # --- configuration ------------------------------------------------------
@@ -119,7 +133,15 @@ class DhanTokenClient:
         started = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=self._timeout()) as client:
-                response = await client.post(
+                # GET, not POST. Dhan's documented call is
+                #   curl --location 'https://api.dhan.co/v2/RenewToken' \
+                #     --header 'access-token: ...' --header 'dhanClientId: ...'
+                # with no --request and no --data, which curl sends as a GET.
+                # The generateAccessToken example directly above it in the same
+                # document DOES say --request POST, so the docs distinguish and
+                # this was simply misread. Shipped as a POST on 2026-09-18 and
+                # every one of the first nineteen renewals came back 400.
+                response = await client.get(
                     url,
                     headers={
                         # The token renews ITSELF: it is the credential and the
@@ -140,23 +162,48 @@ class DhanTokenClient:
 
         elapsed_ms = (time.monotonic() - started) * 1000
 
-        if response.status_code in (401, 403):
-            self.failures += 1
-            self.last_error = f"Dhan refused the renewal ({response.status_code})"
-            raise TokenExpiredError(
-                "Dhan refused to renew the stored token. It renews only a token "
-                "that is still active, so this one has most likely already "
-                "expired -- generate a new one on Dhan Web and save it on the "
-                "Settings page."
-            )
         if response.status_code >= 400:
             self.failures += 1
-            self.last_error = f"Dhan returned {response.status_code}"
-            logger.warning(
-                "Dhan token renewal returned %s in %.0f ms",
-                response.status_code, elapsed_ms,
+            # WHY it failed, in Dhan's own words. Not logging this was the
+            # reason nineteen consecutive failures said nothing but "400" and
+            # the cause had to be found by re-reading the documentation. The
+            # body of an error is an errorType/errorCode/errorMessage object,
+            # not a credential -- and it goes through RedactingFormatter like
+            # every other line regardless. Truncated, because an HTML error
+            # page from a proxy would otherwise land whole in the log.
+            detail = self._error_detail(response)
+            self.last_error = f"Dhan returned {response.status_code}: {detail}"
+
+            # 429 is the only 4xx worth retrying. Every other one is Dhan
+            # telling us the REQUEST is wrong -- a dead token, a token it will
+            # not renew, a malformed call -- and repeating it every fifteen
+            # minutes neither fixes it nor tells anybody. It is reported as
+            # REFUSED so the caller escalates to a human immediately, which
+            # matters because the first attempt happens six hours before the
+            # token dies and those six hours are the whole point.
+            if response.status_code == 429:
+                self.rate_limited += 1
+                logger.warning(
+                    "Dhan rate limited the token renewal in %.0f ms: %s",
+                    elapsed_ms, detail,
+                )
+                raise TokenRenewalError(
+                    "Dhan rate limited the renewal; it will be tried again."
+                )
+
+            logger.error(
+                "Dhan REFUSED the token renewal: %s %s (in %.0f ms). This will "
+                "not succeed on a retry -- it needs a person.",
+                response.status_code, detail, elapsed_ms,
             )
-            raise TokenRenewalError(f"Dhan returned {response.status_code}")
+            raise TokenRenewalRefused(
+                f"Dhan refused to renew the stored token ({response.status_code}: "
+                f"{detail}). Retrying will not help. Dhan renews only an active "
+                f"token that was generated on Dhan Web -- if this token came "
+                f"from the API-key OAuth flow it cannot be renewed at all. "
+                f"Generate a new token on Dhan Web and save it on the "
+                f"Connections page."
+            )
 
         try:
             payload = response.json()
@@ -184,11 +231,26 @@ class DhanTokenClient:
         )
         return payload
 
+    @staticmethod
+    def _error_detail(response) -> str:
+        """Dhan's own description of the failure, safe to log and truncated."""
+        try:
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - not JSON; fall back to the text
+            return (response.text or "").strip()[:200] or "no detail"
+        if isinstance(payload, dict):
+            for key in ("errorMessage", "message", "error", "errorType"):
+                value = payload.get(key)
+                if value:
+                    return str(value)[:200]
+        return str(payload)[:200]
+
     def status(self) -> Dict[str, Any]:
         """Counters for the health page. No token, no client id, no secret."""
         return {
             "renewals": self.renewals,
             "failures": self.failures,
+            "rateLimited": self.rate_limited,
             "lastError": self.last_error,
         }
 

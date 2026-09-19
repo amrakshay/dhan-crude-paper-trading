@@ -37,8 +37,9 @@ the constants in a single client module, and leave the matching logic alone.
 accepts a family of URLs is not the same guarantee as a set you can read in one
 glance.
 
-On 2026-09-18 it gained `https://api.dhan.co/v2/RenewToken`, which is **not
-market data** and is the only entry that is not. It exchanges the access token
+On 2026-09-18 it gained `https://api.dhan.co/v2/RenewToken` (a **GET** — the
+documented `curl` has no `--request` and no `--data`, and sending a POST returns
+400), which is **not market data** and is the only entry that is not. It exchanges the access token
 this application already holds for a fresh 24-hour one. It was an explicit
 decision, because the alternative is a token pasted in by hand every day and an
 expired token silently stops the feed, the chart and the overnight bar refresh.
@@ -430,9 +431,15 @@ token is saved through `SettingsService.save()` so it lands encrypted, is
 registered with the log redactor and is overlaid onto the running config, and
 the feed is then `reconfigure()`d so the process is not left holding a fresh
 token while using the old one. Three outcomes are kept apart: renewed, could
-not renew yet (retry), and will never renew — a token that has fully lapsed
-needs a human, and saying so once beats asking Dhan every fifteen minutes for
-something that cannot succeed.
+not renew yet (retry), and **refused** — and that last distinction is
+load-bearing rather than tidy. On 2026-09-19 a 400 was classified as transient,
+so a refusal was retried nineteen times across the six hours of validity the
+operator could have acted in, and the only alert arrived after the token was
+dead and unrenewable by anyone. Any 4xx except 429 is now a `TokenRenewalRefused`:
+it stops the retries, carries **Dhan's own error message** rather than a bare
+status code, and reports `needsHuman` so the alert goes out while there is still
+time to act. The monitor remembers which token was refused and resumes the
+moment a different one is stored.
 
 **The Dhan access token is encrypted at rest and never leaves the server.**
 Responses carry a mask and decoded JWT metadata only. If you add a settings

@@ -248,3 +248,180 @@ class _FakeClient:
         if self._returns is None:
             raise AssertionError("renew() was not expected to be called")
         return self._returns
+
+
+# --- the 2026-09-19 failure, pinned ----------------------------------------
+async def test_the_renewal_is_a_GET_because_dhan_documents_a_GET(monkeypatch):
+    """Shipped as a POST, and every one of the first 19 renewals returned 400.
+
+    Dhan's documented call is `curl --location '.../RenewToken' --header ...`
+    with no `--request` and no `--data`, which curl sends as a GET. The
+    generateAccessToken example directly above it in the same document DOES
+    say `--request POST`, so the docs distinguish and this was simply misread.
+    """
+    from src.market.services import dhan_token_client
+
+    used = {}
+
+    class _Recording:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, **kwargs):
+            used["method"] = "GET"
+            used["url"] = url
+
+            class _Ok:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"accessToken": "new-token", "expiryTime": "x"}
+
+            return _Ok()
+
+        async def post(self, *args, **kwargs):
+            used["method"] = "POST"
+            raise AssertionError("RenewToken is a GET; a POST returns 400")
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Recording)
+
+    client = dhan_token_client.DhanTokenClient()
+    _patch_credentials(monkeypatch)
+    await client.renew()
+
+    assert used["method"] == "GET"
+    assert used["url"].endswith("/RenewToken")
+
+
+async def test_a_refusal_is_not_retried_and_says_why(monkeypatch):
+    """A 400 means the request is wrong; repeating it changes nothing.
+
+    This is the whole 2026-09-19 failure in one test: the old code classified
+    every non-401 as transient, so nineteen identical 400s went by as
+    warnings while the six hours of remaining validity ran out, and the alert
+    arrived only once the token was dead and unrenewable by anyone.
+    """
+    from src.market.services import dhan_token_client
+
+    class _Refusing:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, *args, **kwargs):
+            class _Bad:
+                status_code = 400
+
+                @staticmethod
+                def json():
+                    return {
+                        "errorType": "Invalid_Authentication",
+                        "errorMessage": "Token cannot be renewed",
+                    }
+
+            return _Bad()
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Refusing)
+
+    client = dhan_token_client.DhanTokenClient()
+    _patch_credentials(monkeypatch)
+
+    import pytest as _pytest
+
+    with _pytest.raises(dhan_token_client.TokenRenewalRefused) as caught:
+        await client.renew()
+
+    # Dhan's OWN words reach the operator. Not logging these was why nineteen
+    # failures said nothing but "400".
+    assert "Token cannot be renewed" in str(caught.value)
+    assert "Token cannot be renewed" in (client.last_error or "")
+
+    # And a refusal is a refusal, not a "try later".
+    assert isinstance(caught.value, dhan_token_client.TokenRenewalError)
+
+
+async def test_rate_limiting_is_the_one_4xx_still_worth_retrying(monkeypatch):
+    from src.market.services import dhan_token_client
+
+    class _Limited:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, *args, **kwargs):
+            class _TooMany:
+                status_code = 429
+
+                @staticmethod
+                def json():
+                    return {"errorMessage": "Too many requests"}
+
+            return _TooMany()
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Limited)
+
+    client = dhan_token_client.DhanTokenClient()
+    _patch_credentials(monkeypatch)
+
+    import pytest as _pytest
+
+    with _pytest.raises(dhan_token_client.TokenRenewalError) as caught:
+        await client.renew()
+    assert not isinstance(caught.value, dhan_token_client.TokenRenewalRefused)
+    assert client.rate_limited == 1
+
+
+async def test_a_refused_token_reports_that_a_human_is_needed(
+    db_session, monkeypatch
+):
+    """The outcome carries it, so the alert can say so while there is time."""
+    from src.market.services.dhan_token_client import TokenRenewalRefused
+    from src.settings.services import token_refresh_service as module
+
+    await _store(db_session, _token(hours_left=5))
+
+    class _Refusing:
+        async def renew(self):
+            raise TokenRenewalRefused("Dhan refused: token cannot be renewed")
+
+    _patch_client(monkeypatch, _Refusing())
+
+    outcome = await module.TokenRefreshService(db_session).refresh_if_due()
+
+    assert outcome.renewed is False
+    assert outcome.needs_human is True
+    assert "refused" in outcome.reason.lower()
+
+
+def _patch_credentials(monkeypatch):
+    """Give the client a client id and token without touching real config.
+
+    Through monkeypatch, NOT by assigning to the class: an earlier version of
+    this helper set `DhanTokenClient._credentials` permanently, which leaked a
+    fake client id into every test that ran after it in the same worker and
+    took six unrelated files down with it.
+    """
+    from src.market.services import dhan_token_client
+
+    monkeypatch.setattr(
+        dhan_token_client.DhanTokenClient,
+        "_credentials",
+        staticmethod(lambda: ("1100003626", "a-token")),
+    )
