@@ -58,10 +58,50 @@ logger = get_logger("connections.alerts")
 DEFAULT_DEDUPE_SECONDS = 300
 DEFAULT_MAX_BODY_CHARS = 3500  # Telegram's own limit is 4096 per message.
 
+# --- how repeats are collapsed, and why there are two answers --------------
+#
+# An EVENT that keeps happening and a CONDITION that is simply true need
+# opposite treatment, and treating them the same is what put ten missed
+# sessions on somebody's phone every five minutes for a day.
+#
+# WINDOW: a floor BETWEEN MESSAGES. The first goes immediately, then one per
+# window carrying the running count. Right for an error flood -- it keeps
+# happening, and "still happening, now 4,000 times" is news.
+DEDUPE_WINDOW = "WINDOW"
+# CONDITION: alert on the TRANSITION, not on the state. One message when it
+# appears, silence while it persists, and a new message only once it has
+# stopped being observed and comes back. Right for a dead task or a stale
+# feed, where the second message says exactly what the first one did.
+DEDUPE_CONDITION = "CONDITION"
+
+# How long a condition must go UNOBSERVED before its return counts as new.
+# Comfortably more than the watcher's 60 s pass, so an ordinary pass never
+# re-arms it, and short enough that a real recurrence is reported promptly.
+DEFAULT_CONDITION_REARM_SECONDS = 900
+
+# A standing condition is re-sent at most this often, so a critical problem
+# nobody acted on is not silent for ever. Once a day is a reminder; once every
+# five minutes is what this replaced.
+DEFAULT_CONDITION_REMINDER_HOURS = 24
+
 
 def _dedupe_seconds() -> int:
     return config_utils.get_property_value_int(
         "connections.alert_dedupe_seconds", DEFAULT_DEDUPE_SECONDS
+    )
+
+
+def _condition_rearm_seconds() -> int:
+    return config_utils.get_property_value_int(
+        "connections.alert_condition_rearm_seconds",
+        DEFAULT_CONDITION_REARM_SECONDS,
+    )
+
+
+def _condition_reminder_hours() -> int:
+    return config_utils.get_property_value_int(
+        "connections.alert_condition_reminder_hours",
+        DEFAULT_CONDITION_REMINDER_HOURS,
     )
 
 
@@ -94,23 +134,26 @@ class AlertService:
         body: str,
         dedupe_key: Optional[str] = None,
         strategy_key: Optional[str] = None,
+        dedupe_mode: str = DEDUPE_WINDOW,
     ) -> Optional[Alert]:
         """Record something worth telling somebody about.
 
         Returns the row, or None when this occurrence was collapsed onto an
         existing one. Never raises: a caller in the middle of a fill must not
         lose the fill because an alert could not be written.
+
+        `dedupe_mode` decides what a repeat MEANS -- see DEDUPE_WINDOW and
+        DEDUPE_CONDITION above.
         """
         try:
             if dedupe_key:
-                since = utc_now() - timedelta(seconds=_dedupe_seconds())
-                existing = await self.alerts.latest_open_for_dedupe(dedupe_key, since)
+                existing = await self._open_for(dedupe_key, dedupe_mode)
                 if existing is not None:
                     existing.suppressed_count = int(existing.suppressed_count or 0) + 1
                     await self.session.flush()
                     logger.debug(
                         "Collapsed a repeat alert onto row %s (%s further "
-                        "occurrence(s) in this window)",
+                        "occurrence(s))",
                         existing.id, existing.suppressed_count,
                     )
                     return None
@@ -143,6 +186,38 @@ class AlertService:
                 "unaffected", kind, title, exc_info=True,
             )
             return None
+
+    async def _open_for(self, dedupe_key: str, mode: str) -> Optional[Alert]:
+        """The row this occurrence should collapse onto, if any.
+
+        WINDOW looks at when the last message was SENT, so a continuing flood
+        gets a fresh one each window with the running count.
+
+        CONDITION looks at when the condition was last OBSERVED, so a watcher
+        reporting the same thing every 60 s keeps one row alive and sends
+        nothing further -- until either the condition stops being observed for
+        the re-arm window (its return is news) or it has been standing for the
+        reminder interval (a critical problem nobody acted on should not go
+        silent for ever).
+        """
+        now = utc_now()
+        if mode == DEDUPE_CONDITION:
+            observed = await self.alerts.latest_observed_for_dedupe(
+                dedupe_key, now - timedelta(seconds=_condition_rearm_seconds())
+            )
+            if observed is None:
+                return None
+            standing_since = observed.created_at
+            if standing_since is not None and standing_since <= now - timedelta(
+                hours=_condition_reminder_hours()
+            ):
+                # Still true a day later. Say so once, then go quiet again.
+                return None
+            return observed
+
+        return await self.alerts.latest_open_for_dedupe(
+            dedupe_key, now - timedelta(seconds=_dedupe_seconds())
+        )
 
     # --- trades ------------------------------------------------------------
     async def record_fill(
@@ -264,12 +339,18 @@ class AlertService:
         severity: str = SEVERITY_WARNING,
         strategy_key: Optional[str] = None,
     ) -> Optional[Alert]:
-        """One of the seven watched conditions. Keyed on the EVENT, not the text.
+        """One of the watched conditions. Keyed on the EVENT, not the text.
 
-        A health condition persists -- a dead task stays dead -- so the dedupe
-        key is the event's own name. Without that, a watcher polling every
-        minute would send the same "swing-scheduler is not running" every
-        minute until somebody fixed it.
+        **A CONDITION, not an event.** A dead task stays dead and ten missed
+        sessions stay missed, so this alerts on the TRANSITION: once when the
+        condition appears, silence while it persists, and again only when it
+        has cleared and come back -- or once a day, so a critical problem
+        nobody acted on does not go silent for ever.
+
+        Keying on the event's name is what makes the repeat recognisable at
+        all; treating it as a floor between messages rather than as a state is
+        what sent ten missed sessions to somebody's phone every five minutes
+        for a day.
         """
         return await self.raise_alert(
             kind=KIND_HEALTH,
@@ -278,6 +359,7 @@ class AlertService:
             body=body,
             dedupe_key=f"health|{event}",
             strategy_key=strategy_key,
+            dedupe_mode=DEDUPE_CONDITION,
         )
 
     # --- commands ----------------------------------------------------------

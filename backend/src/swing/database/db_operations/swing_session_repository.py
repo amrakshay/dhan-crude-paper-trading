@@ -134,6 +134,38 @@ class SwingSessionRepository(_AppendOnly, BaseRepository[SwingSession]):
         )
         return sorted({value for value in result.scalars().all() if value})
 
+    async def first_completed_session(self, strategy_key: str) -> Optional[date]:
+        """The earliest session this strategy actually COMPLETED a run for.
+
+        The boundary for missed-run detection, and each half of that phrase is
+        load-bearing.
+
+        **`session_date`, not `created_at`**: a record is written when the job
+        runs, which for an import or a catch-up is not when the session was.
+        Keying on the write time would make every past session unaccountable
+        and swallow the real gaps this detector exists to find.
+
+        **COMPLETED, not any status**: a rebalance that refuses on stale bars
+        writes a SKIPPED record stamped with the STALE session's date, so the
+        earliest `session_date` across all statuses can be months before the
+        strategy existed -- the live database held exactly that, a SKIPPED row
+        for 2026-07-14 written on 2026-09-18. A COMPLETED record is the only
+        one whose session_date is certainly a session this strategy really
+        processed.
+
+        None when it has never completed one: a strategy that has never run has
+        not missed a run.
+        """
+        result = await self.session.execute(
+            select(func.min(SwingSession.session_date)).where(
+                and_(
+                    SwingSession.strategy_key == strategy_key,
+                    SwingSession.status == STATUS_COMPLETED,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def ran_on_day(
         self, strategy_key: str, run_kind: str, day: date
     ) -> bool:

@@ -30,6 +30,12 @@ logger = get_logger("connections.service")
 STATUS_CONNECTED = "CONNECTED"
 STATUS_NOT_CONFIGURED = "NOT_CONFIGURED"
 STATUS_EXPIRING_SOON = "EXPIRING_SOON"
+# EXPIRED is not EXPIRING_SOON, and the difference is the whole point of having
+# more than two pill states. "Expiring soon" is something to get to today;
+# expired means the feed is ALREADY down and automatic renewal cannot recover
+# it -- Dhan renews only an active token. Showing an amber "expiring soon" over
+# a dead credential is the page understating the one thing it exists to report.
+STATUS_EXPIRED = "EXPIRED"
 STATUS_ERROR = "ERROR"
 STATUS_NEVER_CHECKED = "NEVER_CHECKED"
 STATUS_DISABLED = "DISABLED"
@@ -352,6 +358,8 @@ class ConnectionService:
             return STATUS_NOT_CONFIGURED
         if not connection.enabled:
             return STATUS_DISABLED
+        if detail.get("expired"):
+            return STATUS_EXPIRED
         if detail.get("expiringSoon"):
             return STATUS_EXPIRING_SOON
         if connection.last_check_ok is None:
@@ -368,6 +376,11 @@ class ConnectionService:
             return "Nothing is configured yet."
         if status == STATUS_DISABLED:
             return "Configured, but switched off here."
+        if status == STATUS_EXPIRED:
+            return (
+                detail.get("expiryNote")
+                or "The credential has expired and has to be replaced by hand."
+            )
         if status == STATUS_EXPIRING_SOON:
             return detail.get("expiryNote") or "The credential is close to expiry."
         if status == STATUS_NEVER_CHECKED:
@@ -421,8 +434,10 @@ class ConnectionService:
         hours_left = (
             (info.seconds_remaining / 3600) if info.seconds_remaining is not None else None
         )
+        # Kept apart: one is a warning, the other is an outage.
+        expired = bool(info.present and info.expired)
         expiring = bool(
-            hours_left is not None and (info.expired or hours_left < renew_before)
+            not expired and hours_left is not None and hours_left < renew_before
         )
 
         detail: Dict[str, Any] = {
@@ -435,6 +450,7 @@ class ConnectionService:
             ),
             "token": info.as_dict(),
             "autoRenew": get_token_refresh_monitor().status(),
+            "expired": expired,
             "expiringSoon": expiring,
             "metricValue": await self._instruments_on_the_feed(),
         }

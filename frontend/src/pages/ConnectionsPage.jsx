@@ -92,6 +92,9 @@ const STATUS_TONES = {
   NOT_CONFIGURED: 'neutral',
   NEVER_CHECKED: 'neutral',
   EXPIRING_SOON: 'warning',
+  // Expired is an OUTAGE, not a warning: the feed is already down and
+  // automatic renewal cannot recover it.
+  EXPIRED: 'down',
   ERROR: 'down',
   DISABLED: 'neutral',
 };
@@ -101,6 +104,7 @@ const STATUS_LABELS = {
   NOT_CONFIGURED: 'Not configured',
   NEVER_CHECKED: 'Never checked',
   EXPIRING_SOON: 'Expiring soon',
+  EXPIRED: 'Expired',
   ERROR: 'Error',
   DISABLED: 'Switched off',
 };

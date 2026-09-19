@@ -110,15 +110,45 @@ class AlertRepository(BaseRepository[Alert]):
     async def latest_open_for_dedupe(
         self, dedupe_key: str, since: datetime
     ) -> Optional[Alert]:
-        """The most recent row holding this dedupe window open.
+        """The most recent row holding this dedupe window open, BY CREATION.
 
         A collapsed occurrence increments that row's `suppressed_count` rather
         than inserting its own, which is what stops a flood in the log becoming
         a flood in this table.
+
+        Keyed on `created_at`, so the window is a FLOOR BETWEEN MESSAGES: a
+        flood that continues gets a fresh message every window, carrying the
+        running count. That is right for an EVENT that keeps happening. It is
+        wrong for a CONDITION that is simply true -- see
+        `latest_observed_for_dedupe`.
         """
         result = await self.session.execute(
             select(Alert)
             .where(Alert.dedupe_key == dedupe_key, Alert.created_at >= since)
+            .order_by(Alert.id.desc())
+            .limit(1)
+        )
+        return result.scalars().first()
+
+    async def latest_observed_for_dedupe(
+        self, dedupe_key: str, since: datetime
+    ) -> Optional[Alert]:
+        """The row for a condition that is STILL BEING OBSERVED.
+
+        Keyed on `updated_at`, which moves every time a repeat is collapsed
+        onto the row. So while the watcher keeps reporting a condition the same
+        row stays current and nothing new is sent; once it stops reporting it
+        for longer than the re-arm window, the row goes stale and a recurrence
+        is a new message.
+
+        That is the difference between alerting on a STATE and alerting on a
+        TRANSITION, and it is the whole reason this method exists beside the
+        one above. A standing condition -- ten missed sessions that will never
+        be filled in -- was otherwise re-sent every five minutes for ever.
+        """
+        result = await self.session.execute(
+            select(Alert)
+            .where(Alert.dedupe_key == dedupe_key, Alert.updated_at >= since)
             .order_by(Alert.id.desc())
             .limit(1)
         )

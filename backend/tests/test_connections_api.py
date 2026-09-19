@@ -711,3 +711,35 @@ async def test_validating_records_the_check_so_the_pill_stops_saying_never(
     assert after.json()["lastCheckedAt"] is not None
     assert after.json()["lastCheckOk"] is True
     assert after.json()["status"] == "CONNECTED"
+
+
+async def test_an_expired_token_is_not_shown_as_merely_expiring_soon(auth_client):
+    """Expired is an OUTAGE; expiring soon is a warning.
+
+    Showing amber "Expiring soon" over a dead credential understates the one
+    thing the card exists to report -- the feed is already down, and automatic
+    renewal cannot recover it because Dhan renews only an active token. The
+    live installation showed exactly that on 2026-09-19.
+    """
+    import time
+
+    import jwt
+
+    dead = jwt.encode(
+        {"dhanClientId": "1100123456", "exp": int(time.time()) - 3600},
+        "not-the-real-signing-key",
+        algorithm="HS256",
+    )
+    await auth_client.put(
+        "/api/settings",
+        json={"syntheticFeed": True, "clientId": "1100123456", "accessToken": dead},
+    )
+
+    card = (await auth_client.get("/api/connections/dhan")).json()
+
+    assert card["status"] == "EXPIRED"
+    assert card["detail"]["expired"] is True
+    assert card["detail"]["expiringSoon"] is False, (
+        "an expired token is not 'expiring soon'"
+    )
+    assert "expired" in card["statusDetail"].lower()

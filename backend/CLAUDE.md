@@ -339,6 +339,14 @@ the code.
   the `description` because it is the only thing separating "the bot is not in
   that channel" from "that channel does not exist", and those have different
   fixes. Do not collapse them.
+- **A CONDITION is not an EVENT, and `raise_alert(dedupe_mode=...)` is where
+  that lives.** `WINDOW` is a floor BETWEEN MESSAGES, right for an error flood
+  that keeps happening. `CONDITION` alerts on the TRANSITION and collapses on
+  LAST OBSERVATION (`updated_at`, which moves on every collapse) rather than on
+  row creation, so a watcher reporting the same state every 60 s keeps one row
+  alive and sends nothing further. `record_health` is always `CONDITION`.
+  Getting this wrong sent an expired token and ten permanently-missed sessions
+  to a phone every five minutes for a day.
 - **`alert_catalogue.py` is the list, and the watcher raises ITS names.** The
   Alerts tab is documentation an operator reads, so it has to come from one
   place or it drifts from the code that raises the alerts --
@@ -721,6 +729,15 @@ health page reads.
   never on a `None` price, and never inside the Closing Auction Session for an
   F&O-eligible name -- there it records the trigger and the exit waits for the
   next open.
+- **A missed run is a HOLE in the journal, not the absence of one.**
+  `detect_missed_runs` is bounded below by
+  `SwingSessionRepository.first_completed_session`. Without it a fresh
+  installation reports every session in the lookback as missed, including dates
+  from before the module existed. `session_date` not `created_at` (a record is
+  written when the job RUNS, so keying on the write time makes every past
+  session unaccountable and swallows the real gaps), and COMPLETED not any
+  status (a rebalance refusing on stale bars stamps the STALE session's date --
+  the live database held a SKIPPED row for 2026-07-14 written on 2026-09-18).
 - **`swing_scheduler`** is the only clock in this application. Idempotence is
   the JOURNAL's (`sessions_completed_on`), not a flag's; the in-memory attempt
   clock exists only so a failing job does not report one problem two thousand

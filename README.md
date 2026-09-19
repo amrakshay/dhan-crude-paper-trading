@@ -778,6 +778,31 @@ De-duplication here is keyed on the **event**, because a health condition
 persists — a dead task stays dead, and keying on the message would send the same
 sentence every minute until somebody fixed it.
 
+**A condition and an event are collapsed differently, and confusing them was a
+real bug.** An ERROR that keeps happening is an *event*: the first message goes
+immediately and one per window after it, carrying the running count, because
+"still failing, now 4,000 times" is news. A health condition is a *state*: it
+alerts on the TRANSITION — once when it appears, silence while it persists, and
+again only after it has stopped being observed and comes back, plus a reminder
+once a day so a critical problem nobody acted on does not go silent for ever.
+
+Treating a condition as an event meant a five-minute floor *between messages*,
+so ten permanently-missed sessions and an expired token arrived every five
+minutes for a day — 72 alert rows before it was caught. Every one of them said
+exactly what the first had.
+
+**A missed run is a hole in the journal, not the absence of one.** The detector
+compares the regime index's trading dates against the decision journal, and it
+used to do so with no notion of when the strategy began existing — so a fresh
+installation reported every one of the last ten sessions as missed, including
+dates from before the module was written. The boundary is now the first session
+the strategy actually COMPLETED a run for: `session_date` rather than
+`created_at`, because a record is written when the job runs and not when the
+session was; and COMPLETED rather than any status, because a rebalance that
+refuses on stale bars writes a SKIPPED record stamped with the *stale* session's
+date. A strategy that has never completed a run has not missed one — that it has
+never run is a different state, and the Live tab already shows it.
+
 ### The Alerts tab
 
 Two places, one component. **System Health → Alerts** lists every rule this

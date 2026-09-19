@@ -177,15 +177,23 @@ async def test_a_missed_run_is_reported_and_never_silently_re_decided(db_session
     than a gap that says what it is.
     """
     portfolio_id = await _seed_portfolio(db_session)
-    dates = await _seed_calendar(db_session, count=5)
+    dates = await _seed_calendar(db_session, count=6)
+    expected = dates[:-1]
+
+    # A REAL gap: it ran for the first session and then stopped. An empty
+    # journal would not do -- a strategy that never ran has not missed a run,
+    # and using that as the fixture is how this test used to assert the
+    # fresh-installation false positive as though it were correct.
+    await _record(db_session, portfolio_id, expected[0], RUN_NIGHTLY)
+    await _record(db_session, portfolio_id, expected[0], RUN_REBALANCE)
 
     scheduler = SwingScheduler()
     missed = await scheduler.detect_missed_runs()
     assert missed
 
-    # Detection wrote nothing.
+    # Detection REPAIRED nothing: the journal still holds only what really ran.
     rows = await SwingSessionRepository(db_session).list_recent(STRATEGY, limit=50)
-    assert rows == []
+    assert {row.session_date for row in rows} == {expected[0]}
     assert portfolio_id  # the portfolio exists; nothing was decided into it
 
 
@@ -509,3 +517,106 @@ async def test_ran_on_day_is_keyed_on_when_the_job_RAN(db_session):
         )
         is False
     )
+
+
+async def test_a_fresh_installation_reports_nothing_as_missed(db_session):
+    """The bug that alerted about sessions from before the module existed.
+
+    A brand-new installation has a calendar of real trading dates and an EMPTY
+    journal, and the detector compared the two directly -- so every one of the
+    last ten sessions was "missed", including dates from before the strategy
+    was written. Nothing could have run on them and nobody could act on it.
+
+    A strategy that has never run has not missed a run. That it has never run
+    is a different state, and one the Live tab already shows.
+    """
+    await _seed_portfolio(db_session)
+    await _seed_calendar(db_session, count=12)
+
+    scheduler = SwingScheduler()
+
+    assert await scheduler.detect_missed_runs() == []
+    assert scheduler.status()["missedRunCount"] == 0
+
+
+async def test_sessions_before_the_journal_existed_are_not_missed(db_session):
+    """The boundary is the first time the journal was WRITTEN TO.
+
+    A journal cannot be missing a record from before it existed. This is the
+    live shape exactly: ten trading days of history, and a strategy that only
+    started recording on the most recent one.
+    """
+    portfolio_id = await _seed_portfolio(db_session)
+    dates = await _seed_calendar(db_session, count=12)
+
+    # It ran for the newest decidable session only -- the day it was deployed.
+    newest_decidable = dates[-2]
+    await _record(db_session, portfolio_id, newest_decidable, RUN_NIGHTLY)
+    await _record(db_session, portfolio_id, newest_decidable, RUN_REBALANCE)
+
+    missed = await SwingScheduler().detect_missed_runs()
+
+    assert missed == [], (
+        "the nine sessions before it first ran are not gaps in its journal"
+    )
+
+
+async def test_a_stale_session_date_does_not_move_the_boundary_backwards(
+    db_session
+):
+    """`created_at`, not `min(session_date)`, and this is why.
+
+    A rebalance that refuses on stale bars records the STALE session's date, so
+    the earliest `session_date` in the journal can be months before the
+    strategy existed. Keying the boundary on it would drag the whole lookback
+    back over dates nothing ran on -- which is exactly what the live database
+    held: a SKIPPED rebalance stamped 2026-07-14, written on 2026-09-18.
+    """
+    from datetime import timedelta
+
+    from src.swing.database.db_models.swing_session_model import STATUS_SKIPPED
+
+    portfolio_id = await _seed_portfolio(db_session)
+    dates = await _seed_calendar(db_session, count=12)
+
+    # Written now, but naming a session from long before this installation.
+    await SwingSessionRepository(db_session).create(
+        strategy_key=STRATEGY,
+        portfolio_id=portfolio_id,
+        session_date=dates[0] - timedelta(days=60),
+        run_kind=RUN_REBALANCE,
+        status=STATUS_SKIPPED,
+        started_at=utc_now(),
+        completed_at=utc_now(),
+        message="Refusing to rebalance: the newest stored session is far too old",
+    )
+    await db_session.commit()
+
+    missed = await SwingScheduler().detect_missed_runs()
+
+    assert missed == [], (
+        "a stale session_date is a fact about the DATA, not about when this "
+        "strategy started being responsible"
+    )
+
+
+async def test_a_real_gap_after_the_journal_started_is_still_caught(db_session):
+    """The boundary must not swallow the failure the detector exists for.
+
+    A strategy that ran for a while and then stopped has REAL gaps, and they
+    are after its first record, so they are still reported.
+    """
+    portfolio_id = await _seed_portfolio(db_session)
+    dates = await _seed_calendar(db_session, count=8)
+    expected = dates[:-1]
+
+    # Ran for the first two sessions, then died.
+    for session_date in expected[:2]:
+        await _record(db_session, portfolio_id, session_date, RUN_NIGHTLY)
+        await _record(db_session, portfolio_id, session_date, RUN_REBALANCE)
+
+    missed = await SwingScheduler().detect_missed_runs()
+
+    nightly = [entry for entry in missed if entry.kind == RUN_NIGHTLY]
+    assert nightly, "a strategy that stopped running has missed its runs"
+    assert nightly[0].sessions == expected[2:]

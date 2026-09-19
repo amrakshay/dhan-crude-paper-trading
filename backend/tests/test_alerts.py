@@ -414,3 +414,145 @@ async def test_the_error_sink_reaches_the_outbox_through_the_dispatcher(
 
 async def _no_delivery():
     return 0, 0, 0
+
+
+# --- a CONDITION is not an EVENT -------------------------------------------
+async def test_a_standing_condition_alerts_once_not_every_window(db_session):
+    """The bug that put ten missed sessions on a phone every five minutes.
+
+    The watcher reports a condition every 60 s while it holds. Treated as a
+    floor BETWEEN MESSAGES, that sent a fresh message every de-duplication
+    window for as long as the condition lasted -- 288 a day, every one of them
+    saying exactly what the first one said.
+
+    A condition alerts on the TRANSITION: once when it appears, then silence.
+    """
+    await _configure_telegram(db_session)
+    service = AlertService(db_session)
+
+    first = await service.record_health(
+        event="missed-sessions|nse-swing-momentum",
+        title="2 scheduled session group(s) missed",
+        body="NIGHTLY: 2026-09-02 ...",
+    )
+    assert first is not None
+
+    # Twenty watcher passes over the next stretch, all reporting the same
+    # condition. Every one of them must be silent.
+    for _ in range(20):
+        assert (
+            await service.record_health(
+                event="missed-sessions|nse-swing-momentum",
+                title="2 scheduled session group(s) missed",
+                body="NIGHTLY: 2026-09-02 ...",
+            )
+            is None
+        )
+    await db_session.commit()
+
+    rows = [
+        row
+        for row in await AlertRepository(db_session).recent()
+        if row.kind == "HEALTH"
+    ]
+    assert len(rows) == 1, "a standing condition is one message, not twenty"
+    assert rows[0].suppressed_count == 20
+
+
+async def test_a_condition_that_clears_and_returns_is_news_again(db_session):
+    """Silence while it persists, but its RETURN is a transition worth a
+    message. Otherwise a feed that dropped, recovered and dropped again would
+    be reported once."""
+    from datetime import timedelta
+
+    from src.core.time_utils import utc_now
+
+    await _configure_telegram(db_session)
+    service = AlertService(db_session)
+
+    first = await service.record_health(
+        event="feed-down", title="The feed is down", body="no prices"
+    )
+    await db_session.commit()
+
+    # Age the row past the re-arm window: nothing observed it for a while, so
+    # the condition had cleared.
+    first.updated_at = utc_now() - timedelta(seconds=1800)
+    await db_session.commit()
+
+    again = await service.record_health(
+        event="feed-down", title="The feed is down", body="no prices"
+    )
+    await db_session.commit()
+
+    assert again is not None, "a condition that came back is a new message"
+    rows = [
+        row
+        for row in await AlertRepository(db_session).recent()
+        if row.kind == "HEALTH"
+    ]
+    assert len(rows) == 2
+
+
+async def test_a_standing_condition_is_repeated_once_a_day(db_session):
+    """A critical problem nobody acted on must not go silent for ever.
+
+    Once a day is a reminder. Once every five minutes is what this replaced.
+    """
+    from datetime import timedelta
+
+    from src.core.time_utils import utc_now
+
+    await _configure_telegram(db_session)
+    service = AlertService(db_session)
+
+    first = await service.record_health(
+        event="token-lapsed", title="The token expired", body="paste a new one"
+    )
+    await db_session.commit()
+
+    # Still being observed every minute, but standing since yesterday.
+    first.created_at = utc_now() - timedelta(hours=25)
+    await db_session.commit()
+
+    reminder = await service.record_health(
+        event="token-lapsed", title="The token expired", body="paste a new one"
+    )
+    await db_session.commit()
+
+    assert reminder is not None, "a day-old standing condition is worth saying again"
+
+
+async def test_an_error_flood_still_gets_its_periodic_count(db_session):
+    """The opposite case, and it must not have been broken by the fix.
+
+    An error that keeps HAPPENING is an event, not a state: "still failing, now
+    4,000 times" is news, so the floor-between-messages behaviour stays.
+    """
+    from datetime import timedelta
+
+    from src.core.time_utils import utc_now
+
+    await _configure_telegram(db_session)
+    service = AlertService(db_session)
+
+    first = await service.record_error(
+        "dcpt.swing.stops", "ERROR", "database is locked"
+    )
+    assert first is not None
+    assert (
+        await service.record_error("dcpt.swing.stops", "ERROR", "database is locked")
+        is None
+    )
+    await db_session.commit()
+
+    # Past the window, still failing: a fresh message carrying the count.
+    first.created_at = utc_now() - timedelta(seconds=600)
+    await db_session.commit()
+
+    again = await service.record_error(
+        "dcpt.swing.stops", "ERROR", "database is locked"
+    )
+    await db_session.commit()
+
+    assert again is not None, "a continuing flood still reports its count"

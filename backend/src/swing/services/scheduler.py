@@ -613,6 +613,20 @@ class SwingScheduler:
         Reported, never repaired. Re-deciding a session days later on bars that
         have since been restated would write a record of a decision nobody
         took, which is worse than a gap that says what it is.
+
+        **A MISSED RUN IS A HOLE IN THE JOURNAL, NOT THE ABSENCE OF ONE.** The
+        detector used to compare the last N trading dates against the journal
+        with no notion of when the strategy began existing, so on a fresh
+        installation every one of those dates was reported as missed -- ten
+        sessions from before the module was written, which nothing could have
+        run and nobody could act on. Once alerts started forwarding it, that
+        arrived on somebody's phone every five minutes.
+
+        The boundary is the first time this strategy wrote ANYTHING to the
+        journal: a journal cannot be missing a record from before it existed.
+        A strategy that has never written one has not missed anything -- it has
+        never run, which is a different state and one the Live tab already
+        shows.
         """
         from src.daily_bars.database.db_operations.daily_bar_repository import (
             DailyBarRepository,
@@ -644,6 +658,20 @@ class SwingScheduler:
                 expected = calendar[:-1][-lookback:]
                 if not expected:
                     continue
+
+                # Nothing before the journal existed can be missing from it.
+                live_from = await self._accountable_from(
+                    sessions, definition.key, calendar
+                )
+                if live_from is None:
+                    # Never completed a run. Not a gap -- no history at all,
+                    # which is a different state and not this detector's
+                    # business.
+                    continue
+                expected = [one for one in expected if one >= live_from]
+                if not expected:
+                    continue
+
                 for kind in (RUN_NIGHTLY, RUN_REBALANCE):
                     decided = set(
                         await sessions.decided_session_dates(
@@ -673,6 +701,19 @@ class SwingScheduler:
         if not found:
             logger.info("Swing missed-run check: no gaps in the decision journal.")
         return found
+
+    @staticmethod
+    async def _accountable_from(sessions, strategy_key: str, calendar: List[date]):
+        """The earliest session this strategy can be held responsible for.
+
+        The first session it actually COMPLETED a run for. Everything before
+        that is not a gap in its journal -- it is the time before its journal
+        had anything in it, and nothing was running to miss those sessions.
+
+        Returns None when it has never completed a run, which is a different
+        state entirely and one the Live tab already shows.
+        """
+        return await sessions.first_completed_session(strategy_key)
 
     def _should_check_missed(self, now: datetime) -> bool:
         if self.checked_for_missed_at is None:
