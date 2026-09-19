@@ -23,6 +23,7 @@ from src.btst.database.db_models.btst_session_model import (
     EXIT_DONE,
     EXIT_FAILED,
     EXIT_LATE,
+    EXIT_NOT_HELD,
     EXIT_PENDING,
     STATUS_COMPLETED,
     STATUS_SKIPPED,
@@ -366,7 +367,12 @@ class BtstHoldingRepository(BaseRepository[BtstHolding]):
             .where(BtstHolding.strategy_key == strategy_key)
             .group_by(BtstHolding.exit_status)
         )
-        counts = {status: 0 for status in (EXIT_PENDING, EXIT_DONE, EXIT_LATE, EXIT_FAILED)}
+        counts = {
+            status: 0
+            for status in (
+                EXIT_PENDING, EXIT_DONE, EXIT_LATE, EXIT_FAILED, EXIT_NOT_HELD,
+            )
+        }
         for status, count in result.all():
             counts[str(status)] = int(count or 0)
         return counts

@@ -91,7 +91,14 @@ EXIT_DONE = "EXITED"
 EXIT_LATE = "EXITED_LATE"
 # The exit was attempted and refused or failed. Still open.
 EXIT_FAILED = "FAILED"
-EXIT_STATUSES = (EXIT_PENDING, EXIT_DONE, EXIT_LATE, EXIT_FAILED)
+# The position was NOT HELD when the exit ran -- closed by hand from the
+# Positions page, or sold by an earlier pass whose result this row never saw.
+# Its own status rather than EXITED, because EXITED means "this job sold it"
+# and the Health tab's counts are read as exactly that. Not FAILED either:
+# FAILED counts as open and keeps the alarm firing for a position that is not
+# there. Nothing was sold, nothing is held, and the row says both.
+EXIT_NOT_HELD = "NOT_HELD"
+EXIT_STATUSES = (EXIT_PENDING, EXIT_DONE, EXIT_LATE, EXIT_FAILED, EXIT_NOT_HELD)
 
 
 class BtstSession(TimestampedModel):

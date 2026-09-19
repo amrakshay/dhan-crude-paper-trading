@@ -91,6 +91,20 @@ Identical signals; only the exit differs. So:
   entry is sold on the Monday and that is not late. Getting this wrong put a
   LATE status and an alert on every Friday signal; it was caught by
   `test_a_friday_entry_sold_on_the_monday_is_NOT_late`.
+- **It sells WHAT IS HELD, never what the row recorded at entry.**
+  `btst_holdings.quantity` is what filled at entry and never moves again, so a
+  retry after a partial sale, or an exit reaching a position an operator closed
+  by hand, would sell shares that are no longer there. Nothing downstream
+  refuses that — a closing order skips the funds check by design and the
+  position book simply lets the net go negative — so the result is a SHORT in a
+  strategy that has no stop and must never sell to open. The sale is bounded by
+  both figures: `min(recorded, actually held)`, read from the position book
+  through `_open_quantity`, which is the guard
+  `SwingStopMonitor._open_quantity` already makes on the rotation's side.
+  Nothing held at all is `NOT_HELD` — its own status, because `EXITED` would
+  claim this job sold it and `FAILED` counts as open and would keep the alarm
+  firing for a position that is not there. Added 2026-09-19; both halves are
+  pinned in `tests/test_btst_exit.py`.
 
 ## The scan
 

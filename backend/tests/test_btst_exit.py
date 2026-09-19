@@ -14,6 +14,9 @@ So this file asserts, in order:
   * a position that could NOT be sold stays open and is tried again, rather
     than the row going quiet;
   * a partial sale leaves a real position open and is recorded as such;
+  * A RETRY AFTER ONE SELLS ONLY THE REMAINDER, and a position closed by hand
+    leaves the row NOT_HELD with no order placed -- the exit never sells more
+    than is held, because a strategy with no stop must never go short;
   * anything still open raises an ALERT;
   * an UNARMED strategy decides exactly the same thing and places nothing.
 """
@@ -28,6 +31,7 @@ from src.btst.database.db_models.btst_session_model import (
     EXIT_DONE,
     EXIT_FAILED,
     EXIT_LATE,
+    EXIT_NOT_HELD,
     EXIT_PENDING,
     RUN_EXIT,
 )
@@ -511,3 +515,132 @@ async def test_a_friday_entry_sold_on_the_monday_is_NOT_late(
     assert outcome.late == 0
     holding = (await BtstHoldingRepository(db_session).list_recent(STRATEGY))[0]
     assert holding.exit_status == EXIT_DONE
+
+
+# --- the exit never sells more than is held ---------------------------------
+#
+# `btst_holdings.quantity` is what filled at ENTRY and never moves again. Two
+# things make the position diverge from it, and before 2026-09-19 the exit
+# trusted the row over the book in both cases:
+#
+#   * a partial sale, which leaves the row FAILED and the retry fifteen minutes
+#     later selling the ORIGINAL number again; and
+#   * an operator closing the position by hand, which is exactly what somebody
+#     does when the stuck-exit alarm fires.
+#
+# Nothing downstream refuses it. A closing order skips the funds check by
+# design, and `PositionService.apply_fill` simply lets the net go negative. The
+# result is a SHORT in a strategy whose B15 is "no stop" and which must never
+# sell to open, carrying a realised gap computed against shares it never owned.
+
+
+async def _net_quantity(session, portfolio_id) -> int:
+    from src.positions.database.db_operations.position_repository import (
+        PositionRepository,
+    )
+
+    position = await PositionRepository(session).get_open_for_security(
+        portfolio_id, SECURITY_ID
+    )
+    return 0 if position is None else int(position.net_quantity or 0)
+
+
+async def test_a_retry_after_a_partial_sale_sells_only_the_REMAINDER(
+    db_session, definition, parameters
+):
+    """The bug, stated as the behaviour it produced: it must not go short.
+
+    First pass sells part of the position into a thin book and leaves the row
+    FAILED. The second pass must sell what is LEFT -- not the 100 the row still
+    records, which would close the remaining 60 and open a short for the rest.
+    """
+    await _seed_instrument(db_session)
+    portfolio_id = await _seed_portfolio(db_session)
+    _seed_book(quantity=100_000)
+    await _open_holding(db_session, portfolio_id, quantity=100)
+    assert await _net_quantity(db_session, portfolio_id) == 100
+
+    # A book far too thin to absorb the whole position.
+    _seed_book(quantity=10)
+    first = await _service(db_session, definition, parameters, AT_EXIT).run_exit(
+        portfolio_id
+    )
+    assert first.sold == 0 and first.failed == 1
+    remaining = await _net_quantity(db_session, portfolio_id)
+    assert 0 < remaining < 100, "the first pass should leave a real remainder"
+
+    # Depth comes back; the retry runs.
+    _seed_book(quantity=100_000)
+    second = await _service(
+        db_session, definition, parameters, WELL_AFTER_EXIT
+    ).run_exit(portfolio_id)
+
+    assert second.sold == 1
+    assert second.still_open == 0
+    # THE ASSERTION THIS FILE EXISTS FOR: flat, never short.
+    assert await _net_quantity(db_session, portfolio_id) == 0
+
+    holding = (await BtstHoldingRepository(db_session).list_recent(STRATEGY))[0]
+    assert holding.exit_status == EXIT_LATE  # it is, and it says so
+    assert holding.quantity == 100           # the entry record is untouched
+
+
+async def test_a_position_closed_BY_HAND_leaves_the_row_NOT_HELD_and_places_nothing(
+    db_session, definition, parameters
+):
+    """The likelier half of the same bug.
+
+    The stuck-exit alarm tells an operator a position is still held, so they
+    close it from the Positions page. The row still says 100. Selling 100 more
+    would open a short; leaving the row FAILED would keep the alarm firing for
+    a position that is not there.
+    """
+    from src.orders.database.db_operations.order_repository import OrderRepository
+    from src.orders.services.order_service import OrderService
+    from src.positions.database.db_operations.position_repository import (
+        PositionRepository,
+    )
+
+    await _seed_instrument(db_session)
+    portfolio_id = await _seed_portfolio(db_session)
+    _seed_book()
+    await _open_holding(db_session, portfolio_id, quantity=100)
+
+    # The operator closes it by hand.
+    await OrderService(
+        OrderRepository(db_session), InstrumentRepository(db_session),
+        PositionRepository(db_session), book=get_feed_manager().book,
+    ).submit_paper_order(
+        security_id=SECURITY_ID, side="SELL", order_type="MARKET", lots=100,
+        is_close_order=True, portfolio_id=portfolio_id, strategy_key=STRATEGY,
+    )
+    await db_session.commit()
+    assert await _net_quantity(db_session, portfolio_id) == 0
+
+    orders_before = sum(
+        (await OrderRepository(db_session).count_by_status()).values()
+    )
+    outcome = await _service(db_session, definition, parameters, AT_EXIT).run_exit(
+        portfolio_id
+    )
+
+    assert outcome.due == 1
+    assert outcome.sold == 0
+    assert outcome.already_closed == 1
+    # Not stuck: nothing is held, so the alarm must not fire.
+    assert outcome.still_open == 0
+    assert outcome.failed == 0
+    # No order was placed at all -- not one that filled nothing.
+    assert sum(
+        (await OrderRepository(db_session).count_by_status()).values()
+    ) == orders_before
+    assert await _net_quantity(db_session, portfolio_id) == 0
+
+    holding = (await BtstHoldingRepository(db_session).list_recent(STRATEGY))[0]
+    assert holding.exit_status == EXIT_NOT_HELD
+    assert holding.is_open is False
+    # No price and no gap: this job did not sell the shares and has none to
+    # claim, so the row cannot reach the edge statistics.
+    assert holding.exit_price is None
+    assert holding.overnight_gap is None
+    assert "already closed" in holding.exit_reason

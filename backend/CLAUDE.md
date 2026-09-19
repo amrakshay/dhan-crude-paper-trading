@@ -969,6 +969,20 @@ list; these are the ones that will bite a future change.
   signal. Not holiday-aware, and that is the same trade this application makes
   everywhere else: a holiday reads as one day late, which errs towards
   reporting something that is fine.
+- **The exit sells WHAT IS HELD, not what the row recorded at entry.**
+  `btst_holdings.quantity` is frozen at entry, so a retry after a partial sale
+  -- or an exit reaching a position an operator closed by hand after the alarm
+  fired -- would sell shares that are gone. Nothing downstream refuses it: a
+  closing order skips the funds check by design (section 5a) and
+  `PositionService.apply_fill` lets the net go negative, so the result is a
+  SHORT in a strategy that must never sell to open, with a realised gap
+  computed against shares it never owned. `_open_quantity` reads the position
+  book and the sale is `min(recorded, held)`; it is the same guard
+  `SwingStopMonitor._open_quantity` makes (section 10f). Nothing held is
+  `NOT_HELD`, a status of its own -- `EXITED` would claim this job sold it and
+  feed `exit_counts`, `FAILED` counts as open and would keep the stuck-exit
+  alarm firing for a position that is not there. Fixed 2026-09-19 after the
+  review; without it the suite's own fixture ends at -50 shares.
 - **No `stop_service`, no `stop_monitor`, and their absence is asserted.** B15
   is "none" and the YAML says so in words; a value other than "none" is
   refused. The only risk window is one in which no order can execute at any

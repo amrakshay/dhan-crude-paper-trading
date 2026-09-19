@@ -43,6 +43,7 @@ from src.btst.database.db_models.btst_session_model import (
     EXIT_DONE,
     EXIT_FAILED,
     EXIT_LATE,
+    EXIT_NOT_HELD,
     EXIT_PENDING,
     RUN_EXIT,
     RUN_SCAN,
@@ -153,6 +154,12 @@ class ExitOutcome:
     sold: int = 0
     late: int = 0
     failed: int = 0
+    # Rows whose position was NOT HELD when the exit reached them -- closed by
+    # hand, or sold by an earlier pass. Counted apart from `sold` because this
+    # job did not sell them, and apart from `failed` because nothing is stuck:
+    # `still_open` subtracts both, or the alarm would fire for a position that
+    # is not there.
+    already_closed: int = 0
     still_open: int = 0
     notes: List[str] = field(default_factory=list)
 
@@ -165,6 +172,7 @@ class ExitOutcome:
             "sold": self.sold,
             "late": self.late,
             "failed": self.failed,
+            "alreadyClosed": self.already_closed,
             "stillOpen": self.still_open,
             "message": self.record.message if self.record else None,
             "notes": list(self.notes),
@@ -756,7 +764,7 @@ class BtstExecutionService:
                 await self._exit_one(portfolio_id, holding, now, outcome)
             )
 
-        outcome.still_open = outcome.due - outcome.sold
+        outcome.still_open = outcome.due - outcome.sold - outcome.already_closed
         # The session date is the one the positions were OPENED in, so the two
         # halves of a trade share a date and can be read as a pair. The oldest
         # is used when a failed exit has left more than one session open --
@@ -786,20 +794,78 @@ class BtstExecutionService:
     async def _exit_one(
         self, portfolio_id: int, holding, now: datetime, outcome: ExitOutcome
     ) -> Decision:
-        """One exit, and the lateness arithmetic around it."""
+        """One exit, and the lateness arithmetic around it.
+
+        **The quantity comes from the POSITION, not from this row.**
+        `holding.quantity` is what filled at entry and never moves again, so a
+        row that has already been partly sold -- or whose position was closed
+        by hand after the alarm fired -- still says the original number. Selling
+        that number again sells shares that are no longer there, and nothing
+        downstream refuses it: a closing order skips the funds check by design,
+        and the position book simply lets the net go negative. The result is a
+        SHORT in a strategy that must never sell to open, with a wrong realised
+        gap attached to it.
+
+        So the sale is bounded by both figures: never more than is actually
+        held, and never more than this row opened. The first bound is the bug;
+        the second stops the exit reaching a position somebody else's buy put
+        in the same portfolio. `SwingStopMonitor._open_quantity` is the same
+        guard on the rotation's side and is where this pattern comes from.
+        """
         late_by = self._minutes_late(holding, now)
         is_late = late_by is not None and late_by > self.schedule.exit_alarm_after_minutes
+        recorded = int(holding.quantity)
+        held = await self._open_quantity(holding)
+        sellable = min(recorded, held)
 
         if not outcome.armed:
+            shortfall = (
+                ""
+                if held >= recorded
+                else (
+                    f" Only {held} share(s) are actually held against the "
+                    f"{recorded} this row opened, so {sellable} would be sold."
+                )
+            )
             return Decision(
                 symbol=holding.symbol,
                 security_id=holding.security_id,
                 action=ACTION_HELD,
-                quantity=holding.quantity,
+                quantity=sellable,
                 reason=(
-                    f"NOT ARMED: {holding.quantity} share(s) from "
+                    f"NOT ARMED: {sellable} share(s) from "
                     f"{holding.entry_session_date.isoformat()} would be sold "
-                    f"here. Nothing was placed."
+                    f"here. Nothing was placed.{shortfall}"
+                ),
+            )
+
+        if sellable <= 0:
+            # The position went away by another route -- closed by hand, or
+            # sold by an earlier pass whose result this row never saw. Nothing
+            # to sell, and no order is placed. Recorded NOT_HELD rather than
+            # left FAILED, because FAILED counts as open and would keep the
+            # stuck-exit alarm firing for a position that is not there.
+            await self._mark_not_held(holding, recorded)
+            outcome.already_closed += 1
+            outcome.notes.append(
+                f"{holding.symbol}: nothing held, so nothing was sold."
+            )
+            logger.warning(
+                "BTST exit for %s placed NO order: the row opened %s share(s) "
+                "but the position holds %s. It was closed by something else. "
+                "Recorded NOT_HELD.",
+                holding.symbol, recorded, held,
+            )
+            return Decision(
+                symbol=holding.symbol,
+                security_id=holding.security_id,
+                action=ACTION_SKIPPED,
+                quantity=0,
+                reason=(
+                    f"No exit placed: this row opened {recorded} share(s) and "
+                    f"the position holds {held}. It was closed by something "
+                    f"else -- by hand, or by an earlier pass. Nothing was sold "
+                    f"and nothing is held."
                 ),
             )
 
@@ -817,7 +883,7 @@ class BtstExecutionService:
                 symbol=holding.symbol,
                 security_id=holding.security_id,
                 action=ACTION_HELD,
-                quantity=holding.quantity,
+                quantity=sellable,
                 reason=f"STILL HELD -- exit not placed: {refusal}",
             )
 
@@ -828,7 +894,11 @@ class BtstExecutionService:
                 security_id=holding.security_id,
                 side=OrderSide.SELL.value,
                 order_type=OrderType.MARKET.value,
-                lots=int(holding.quantity),
+                # WHAT IS HELD, not what this row opened at entry. See the
+                # docstring: the recorded figure never moves, so a retry after
+                # a partial sale would sell shares that are no longer there and
+                # open a short.
+                lots=int(sellable),
                 is_close_order=True,
                 portfolio_id=portfolio_id,
                 strategy_key=self.definition.key,
@@ -849,7 +919,7 @@ class BtstExecutionService:
                 symbol=holding.symbol,
                 security_id=holding.security_id,
                 action=ACTION_HELD,
-                quantity=holding.quantity,
+                quantity=sellable,
                 reason=f"STILL HELD -- exit refused: {error}",
             )
 
@@ -861,15 +931,20 @@ class BtstExecutionService:
         )
         gap = self._overnight_gap(holding.entry_price, exit_price)
 
-        if filled < int(holding.quantity):
+        if filled < sellable:
             # A partial exit leaves a real position open. It is recorded
             # FAILED -- not DONE with a note -- because the row's whole job is
             # to answer "is anything still held", and a partially closed
             # position is.
+            #
+            # Compared against what was SENT rather than against
+            # `holding.quantity`: on a retry those differ, and measuring the
+            # fill against the original figure would call a complete sale
+            # partial for ever.
             await self._mark_failed(
                 holding,
-                f"Only {filled} of {holding.quantity} share(s) sold: the book "
-                f"ran out of depth. The rest is still held.",
+                f"Only {filled} of {sellable} share(s) sold: the book ran out "
+                f"of depth. The rest is still held.",
                 order_id=order.id,
                 exit_price=exit_price,
             )
@@ -881,8 +956,8 @@ class BtstExecutionService:
                 quantity=filled,
                 order_id=order.id,
                 reason=(
-                    f"PARTIAL exit: {filled} of {holding.quantity} share(s) "
-                    f"sold, the rest is still held."
+                    f"PARTIAL exit: {filled} of {sellable} share(s) sold, the "
+                    f"rest is still held."
                 ),
             )
 
@@ -1007,6 +1082,44 @@ class BtstExecutionService:
         if exit_price is not None:
             holding.exit_price = exit_price
         await self.session.flush()
+
+    async def _mark_not_held(self, holding, recorded: int) -> None:
+        """The position was gone before the exit reached it. Nothing was sold.
+
+        No exit price and no overnight gap: this job did not sell the shares
+        and has no price to claim. `performance()` reads only EXITED and
+        EXITED_LATE rows with a gap, so the row cannot reach the edge
+        statistics -- which is the point of giving it a status of its own
+        rather than calling it EXITED with a note.
+        """
+        holding.exit_status = EXIT_NOT_HELD
+        holding.exited_at = utc_now()
+        holding.exit_reason = (
+            f"Not held when the exit ran: this row opened {recorded} share(s) "
+            f"and the position was already closed -- by hand, or by an earlier "
+            f"pass. No order was placed and no exit price is recorded."
+        )[:500]
+        await self.session.flush()
+
+    async def _open_quantity(self, holding) -> int:
+        """How many shares are ACTUALLY held, from the position book.
+
+        The same lookup `SwingStopMonitor._open_quantity` makes before its own
+        exit, and for the same reason: the quantity a strategy wrote down at
+        entry is not the quantity it still owns. Clamped at zero -- a negative
+        net is a short this strategy cannot have opened, and selling more on
+        top of it would be the bug this guard exists to stop.
+        """
+        from src.positions.database.db_operations.position_repository import (
+            PositionRepository,
+        )
+
+        position = await PositionRepository(self.session).get_open_for_security(
+            int(holding.portfolio_id), str(holding.security_id)
+        )
+        if position is None:
+            return 0
+        return max(int(position.net_quantity or 0), 0)
 
     async def _raise_stuck_alert(self, outcome: ExitOutcome, holdings, now) -> None:
         """A position still open after the exit ran is an ALERT, not a log line.
@@ -1202,6 +1315,12 @@ class BtstExecutionService:
                 f"and nothing was placed."
             )[:500]
         head = f"Exited: {outcome.sold} of {outcome.due} position(s) sold."
+        if outcome.already_closed:
+            head = (
+                f"{head} {outcome.already_closed} was/were NOT HELD when the "
+                f"exit reached them -- closed by hand, or by an earlier pass -- "
+                f"so no order was placed for them."
+            )
         if outcome.late:
             head = (
                 f"{head} {outcome.late} of them LATE -- the overnight gap is "

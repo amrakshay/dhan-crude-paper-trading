@@ -84,6 +84,10 @@ const EXIT_LABELS = {
   EXITED: 'Sold at the open',
   EXITED_LATE: 'SOLD LATE',
   FAILED: 'STILL HELD',
+  // The position was gone before the exit reached it -- closed by hand, or by
+  // an earlier pass. Nothing was sold, and nothing is held. Deliberately not
+  // grouped with the two alarm states below: there is nothing to act on.
+  NOT_HELD: 'Closed elsewhere',
 };
 
 const TABS = [
