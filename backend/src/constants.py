@@ -107,6 +107,13 @@ class ConnectionState(str, Enum):
     RECONNECTING = "RECONNECTING"
     SYNTHETIC = "SYNTHETIC"
     DISABLED = "DISABLED"
+    # Running, with NOTHING TO SUBSCRIBE. A distinct state from DISCONNECTED
+    # because it is not a failure: no strategy wants an instrument right now,
+    # so there is no socket, and there is nothing wrong. Colouring it the same
+    # red as a dropped connection would make the indicator cry wolf on the
+    # ordinary overnight state -- the same "off is not broken" rule the health
+    # tabs follow.
+    IDLE = "IDLE"
 
 
 # --- users -----------------------------------------------------------------

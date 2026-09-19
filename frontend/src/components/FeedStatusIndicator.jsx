@@ -17,6 +17,11 @@ const STATE_STYLES = {
   ERROR: { color: 'error', label: 'Error' },
   SYNTHETIC: { color: 'warning', label: 'SYNTHETIC' },
   DISABLED: { color: 'default', label: 'Feed off' },
+  // Running, with nothing to subscribe -- the ordinary overnight state. Grey,
+  // not red: no strategy wants an instrument, so there is no socket and
+  // nothing is wrong. Colouring it like a dropped connection would make this
+  // indicator cry wolf every night.
+  IDLE: { color: 'default', label: 'Idle' },
 };
 
 export default function FeedStatusIndicator() {

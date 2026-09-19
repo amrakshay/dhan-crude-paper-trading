@@ -43,6 +43,11 @@ logger = get_logger("market.feed")
 # fixes something. Reconnecting on these would just spin.
 FATAL_DISCONNECT_CODES = {806, 807, 808, 809}
 
+# How long an IDLE client waits before looking again, when nothing has woken
+# it. `subscribe()` sets an event, so this is only the backstop for a path that
+# adds to the set without going through it -- not the normal mechanism.
+IDLE_RECHECK_SECONDS = 5.0
+
 
 class DhanFeedClient:
     """Maintains one authenticated feed connection, with resubscribe on drop."""
@@ -71,6 +76,9 @@ class DhanFeedClient:
         self._watchdog_task: Optional[asyncio.Task] = None
         self._stopping = False
         self._send_lock = asyncio.Lock()
+        # Set when something is added to subscribe, so an IDLE client wakes
+        # immediately instead of waiting out `IDLE_RECHECK_SECONDS`.
+        self._wanted = asyncio.Event()
 
     # --- configuration -----------------------------------------------------
     @staticmethod
@@ -170,6 +178,24 @@ class DhanFeedClient:
         backoff = initial
 
         while not self._stopping:
+            # NOTHING TO CARRY, NOTHING TO CONNECT FOR.
+            #
+            # Dhan closes a socket that connects and never subscribes -- within
+            # the same second, with no close frame and no DISCONNECT packet --
+            # so an unguarded loop treats that as a lost connection and
+            # reconnects for ever. On 2026-09-19 that ran 237 times in an
+            # afternoon: a connect, an immediate close and a 30 s wait, all
+            # night, taking and losing one of Dhan's five per-user slots each
+            # time and carrying no data because there was nothing to carry.
+            #
+            # An empty set is the ORDINARY overnight state now, not a fault:
+            # `positions` strategies hold nothing, and a `universe` strategy is
+            # outside its window for most of the day. So the client idles until
+            # somebody wants an instrument.
+            if not self._wants_a_connection():
+                await self._idle_until_wanted()
+                continue
+
             try:
                 await self._connect_and_consume()
                 backoff = initial          # a clean session resets the backoff
@@ -180,6 +206,21 @@ class DhanFeedClient:
                 logger.error("Feed stopped, manual intervention needed: %s", exc)
                 return
             except Exception as exc:
+                # The set emptied WHILE we were connected -- an unsubscribe
+                # took the last instrument, and Dhan then dropped the idle
+                # socket. That is the expected consequence of unsubscribing,
+                # not a connection problem, so it is not reported as one and
+                # does not count against the reconnect budget.
+                if not self._wants_a_connection():
+                    logger.info(
+                        "Feed closed after the last instrument was "
+                        "unsubscribed (%s). Going idle; it will reconnect when "
+                        "something is subscribed again.",
+                        type(exc).__name__,
+                    )
+                    backoff = initial
+                    continue
+
                 self._set_state(ConnectionState.RECONNECTING, str(exc))
                 logger.warning(
                     "Feed connection lost (%s: %s); reconnect #%s in %.1fs "
@@ -195,6 +236,41 @@ class DhanFeedClient:
             await asyncio.sleep(backoff * (0.8 + 0.4 * random.random()))
             backoff = min(backoff * 2, maximum)
             self.reconnect_count += 1
+
+    def _wants_a_connection(self) -> bool:
+        """Is there anything for a socket to carry?
+
+        Both halves matter. `_subscribed` is what a reconnect would restore;
+        `_pending_subscribe` is what arrived while the socket was down, and
+        checking only the first would leave a client that went idle unable to
+        come back when `subscribe()` queued something.
+        """
+        return bool(self._subscribed or self._pending_subscribe)
+
+    async def _idle_until_wanted(self) -> None:
+        """Wait, without a socket, until something wants subscribing.
+
+        IDLE rather than DISCONNECTED: nothing is wrong, so nothing should be
+        coloured as though it were. The state is reported as its own thing all
+        the way to the indicator in the header.
+        """
+        if self.state != ConnectionState.IDLE:
+            self._set_state(
+                ConnectionState.IDLE,
+                "no strategy has an instrument to subscribe",
+            )
+            logger.info(
+                "Feed idle: no strategy wants an instrument, so no upstream "
+                "connection is held. Dhan allows 5 per user and closes one "
+                "that subscribes to nothing; this reconnects the moment "
+                "something is subscribed."
+            )
+        self._wanted.clear()
+        try:
+            await asyncio.wait_for(self._wanted.wait(), timeout=IDLE_RECHECK_SECONDS)
+        except asyncio.TimeoutError:
+            # The backstop, not the mechanism. `subscribe()` sets the event.
+            pass
 
     async def _connect_and_consume(self) -> None:
         if not self.has_credentials():
@@ -382,6 +458,10 @@ class DhanFeedClient:
             await self._send_subscriptions(new, subscribe=True)
         else:
             self._pending_subscribe.extend(new)
+        # Wake an IDLE client immediately rather than leaving it to the
+        # recheck. A universe window opening at 14:45 should reach the feed
+        # then, not up to five seconds later.
+        self._wanted.set()
         return len(new)
 
     async def unsubscribe(self, instruments: Iterable[Tuple[str, str]]) -> int:

@@ -95,6 +95,11 @@ class FeedManager:
         # Per strategy, security ids kept subscribed on top of whatever it
         # holds. See pin_instruments().
         self._pinned: Dict[str, Set[str]] = {}
+        # Per universe strategy, whether its subscription window was open on
+        # the last pass. The resync loop is EDGE-triggered off this, so a
+        # window opening costs one resync rather than one every five seconds
+        # for as long as it stays open.
+        self._window_open: Dict[str, bool] = {}
         self._contract_meta: Dict[str, Dict[str, Any]] = {}
         self.last_resync_ms: Optional[int] = None
         self.last_error: Optional[str] = None
@@ -691,8 +696,39 @@ class FeedManager:
             return running[0].exchange_segment
         return get_strategy_registry().default().exchange_segment
 
+    def _universe_window_changed(self) -> Optional[str]:
+        """Has a universe strategy's subscription window just opened or shut?
+
+        Returns the strategy key that moved, or None.
+
+        **Without this a universe subscription never happens at all.** The loop
+        below only ever resyncs an OPTION-CHAIN strategy, because it is
+        watching a front future drift away from a strike window -- a
+        `positions` strategy has no such centre and is resynced by the events
+        that change what it holds (a fill, a toggle, a rebalance pinning
+        names). A `universe` strategy is neither: what changes is THE TIME, and
+        nothing else in this application was watching a clock on the feed's
+        behalf. BTST's window would have opened at 14:45 with nobody noticing.
+
+        Edge-triggered, not level-triggered: it resyncs on the TRANSITION, so
+        the window opening costs one resync rather than one every five seconds
+        for the fifty minutes it is open.
+        """
+        from src.core.time_utils import ist_now
+
+        now = ist_now().time()
+        for strategy in self._strategies():
+            if strategy.subscription.kind != SubscriptionPolicy.UNIVERSE:
+                continue
+            open_now = strategy.subscription.window_is_open(now)
+            if self._window_open.get(strategy.key) != open_now:
+                self._window_open[strategy.key] = open_now
+                return strategy.key
+        return None
+
     async def _resync_loop(self) -> None:
-        """Re-centre each strategy's strike window as its underlying moves.
+        """Re-centre each strategy's strike window as its underlying moves, and
+        open or shut a universe strategy's subscription window on time.
 
         Only resubscribes once a move is material (default 3 strikes), so a
         price oscillating around a strike boundary does not churn the
@@ -704,6 +740,16 @@ class FeedManager:
             await asyncio.sleep(5)
             try:
                 if self.feed is None:
+                    continue
+
+                moved = self._universe_window_changed()
+                if moved is not None:
+                    logger.info(
+                        "%s's subscription window %s; resyncing.",
+                        moved,
+                        "opened" if self._window_open.get(moved) else "closed",
+                    )
+                    await self.resync()
                     continue
 
                 for strategy in self._strategies():

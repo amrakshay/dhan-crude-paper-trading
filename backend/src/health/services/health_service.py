@@ -586,7 +586,17 @@ def summarise(health: Dict[str, Any]) -> Dict[str, Any]:
         problems.append(f"Background task '{name}' is running more than once")
 
     feed = health.get("upstreamFeed") or {}
-    if feed.get("hasUpstreamConnection") and feed.get("state") != ConnectionState.CONNECTED.value:
+    # IDLE is not a problem. It means no strategy has an instrument to
+    # subscribe right now -- the ordinary overnight state -- so there is no
+    # socket and nothing is wrong. Reporting it here would put a permanent
+    # entry on the problems list for a system working exactly as configured,
+    # which is the same "off is not broken" rule the strategy health tabs
+    # follow.
+    if (
+        feed.get("hasUpstreamConnection")
+        and feed.get("state")
+        not in (ConnectionState.CONNECTED.value, ConnectionState.IDLE.value)
+    ):
         problems.append(f"Upstream feed is {feed.get('state')}")
     if feed.get("error"):
         problems.append("The feed reported an error")
