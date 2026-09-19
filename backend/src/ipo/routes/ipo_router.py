@@ -71,8 +71,36 @@ async def status(
     controller: IpoController = Depends(get_ipo_controller),
     _: SessionPrincipal = Depends(require_session),
 ) -> IpoStatusResponse:
-    """What the IPO clock is doing, and when it last refreshed."""
+    """What the IPO clock is doing, and when it last refreshed.
+
+    **This is the FOOTER, not the Status tab.** Any signed-in user may read it:
+    it carries the schedule, whether the clock is alive and the last refresh
+    line, and nothing that is not already implied by the tabs. The tab called
+    "Status" is `/ipo/health` below, which is admin-only because it serves job
+    detail lines and machinery state. Two endpoints, two audiences, and the
+    names are worth reading carefully.
+    """
     return await controller.status()
+
+
+@ipo_router.get("/health")
+async def health(
+    controller: IpoController = Depends(get_ipo_controller),
+    _: SessionPrincipal = Depends(require_admin),
+) -> dict:
+    """The Status tab: the clock, today's sweeps, the source and the job log.
+
+    Not to be confused with `/ipo/status` above, which is the page footer and
+    is open to any signed-in user.
+
+    **ADMIN-ONLY**, like the other two health surfaces and for the same
+    reason: it serves machinery state and job detail lines, which is the
+    exposure `/api/healthcheck/*` and the swing Health tab are gated for.
+
+    It does NOT restate the process figures -- the task table, CPU, the feed.
+    Those are on /health and the tab links to them.
+    """
+    return await controller.health()
 
 
 @ipo_router.post("/{ipo_id}/action", response_model=IpoResponse)

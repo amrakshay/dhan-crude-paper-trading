@@ -97,6 +97,18 @@ class IpoController:
         await self.session.commit()
         return await self.tab(TAB_CLOSING_TODAY)
 
+    async def health(self) -> dict:
+        """Is this feature doing its job, and what has it been doing.
+
+        Returns a plain dict rather than a Pydantic model, the same way the
+        health payloads elsewhere in this application do: it is a report, its
+        shape follows what there is to report, and pinning it in a schema
+        would mean editing two files to add a figure.
+        """
+        from src.ipo.services.ipo_health_service import IpoHealthService
+
+        return await IpoHealthService(self.session).payload()
+
     async def status(self) -> IpoStatusResponse:
         from src.ipo.services.scheduler import get_ipo_scheduler
 

@@ -585,6 +585,27 @@ def rules_for(strategy_key: Optional[str] = None) -> List[AlertRule]:
     ]
 
 
+def rules_for_category(category: str) -> List[AlertRule]:
+    """The rules in one category.
+
+    A SELECTOR, not a second scoping concept. `strategy_scoped` answers "is
+    this about one strategy"; this answers "which group is it in", which the
+    page already groups by. It exists because the IPO dashboard's two rules are
+    deliberately NOT strategy-scoped -- no strategy owns an IPO -- so
+    `rules_for(strategy_key)` correctly refuses to return them, and without
+    this the only surface that could show them is the system page.
+
+    Nothing here is withdrawn from the system page by being selected: that page
+    shows `all_rules()` and still does.
+    """
+    return [rule for rule in RULES if rule.category == category]
+
+
+def known_categories() -> Tuple[str, ...]:
+    """Every category a rule actually uses. The API validates against this."""
+    return tuple(sorted({rule.category for rule in RULES}))
+
+
 def by_key(key: str) -> Optional[AlertRule]:
     for rule in RULES:
         if rule.key == key:

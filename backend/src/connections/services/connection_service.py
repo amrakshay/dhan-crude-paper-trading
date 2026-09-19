@@ -174,9 +174,16 @@ class ConnectionService:
 
     # --- the alert catalogue -----------------------------------------------
     async def alert_catalogue(
-        self, strategy_key: Optional[str] = None
+        self, strategy_key: Optional[str] = None, category: Optional[str] = None
     ) -> Dict[str, Any]:
         """Every alert rule this build has, with when it last fired.
+
+        `category` is the second way to narrow it, and it is a SELECTOR rather
+        than a second scoping concept: the IPO dashboard's rules are
+        deliberately not strategy-scoped -- no strategy owns an IPO -- so
+        `rules_for(strategy_key)` correctly refuses them and a page that is not
+        a strategy page needs some other way to ask. The two are mutually
+        exclusive; the route rejects both at once.
 
         READ-ONLY, on both surfaces. What gets alerted is a property of the
         build, decided in code and reviewed like code -- there is deliberately
@@ -199,8 +206,14 @@ class ConnectionService:
         stats = await repository.stats_by_key(strategy_key=strategy_key)
         last_rows = await repository.by_ids([row["lastId"] for row in stats])
 
+        selected = (
+            alert_catalogue.rules_for_category(category)
+            if category is not None
+            else alert_catalogue.rules_for(strategy_key)
+        )
+
         rules: List[Dict[str, Any]] = []
-        for rule in alert_catalogue.rules_for(strategy_key):
+        for rule in selected:
             matched = [row for row in stats if self._matches(rule, row)]
             payload = rule.as_dict()
             if not matched:
@@ -271,8 +284,20 @@ class ConnectionService:
                 for row in await repository.recent(
                     limit=30, strategy_key=strategy_key
                 )
+                # A category's page shows the rows ITS rules produced. Filtered
+                # here rather than in SQL because what identifies a rule is its
+                # kind plus a dedupe PREFIX, which `_matches` already knows and
+                # a query would have to learn twice.
+                if category is None
+                or any(
+                    self._matches(
+                        rule,
+                        {"kind": row.kind, "dedupeKey": row.dedupe_key},
+                    )
+                    for rule in selected
+                )
             ],
-            "notes": self._catalogue_notes(strategy_key),
+            "notes": self._catalogue_notes(strategy_key, category),
         }
 
     @staticmethod
@@ -290,7 +315,9 @@ class ConnectionService:
         return str(row.get("dedupeKey") or "").startswith(rule.dedupe_prefix)
 
     @staticmethod
-    def _catalogue_notes(strategy_key: Optional[str]) -> List[str]:
+    def _catalogue_notes(
+        strategy_key: Optional[str], category: Optional[str] = None
+    ) -> List[str]:
         """What this page cannot tell you, said rather than implied away."""
         notes = [
             "This list is read-only. What gets alerted is a property of the "
@@ -306,6 +333,13 @@ class ConnectionService:
                 "Only alerts ABOUT this strategy are shown. Process-wide ones "
                 "-- a dead task, the feed, the Dhan token -- live on the System "
                 "Health page, because they are not this strategy's business."
+            )
+        if category is not None:
+            notes.append(
+                "Only this feature's own rules are shown. They are NOT "
+                "withdrawn from the System Health page, which lists every rule "
+                "in the build -- this is a narrower view of the same list, not "
+                "a second one."
             )
         return notes
 

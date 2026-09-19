@@ -212,9 +212,29 @@ class ConnectionController:
         )
 
     async def alert_catalogue(
-        self, strategy_key: Optional[str] = None
+        self, strategy_key: Optional[str] = None, category: Optional[str] = None
     ) -> AlertCatalogueResponse:
-        payload = await self.service.alert_catalogue(strategy_key)
+        from src.connections.services import alert_catalogue as catalogue
+
+        if strategy_key is not None and category is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Narrow by strategy or by category, not both: they are two "
+                    "different questions and answering both at once would "
+                    "quietly return nothing."
+                ),
+            )
+        if category is not None and category not in catalogue.known_categories():
+            # A typo must not look like a feature with no rules.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{category!r} is not an alert category; expected one of "
+                    f"{', '.join(catalogue.known_categories())}"
+                ),
+            )
+        payload = await self.service.alert_catalogue(strategy_key, category)
         return AlertCatalogueResponse(
             strategyKey=payload["strategyKey"],
             rules=[AlertRuleRow(**rule) for rule in payload["rules"]],

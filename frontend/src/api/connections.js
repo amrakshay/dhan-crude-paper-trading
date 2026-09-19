@@ -27,10 +27,16 @@ export const connectionsApi = {
    * `strategyKey` narrows it to the rules ABOUT that strategy, which is what a
    * strategy's own page shows. Omit it for the system view, which shows all.
    */
-  catalogue: (strategyKey) =>
-    api.get(
-      `/connections/alerts/catalogue${
-        strategyKey ? `?strategyKey=${encodeURIComponent(strategyKey)}` : ''
-      }`,
-    ),
+  // Narrow by strategy OR by category, never both -- the server returns a 400
+  // for both at once, because they are two different questions and answering
+  // them together would quietly return nothing. `category` exists for a page
+  // that is not a strategy page: the IPO rules are deliberately not
+  // strategy-scoped, so `strategyKey` cannot reach them.
+  catalogue: (strategyKey, category) => {
+    const query = new URLSearchParams();
+    if (strategyKey) query.set('strategyKey', strategyKey);
+    if (category) query.set('category', category);
+    const suffix = query.toString();
+    return api.get(`/connections/alerts/catalogue${suffix ? `?${suffix}` : ''}`);
+  },
 };

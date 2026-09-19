@@ -319,6 +319,15 @@ class IpoService:
     async def listed(self, today: date, limit: int = 100, now: Optional[datetime] = None):
         return await self._views(await self.ipos.listed(limit), today, now)
 
+    async def tracked(self, today: date, now: Optional[datetime] = None):
+        """Every IPO still being followed -- everything that has not listed.
+
+        What the Status tab counts staleness over. A public seam rather than
+        the health service reaching into `_views`, which would make a private
+        helper part of this module's surface by accident.
+        """
+        return await self._views(await self.ipos.not_listed(), today, now)
+
     async def outstanding_closing_today(
         self, today: date, now: Optional[datetime] = None
     ) -> List[IpoView]:

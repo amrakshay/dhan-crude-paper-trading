@@ -597,7 +597,10 @@ backend/src/ipo/services/ipo_source_client.py   the ONLY module naming
                                    webnodejs.investorgain.com
 backend/src/ipo/services/scheduler.py   the SECOND clock; nothing to do with
                                    a strategy, and deliberately separate
-frontend/src/pages/IpoDashboardPage.jsx           its three tabs
+backend/src/ipo/services/ipo_health_service.py   is THIS FEATURE healthy,
+                                   and did the 14:00 reminder actually go out
+frontend/src/pages/IpoDashboardPage.jsx           its four tabs
+frontend/src/components/IpoStatus.jsx             the Status tab, admin-only
 backend/src/swing/services/stop_monitor.py         the chandelier stop watcher
 backend/src/reports/services/metrics_service.py    CAGR, drawdown, MAR, concentration
 backend/src/strategies/services/market_clock.py    is the market open, and may an

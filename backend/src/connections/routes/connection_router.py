@@ -69,6 +69,7 @@ async def list_alerts(
 @connection_router.get("/alerts/catalogue", response_model=AlertCatalogueResponse)
 async def alert_catalogue(
     strategyKey: Optional[str] = Query(None),  # noqa: N803 - camelCase on the wire
+    category: Optional[str] = Query(None),
     controller: ConnectionController = Depends(get_connection_controller),
     _: SessionPrincipal = Depends(require_admin),
 ) -> AlertCatalogueResponse:
@@ -83,11 +84,16 @@ async def alert_catalogue(
     System Health page owns them, and duplicating them would make two pages that
     disagree the moment one changes.
 
+    `category` narrows it the other way, for a page that is not a strategy
+    page: the IPO dashboard's rules are deliberately not strategy-scoped, so
+    `strategyKey` cannot reach them. The two are mutually exclusive and asking
+    for both is a 400 rather than a silent empty list.
+
     **Admin-only, like the rest of this router.** It serves alert bodies, and a
     body can carry whatever a developer interpolated into a log line -- the same
     exposure `/api/healthcheck/problems` and the swing Health tab are gated for.
     """
-    return await controller.alert_catalogue(strategyKey)
+    return await controller.alert_catalogue(strategyKey, category)
 
 
 @connection_router.post("/telegram/test-message", response_model=TestMessageResponse)

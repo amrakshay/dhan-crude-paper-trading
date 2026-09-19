@@ -524,3 +524,86 @@ async def test_the_reminder_row_names_no_strategy(one_closing_today):
     ipo_rows = [row for row in rows if row.kind == "IPO"]
     assert len(ipo_rows) == 1
     assert ipo_rows[0].strategy_key is None
+
+
+# --- the Status tab's own reasoning ----------------------------------------
+async def test_a_slot_is_only_missed_once_its_hour_has_fully_passed(
+    one_closing_today,
+):
+    """Calling the current hour missed at 14:05 would report a fault that is
+    not one -- it may still be about to run."""
+    from src.ipo.services.ipo_health_service import IpoHealthService
+
+    service, ipo, today = one_closing_today
+    health = IpoHealthService(service.session)
+    state = {"reminderFrom": "10:00", "reminderTo": "17:00"}
+
+    at_1405 = datetime(today.year, today.month, today.day, 14, 5)
+    sweeps = await health._sweeps(today, at_1405, state)  # noqa: SLF001
+
+    assert sweeps.closing_today == 1
+    assert sweeps.outstanding == 1
+    assert len(sweeps.expected_slots) == 8            # 10:00 through 17:00
+    assert sweeps.completed_slots == []
+    # 10 through 13 have passed; 14 is the current hour and is not yet missed.
+    assert sweeps.missed_slots == [
+        f"{today.isoformat()}|{hour:02d}" for hour in (10, 11, 12, 13)
+    ]
+
+
+async def test_nothing_closing_means_no_slots_expected_and_none_missed(db_session):
+    """"0 of 0 sweeps ran" is CORRECT on most days, and must not read as a
+    gap -- nothing closes on the great majority of them."""
+    from src.ipo.services.ipo_health_service import IpoHealthService
+
+    health = IpoHealthService(db_session)
+    today = date(2026, 9, 21)
+    at_1600 = datetime(2026, 9, 21, 16, 0)
+
+    sweeps = await health._sweeps(  # noqa: SLF001
+        today, at_1600, {"reminderFrom": "10:00", "reminderTo": "17:00"}
+    )
+
+    assert sweeps.closing_today == 0
+    assert sweeps.expected_slots == []
+    assert sweeps.missed_slots == []
+
+
+def test_no_sweep_time_is_promised_when_there_is_nothing_to_remind_about():
+    """None is a real answer. A time printed anyway would promise a message
+    that is not coming."""
+    from src.ipo.services.ipo_health_service import _next_sweep
+
+    at_1130 = datetime(2026, 9, 21, 11, 30)
+
+    assert _next_sweep("10:00", "17:00", at_1130, has_work=False) is None
+    assert _next_sweep("10:00", "17:00", at_1130, has_work=True).startswith(
+        "2026-09-21T12:00"
+    )
+    # After the last slot's hour there is no further sweep today.
+    assert (
+        _next_sweep("10:00", "17:00", datetime(2026, 9, 21, 17, 30), has_work=True)
+        is None
+    )
+    # Before the window it is the window's own start.
+    assert _next_sweep(
+        "10:00", "17:00", datetime(2026, 9, 21, 8, 0), has_work=True
+    ).startswith("2026-09-21T10:00")
+
+
+def test_the_alert_catalogue_category_selector_finds_the_ipo_rules():
+    """`rules_for(strategy_key)` correctly refuses them -- they are not
+    strategy-scoped -- so a page that is not a strategy page needs this."""
+    from src.connections.services import alert_catalogue
+
+    keys = {rule.key for rule in alert_catalogue.rules_for_category(
+        alert_catalogue.CATEGORY_IPO
+    )}
+
+    assert keys == {
+        alert_catalogue.EVENT_IPO_CLOSING_REMINDER,
+        alert_catalogue.EVENT_IPO_SOURCE_UNREACHABLE,
+    }
+    assert alert_catalogue.CATEGORY_IPO in alert_catalogue.known_categories()
+    # And they remain in the whole list; this is a view, not a second list.
+    assert keys <= {rule.key for rule in alert_catalogue.all_rules()}

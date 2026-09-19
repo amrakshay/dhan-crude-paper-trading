@@ -739,7 +739,8 @@ plus several that are specific to this one.
 
 ## 5f. The IPO dashboard
 
-`src/pages/IpoDashboardPage.jsx` with `IpoTable`, and `src/api/ipo.js`.
+`src/pages/IpoDashboardPage.jsx` with `IpoTable`, `IpoStatus` and
+`src/api/ipo.js`.
 
 **IT IS NOT A STRATEGY PAGE.** It places no orders and reads no socket; it
 polls at 30 s, because the GMP behind it refreshes hourly at best. Modelled on
@@ -763,6 +764,30 @@ Trade Notes, not on /swing.
 - **The Closing next tab admits it has no holiday calendar.** The caveat comes
   from the server with the payload rather than being written into JSX, so the
   page and the API cannot disagree about what it promises.
+- **ONE Status tab, not a Health tab and an Alerts tab.** /swing and /btst
+  have both because they trade unattended and the consequences are money; this
+  sends a message. Giving a non-strategy page a strategy page's shape by
+  imitation is how a page ends up with tabs that exist because the neighbours
+  have them. It is admin-only and HIDDEN for a ROLE_USER, because it serves job
+  detail lines and machinery state -- the same exposure the other two health
+  surfaces are gated for.
+- **"0 of 0 sweeps ran" is CORRECT on most days**, so the tab says "no IPO
+  closes today, no sweeps are scheduled" rather than rendering an empty
+  schedule that reads as a fault. A slot is only called MISSED once its hour
+  has fully passed; the current hour may still be about to run.
+- **Fetch failures on that tab are process-local and it says so.** A failed run
+  deliberately leaves no row -- that is what lets it retry inside its own hour
+  -- so the list empties on a restart, and silence there is not evidence of
+  success.
+- **The Alerts half reuses `AlertsPanel` unchanged**, asked for its rules by
+  CATEGORY rather than by strategy key: these two rules are deliberately not
+  strategy-scoped, so `strategyKey` cannot reach them. They are NOT withdrawn
+  from the System Health page by appearing here, and the panel's own notes say
+  so.
+- **`src/theme/chipTone.js` is where a coloured chip gets its colours.** This
+  theme gives every chip a background, which defeats `color="success"` (section
+  1); one helper keeps the IPO tables and the Status tab from drifting into two
+  different greens.
 - **The source link is built here**, from each IPO's stored relative path and
   `IPO_SOURCE_BASE`. The host the backend CALLS is a different one and is named
   in exactly one backend module; keeping the display host out of Python is what

@@ -19,6 +19,11 @@ export const ipoApi = {
   listed: () => api.get('/ipo/listed'),
   status: () => api.get('/ipo/status'),
 
+  // Admin only: the clock, today's sweeps, the source and the job log. The
+  // server refuses this for a ROLE_USER, which is why the tab is hidden rather
+  // than shown empty.
+  health: () => api.get('/ipo/health'),
+
   // Admin only. `value` rather than a verb because all three toggle: a mis-tap
   // has to be undoable, and Reject has to be reversible before the IPO closes.
   setAction: (ipoId, action, value) =>

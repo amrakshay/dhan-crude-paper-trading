@@ -16,7 +16,10 @@ import {
 import RefreshIcon from '@mui/icons-material/Refresh';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { ipoApi, IPO_SOURCE_PAGE } from '../api/ipo';
+import { connectionsApi } from '../api/connections';
 import IpoTable from '../components/IpoTable';
+import IpoStatus from '../components/IpoStatus';
+import AlertsPanel from '../components/AlertsPanel';
 import { useAuth } from '../auth/AuthContext';
 
 /**
@@ -50,7 +53,18 @@ const TABS = [
   { key: 'closing-today', label: 'Closing today' },
   { key: 'closing-next', label: 'Closing next' },
   { key: 'listed', label: 'Listed' },
+  // ONE tab, not a Health tab and an Alerts tab. /swing and /btst have both
+  // because they trade unattended; this sends a message. Admin-only, because
+  // it serves machinery state and job detail lines -- the same exposure the
+  // other two health surfaces are gated for.
+  { key: 'status', label: 'Status', adminOnly: true },
 ];
+
+// The alert category this feature's rules belong to. They are deliberately NOT
+// strategy-scoped -- no strategy owns an IPO -- so the catalogue is asked by
+// CATEGORY here rather than by strategy key. They stay on the System Health
+// page too; this is a narrower view of the same list, not a second one.
+const ALERT_CATEGORY = 'IPO';
 
 const EMPTY_MESSAGES = {
   'closing-today': 'No mainboard IPO closes today. Nothing to do, and nothing will be sent.',
@@ -69,12 +83,23 @@ const LOADERS = {
 export default function IpoDashboardPage() {
   const { isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = TABS.some((item) => item.key === searchParams.get('tab'))
-    ? searchParams.get('tab')
+
+  // Hiding the Status tab is presentation; the API refuses a ROLE_USER
+  // independently. A hand-typed ?tab=status falls back to the first tab rather
+  // than rendering a panel whose every request would 403.
+  const visibleTabs = useMemo(
+    () => TABS.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin],
+  );
+  const requested = searchParams.get('tab');
+  const tab = visibleTabs.some((item) => item.key === requested)
+    ? requested
     : 'closing-today';
 
   const [payload, setPayload] = useState(null);
   const [status, setStatus] = useState(null);
+  const [health, setHealth] = useState(null);
+  const [catalogue, setCatalogue] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -84,12 +109,21 @@ export default function IpoDashboardPage() {
     async ({ quiet = false } = {}) => {
       if (!quiet) setLoading(true);
       try {
-        const [tabPayload, statusPayload] = await Promise.all([
-          LOADERS[tab](),
-          ipoApi.status(),
-        ]);
-        setPayload(tabPayload);
+        const statusPayload = await ipoApi.status();
         setStatus(statusPayload);
+        if (tab === 'status') {
+          // The two halves of the Status tab. The catalogue comes from the
+          // ONE alert catalogue, narrowed by category -- these rules are not
+          // strategy-scoped, and they stay on the System Health page too.
+          const [healthPayload, cataloguePayload] = await Promise.all([
+            ipoApi.health(),
+            connectionsApi.catalogue(undefined, ALERT_CATEGORY),
+          ]);
+          setHealth(healthPayload);
+          setCatalogue(cataloguePayload);
+        } else {
+          setPayload(await LOADERS[tab]());
+        }
         setError(null);
       } catch (exc) {
         setError(exc.message);
@@ -194,38 +228,62 @@ export default function IpoDashboardPage() {
           onChange={(_event, value) => setSearchParams({ tab: value })}
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
-          {TABS.map((item) => (
+          {visibleTabs.map((item) => (
             <Tab key={item.key} value={item.key} label={item.label} />
           ))}
         </Tabs>
 
         <Box sx={{ p: 2 }}>
-          {payload?.day ? (
-            <Typography variant="body2" sx={{ mb: 1 }}>
-              {tab === 'closing-today' ? 'Closing' : 'Closing next on'}{' '}
-              <strong>{payload.day}</strong>
-            </Typography>
-          ) : null}
-
-          {payload?.caveat ? (
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-              {payload.caveat}
-            </Typography>
-          ) : null}
-
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-              <CircularProgress size={28} />
-            </Box>
+          {tab === 'status' ? (
+            <Stack spacing={3}>
+              <IpoStatus health={health} error={null} loading={loading} />
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  What this feature will tell you about
+                </Typography>
+                {/* The SAME AlertsPanel the system page and the two strategy
+                    pages use. These two rules are not strategy-scoped, so the
+                    catalogue is narrowed by category instead -- and they are
+                    not withdrawn from the System Health page by appearing
+                    here. */}
+                <AlertsPanel catalogue={catalogue} error={null} loading={loading} />
+              </Box>
+            </Stack>
           ) : (
-            <IpoTable
-              tab={tab}
-              ipos={payload?.ipos ?? []}
-              isAdmin={isAdmin}
-              busyId={busyId}
-              onAction={onAction}
-              emptyMessage={EMPTY_MESSAGES[tab]}
-            />
+            <>
+              {payload?.day ? (
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  {tab === 'closing-today' ? 'Closing' : 'Closing next on'}{' '}
+                  <strong>{payload.day}</strong>
+                </Typography>
+              ) : null}
+
+              {payload?.caveat ? (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  display="block"
+                  sx={{ mb: 2 }}
+                >
+                  {payload.caveat}
+                </Typography>
+              ) : null}
+
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+                  <CircularProgress size={28} />
+                </Box>
+              ) : (
+                <IpoTable
+                  tab={tab}
+                  ipos={payload?.ipos ?? []}
+                  isAdmin={isAdmin}
+                  busyId={busyId}
+                  onAction={onAction}
+                  emptyMessage={EMPTY_MESSAGES[tab]}
+                />
+              )}
+            </>
           )}
         </Box>
       </Paper>

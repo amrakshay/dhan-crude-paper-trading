@@ -13,8 +13,10 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { ipoSourceUrl } from '../api/ipo';
+import { chipTone } from '../theme/chipTone';
 
 /**
  * One tab's table. Three tabs, one component, because the rows are the same
@@ -155,24 +157,41 @@ function ActionButtons({ ipo, busy, onAction }) {
 }
 
 function StateChips({ ipo }) {
+  const theme = useTheme();
+  // Explicit colours throughout: this theme gives every chip a background, so
+  // `color="success"` ships as unreadable text on grey.
   if (ipo.rejected) {
-    return <Chip size="small" color="error" label="Rejected — no reminders" />;
+    return (
+      <Chip
+        size="small"
+        variant="outlined"
+        sx={chipTone(theme, 'neutral')}
+        label="Rejected — no reminders"
+      />
+    );
   }
   if (ipo.applied && ipo.mandateAccepted) {
-    return <Chip size="small" color="success" label="Done — no reminders" />;
+    return (
+      <Chip
+        size="small"
+        variant="outlined"
+        sx={chipTone(theme, 'done')}
+        label="Done — no reminders"
+      />
+    );
   }
   return (
     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
       <Chip
         size="small"
-        color={ipo.applied ? 'success' : 'warning'}
-        variant={ipo.applied ? 'filled' : 'outlined'}
+        variant="outlined"
+        sx={chipTone(theme, ipo.applied ? 'done' : 'pending')}
         label={ipo.applied ? `Applied ${formatIst(ipo.appliedAt)}` : 'Not applied'}
       />
       <Chip
         size="small"
-        color="warning"
         variant="outlined"
+        sx={chipTone(theme, 'pending')}
         label="Mandate not accepted"
       />
     </Stack>
@@ -180,6 +199,7 @@ function StateChips({ ipo }) {
 }
 
 export default function IpoTable({ tab, ipos, isAdmin, busyId, onAction, emptyMessage }) {
+  const theme = useTheme();
   const showActions = tab === 'closing-today';
   const showListing = tab === 'listed';
 
@@ -266,8 +286,11 @@ export default function IpoTable({ tab, ipos, isAdmin, busyId, onAction, emptyMe
                   {showListing ? (
                     <Chip
                       size="small"
-                      variant={ipo.applied ? 'filled' : 'outlined'}
-                      color={ipo.rejected ? 'default' : ipo.applied ? 'success' : 'warning'}
+                      variant="outlined"
+                      sx={chipTone(
+                        theme,
+                        ipo.rejected ? 'neutral' : ipo.applied ? 'done' : 'pending',
+                      )}
                       label={
                         ipo.applied
                           ? ipo.mandateAccepted

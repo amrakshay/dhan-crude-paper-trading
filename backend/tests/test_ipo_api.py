@@ -213,3 +213,82 @@ async def test_role_pages_grant_ipo_to_both_roles(seeded_board, user_client):
 
     assert "/ipo" in user_pages
     assert "/ipo" in admin_pages
+
+
+# --- the Status tab ---------------------------------------------------------
+async def test_the_status_payload_reports_the_clock_and_the_job_log(seeded_board):
+    payload = (await seeded_board.get("/api/ipo/health")).json()
+
+    assert payload["clock"]["taskName"] == "ipo-scheduler"
+    assert payload["clock"]["dailyRefreshAt"] == "13:00"
+    assert payload["clock"]["nextDailyRefreshAt"] is not None
+    assert payload["source"]["host"] == "webnodejs.investorgain.com"
+    assert payload["freshness"]["storedIpos"] > 0
+    assert isinstance(payload["jobs"], list)
+    assert payload["notes"]
+
+
+async def test_no_sweep_is_promised_on_a_day_nothing_closes(seeded_board):
+    """None is a real answer, not a missing one.
+
+    Printing "next sweep 14:00" on a day with no closing IPO would promise a
+    message that is never coming.
+    """
+    payload = (await seeded_board.get("/api/ipo/health")).json()
+
+    assert payload["sweeps"]["closingToday"] == 0
+    assert payload["sweeps"]["expectedSlots"] == []
+    assert payload["sweeps"]["missedSlots"] == []
+    assert payload["clock"]["nextSweepAt"] is None
+
+
+async def test_a_plain_user_is_refused_the_status_payload(seeded_board, user_client):
+    """Admin-only, like the other two health surfaces: it serves machinery
+    state and job detail lines."""
+    response = await user_client.get("/api/ipo/health")
+
+    assert response.status_code == 403
+
+
+async def test_the_alert_catalogue_can_be_narrowed_to_this_feature(seeded_board):
+    response = await seeded_board.get(
+        "/api/connections/alerts/catalogue?category=IPO"
+    )
+
+    assert response.status_code == 200, response.text
+    keys = {rule["key"] for rule in response.json()["rules"]}
+    assert keys == {"ipo-closing-reminder", "ipo-source-unreachable"}
+    assert all(rule["categoryLabel"] == "IPO dashboard" for rule in response.json()["rules"])
+
+
+async def test_narrowing_the_catalogue_does_not_withdraw_the_rules_elsewhere(
+    seeded_board,
+):
+    """A narrower view of one list, not a second list."""
+    everything = (await seeded_board.get("/api/connections/alerts/catalogue")).json()
+
+    keys = {rule["key"] for rule in everything["rules"]}
+    assert "ipo-closing-reminder" in keys
+    assert "ipo-source-unreachable" in keys
+
+
+async def test_asking_the_catalogue_by_strategy_and_category_at_once_is_refused(
+    seeded_board,
+):
+    """Two different questions. Answering both at once returns nothing, which
+    would look like a feature with no rules rather than a bad request."""
+    response = await seeded_board.get(
+        "/api/connections/alerts/catalogue"
+        "?category=IPO&strategyKey=nse-swing-momentum"
+    )
+
+    assert response.status_code == 400
+
+
+async def test_an_unknown_category_is_refused_rather_than_empty(seeded_board):
+    """A typo must not look like a feature with no rules."""
+    response = await seeded_board.get(
+        "/api/connections/alerts/catalogue?category=IPOS"
+    )
+
+    assert response.status_code == 400
