@@ -1,0 +1,13 @@
+
+=== AAPL  claimed: cup_and_handle  2019-01-01..2019-12-31
+    cup through H1 2019, ~2wk handle, breakout over ~$215
+    NO DETECTION in the claimed window
+
+=== NVDA  claimed: cup_and_handle  2019-06-01..2020-06-30
+    multi-month cup into early 2020, short handle, breakout to new highs
+    NO DETECTION in the claimed window
+
+=== POOL  claimed: cup_and_handle  2019-11-01..2020-08-31
+    Feb 2020 high, late-Mar low, late-Apr recovery, late-May breakout
+    NO DETECTION in the claimed window
+TATAMOTORS.NS: no data

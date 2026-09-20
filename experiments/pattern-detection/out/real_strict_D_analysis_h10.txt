@@ -1,0 +1,42 @@
+real_strict_D: 3620 signals, 10-bar excess return over the date-matched average of every symbol  [signed to the direction the pattern implies]
+
+group                              n     mean   median      t           boot 95% CI   win%
+cup_and_handle                   575   -0.65%   -0.68%  -2.48      [-1.20%, -0.08%]    45%
+   score <= 0.83                 456   -0.67%   -0.68%  -2.19      [-1.26%, -0.06%]    45%
+   score >  0.83                 119   -0.56%   -0.68%  -1.20      [-1.49%, +0.36%]    45%
+   score/outcome correlation     +0.048
+
+triangle                        1630    0.04%    0.21%   0.24      [-0.26%, +0.33%]    52%
+   score <= 1.00                1630    0.04%    0.21%   0.24      [-0.26%, +0.33%]    52%
+   score/outcome correlation     +0.010
+
+triangle:ascending               213   -0.21%    0.40%  -0.44      [-1.18%, +0.65%]    53%
+   score <= 0.92                 179   -0.13%    0.40%  -0.24      [-1.21%, +0.85%]    54%
+   score >  0.92                  34   -0.63%   -0.45%  -0.65      [-2.34%, +1.32%]    47%
+   score/outcome correlation     +0.051
+
+triangle:descending              206   -0.87%   -0.18%  -2.11      [-1.61%, -0.15%]    48%
+   score <= 0.92                 176   -1.00%   -0.29%  -2.12      [-1.87%, -0.14%]    48%
+   score >  0.92                  30   -0.11%   -0.10%  -0.19      [-1.29%, +1.12%]    43%
+   score/outcome correlation     +0.035
+
+triangle:falling_wedge           359   -0.31%   -0.92%  -0.84      [-0.88%, +0.27%]    44%
+
+triangle:pennant                  27    0.92%    2.80%   0.68      [-1.45%, +3.32%]    59%
+   score <= 0.92                  20    2.04%    4.61%   1.32      [-1.02%, +4.56%]    65%
+   score >  0.92                   7   -2.27%   -0.01%  -0.83        [+nan%, +nan%]    43%
+   score/outcome correlation     -0.114
+
+triangle:rising_wedge            328    0.63%    1.01%   1.75      [-0.10%, +1.33%]    57%
+   score <= 1.00                 328    0.63%    1.01%   1.75      [-0.10%, +1.33%]    57%
+   score/outcome correlation     +0.028
+
+triangle:symmetrical             497    0.34%    0.54%   1.19      [-0.24%, +0.91%]    54%
+   score <= 1.00                 497    0.34%    0.54%   1.19      [-0.24%, +0.91%]    54%
+   score/outcome correlation     -0.060
+
+vcp                             1405    0.87%   -0.31%   3.82      [+0.36%, +1.40%]    48%
+   score <= 0.73                 749    0.64%   -0.73%   2.04      [+0.06%, +1.27%]    45%
+   score >  0.73                 656    1.13%    0.25%   3.43      [+0.43%, +1.86%]    52%
+   score/outcome correlation     +0.026
+

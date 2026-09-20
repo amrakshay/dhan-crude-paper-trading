@@ -1,0 +1,29 @@
+positives: {'cup_and_handle': 144, 'vcp': 54, 'triangle': 135}   negatives: 330
+
+pattern             recall    prec  sig.prec   FA/1k   hit  miss   FP
+cup_and_handle       86.1%   48.6%     58.9%   215.5   124    20  131
+triangle            100.0%   40.4%     29.9%   111.0   135     0  199
+vcp                 100.0%   25.7%     64.8%    42.2    54     0  156
+(FA/1k = detections per 1,000 bar-scans on the 16500 negative scans)
+
+false positives by negative control:
+   random_walk->triangle                         55
+   trend->triangle                               55
+   rectangle->vcp                                47
+   trend->cup_and_handle                         46
+   random_walk->cup_and_handle                   44
+   rectangle->triangle                           43
+   head_and_shoulders->vcp                       36
+   v_bottom->triangle                            35
+   random_walk->vcp                              30
+   head_and_shoulders->cup_and_handle            29
+   v_bottom->vcp                                 22
+   trend->vcp                                    21
+   head_and_shoulders->triangle                  11
+   rectangle->cup_and_handle                      7
+   v_bottom->cup_and_handle                       5
+
+misses:
+   cup_and_handle:with_handle: nothing fired               20
+
+663 samples in 44.1s

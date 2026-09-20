@@ -1,0 +1,24 @@
+rule: early + EMA50   slots 12   cost 0.3%   3188 signals
+field coverage: score 100%, squeeze 100%, dry 100%, rr 100%, t_count 100%, to_pivot 100%, rs 100%
+
+allocation                      CAGR   maxDD  taken  final x  vs date  overlap
+date order (baseline)          21.3%   15.8%    991     7.10       --       --
+random (mean of 20 seeds)      21.7%   17.2%    971     7.40    +0.4%      78%
+   random 10th-90th pct        20.4% ..23.2%
+
+highest score first            19.8%   17.4%   1027     6.25    -1.5%      81%   z vs random -1.1
+LOWEST score first (sign check)   24.4%   16.5%    977     9.22    +3.2%      80%   z vs random +1.6
+strongest 6m relative strength first   24.4%   15.4%   1001     9.20    +3.1%      79%   z vs random +1.6
+weakest relative strength first (sign check)   19.6%   15.4%    988     6.15    -1.7%      78%   z vs random -1.2
+tightest range contraction first   22.3%   16.9%   1014     7.75    +1.1%      78%   z vs random +0.4
+loosest first (sign check)     21.0%   17.0%    965     6.91    -0.3%      77%   z vs random -0.4
+driest final contraction first   21.5%   16.7%   1038     7.24    +0.2%      79%   z vs random -0.1
+closest to the pivot first     21.4%   15.1%    980     7.20    +0.2%      79%   z vs random -0.1
+furthest from the pivot first   23.1%   15.9%    987     8.24    +1.8%      76%   z vs random +0.8
+best reward:risk first         20.7%   15.2%   1117     6.76    -0.6%      80%   z vs random -0.6
+most contractions first        22.0%   16.2%   1019     7.56    +0.8%      85%   z vs random +0.2
+
+vs date = CAGR difference against first-come-first-served
+overlap = share of the baseline's trades this rule also took
+z vs random = standard deviations from the random-allocation mean;
+              inside about +/-2 is indistinguishable from luck

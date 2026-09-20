@@ -1,0 +1,17 @@
+364 distinct breakout signals from 57,916 bar-scans across 454 symbols
+  = 6.3 signals per 1,000 bar-scans
+
+pattern                        n    fwd10    exc10   win%    fwd20    exc20   win%
+  cup_and_handle/with_handle    19    2.78%   -2.51%    37%    1.40%  -11.99%    21%
+  triangle/ascending          31    4.43%    3.07%    58%   15.36%    0.18%    39%
+  triangle/descending         26    5.72%   -0.74%    46%   16.89%    2.70%    50%
+  triangle/falling_wedge      43    4.97%    0.20%    42%   16.39%    3.77%    44%
+  triangle/rising_wedge       57    8.93%   -1.01%    47%   23.99%   -5.63%    46%
+  triangle/symmetrical       119    6.74%   -1.44%    48%   13.53%   -0.88%    45%
+  vcp/2T                      60    7.75%    0.54%    50%   11.54%   -1.12%    40%
+  vcp/3T                       9   15.52%   11.32%    56%   18.99%   13.86%    56%
+cup_and_handle                19    2.78%   -2.51%    37%    1.40%  -11.99%    21%
+triangle                     276    6.55%   -0.58%    48%   16.59%   -0.58%    45%
+vcp                           69    8.78%    1.97%    51%   12.54%    0.89%    42%
+
+fwd = raw forward return (always long); exc = excess over the date-matched average of every symbol, SIGNED to the direction the pattern implies; win% = share of those beating the average

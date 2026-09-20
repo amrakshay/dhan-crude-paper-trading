@@ -1,0 +1,37 @@
+Index regime filter on the NIFTY, applied to `early entry + EMA50 trail`
+Rs 1,000,000 capital, Rs 100,000 per trade, 0.3% round-trip cost
+
+filter                          in mkt  trades    CAGR   maxDD    MAR     final   win%
+none (baseline)                   100%    1806    19.8   -21.0   0.94     62.7L   20.2
+above 200-day                      73%    1435    16.7   -25.5   0.66     48.0L   18.2
+above 200-day + flatten            73%    1398    15.7   -24.6   0.64     44.0L   18.9
+200-day rising                     76%    1037     9.1   -25.2   0.36     24.2L   19.1
+200-day rising + flatten           76%    1048     9.3   -26.7   0.35     24.7L   20.6
+above AND rising                   65%     945     7.4   -28.5   0.26     20.7L   18.9
+above AND rising + flatten         65%     938     8.1   -25.6   0.32     22.0L   21.1
+50-day > 200-day                   70%    1305    14.8   -30.3   0.49     40.6L   17.6
+50-day > 200-day + flatten         70%    1305    13.7   -25.9   0.53     36.8L   18.5
+BELOW 200-day (inverse)            27%     275     9.4    -7.0   1.34     24.9L   28.0
+BELOW 200-day (inverse) + flatten     27%     227     2.4    -6.7   0.36     12.7L   35.7
+
+in mkt = share of sessions the filter allows new entries
+
+year by year (% return on the book)
+year                   none      above 200-day  above 200-day + f   above AND rising  BELOW 200-day (in
+2016                   -3.9               -3.0               -1.4               -3.0               -1.6
+2017                   38.0               44.1               22.5               44.1               19.2
+2018                   -2.0               -3.0               -8.1               -3.8                1.7
+2019                   -6.7               -7.6              -13.8               -8.3               -2.2
+2020                   64.0               24.2               40.2               -7.5               46.3
+2021                   83.2              105.7              112.3               51.9                5.4
+2022                   -6.0              -10.0              -11.9              -13.6                7.1
+2023                   71.4               50.4               56.9               43.1               30.1
+2024                   14.6               18.3               14.2                6.2                3.1
+2025                   -5.2               -4.3               -1.0               -5.1               -5.0
+2026                   -1.8               -2.2               -1.4               -4.3                1.3
+
+   none                          6 negative years of 11
+   above 200-day                 6 negative years of 11
+   above 200-day + flatten       6 negative years of 11
+   above AND rising              7 negative years of 11
+   BELOW 200-day (inverse)       3 negative years of 11

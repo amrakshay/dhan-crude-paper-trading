@@ -1,0 +1,35 @@
+VCP exits compared, same bases, stop always at the contraction low
+
+--- entry: breakout (first close above the pivot)
+   exit rule                          n  mean R  med R  win%  mean ret med bars   R/bar  p95 R  trail%
+   flat 40 bars                    1777    0.39  -0.21   46%     4.20%       40   0.013   3.74      0%
+   flat 60 bars                    1777    0.54  -0.62   43%     6.02%       59   0.014   4.71      0%
+   EMA9                            1777    0.12  -0.16   38%     1.19%        7   0.013   2.00     95%
+   EMA9, 2 closes                  1777    0.18  -0.17   40%     2.02%       10   0.014   2.48     88%
+   EMA9, 0.5 ATR buffer            1777    0.25  -0.20   40%     2.63%       13   0.015   2.99     87%
+   EMA9, armed at +1R              1777    0.29   0.30   56%     3.33%       19   0.011   2.53     59%
+   EMA9, 2 closes + armed +1R      1777    0.36   0.23   54%     4.16%       22   0.012   3.02     58%
+   EMA20                           1777    0.31  -0.23   39%     3.34%       13   0.018   3.20     89%
+   EMA20, 2 closes                 1777    0.40  -0.22   40%     4.23%       17   0.018   3.64     80%
+   EMA20, armed at +1R             1777    0.47   0.14   52%     5.38%       25   0.014   3.87     59%
+   EMA50                           1777    0.65  -0.34   39%     7.05%       27   0.018   5.11     72%
+   EMA50, armed at +1R             1777    0.75  -0.19   46%     8.42%       36   0.016   5.53     55%
+
+--- entry: early (the forming bar; trail arms at the breakout)
+   exit rule                          n  mean R  med R  win%  mean ret med bars   R/bar  p95 R  trail%
+   flat 40 bars                    3188    0.87  -1.00   21%     1.94%        6   0.060   8.98      0%
+   flat 60 bars                    3188    1.14  -1.00   20%     2.85%        6   0.061  10.66      0%
+   EMA9                            3188    0.64  -1.00   29%     1.63%        5   0.049   6.52     31%
+   EMA9, 2 closes                  3188    0.68  -1.00   27%     1.86%        6   0.048   6.82     29%
+   EMA9, 0.5 ATR buffer            3188    0.83  -1.00   26%     2.09%        6   0.053   6.85     29%
+   EMA9, armed at +1R              3188    0.65  -1.00   29%     1.76%        6   0.046   6.52     29%
+   EMA9, 2 closes + armed +1R      3188    0.69  -1.00   27%     2.00%        6   0.045   6.82     28%
+   EMA20                           3188    0.86  -1.00   27%     2.33%        6   0.055   6.91     30%
+   EMA20, 2 closes                 3188    1.03  -1.00   25%     2.63%        6   0.059   7.79     27%
+   EMA20, armed at +1R             3188    0.87  -1.00   27%     2.47%        6   0.053   6.91     28%
+   EMA50                           3188    1.62  -1.00   22%     4.15%        6   0.073   9.99     25%
+   EMA50, armed at +1R             3188    1.63  -1.00   23%     4.27%        6   0.071   9.99     24%
+
+R/bar is the number that decides whether a fast exit is worth it:
+a rule earning half the R in a quarter of the time is ahead, IF you
+have another signal to put the money into.

@@ -1,0 +1,32 @@
+9 EMA trailing exit, against the flat 40-bar hold (max hold 250 bars)
+
+entry / exit                       n  mean R  med R   win%  mean ret  med bars   R/bar  MA exit%
+breakout/ema9                   1777    0.12  -0.16    38%     1.19%         7   0.013       95%
+breakout/ema9_nofloor           1777    0.12  -0.16    38%     1.25%         7   0.013      100%
+breakout/ema20                  1777    0.31  -0.23    39%     3.34%        13   0.018       89%
+breakout/sma9                   1777    0.11  -0.14    40%     1.03%         7   0.013       95%
+breakout/sma20                  1777    0.27  -0.22    40%     2.89%        13   0.016       89%
+breakout/ema9/nextopen          1777    0.14  -0.14    40%     1.37%         8   0.013       95%
+early/ema9                      3188    0.71  -0.37    35%     1.59%         3   0.104       59%
+early/ema9_nofloor              3188    0.59  -0.30    38%     1.54%         3   0.086       76%
+early/ema20                     3188    0.86  -0.68    30%     2.07%         4   0.087       52%
+early/sma9                      3188    0.73  -0.35    36%     1.60%         3   0.114       59%
+early/sma20                     3188    0.85  -0.61    31%     2.02%         4   0.090       54%
+early/ema9/nextopen             3188    0.76  -0.38    36%     1.68%         4   0.104       59%
+
+R/bar = total R divided by total bars held: the capital-efficiency
+        number, and the one a fast exit is supposed to win on
+MA exit% = share of trades that ended on the moving average rather
+        than the structural stop or the holding cap
+
+breakout/ema9: tail dependence and exit reasons
+   percentiles  p10=-0.64  p25=-0.43  p50=-0.16  p75=0.32  p90=1.21  p95=2.00  p99=4.27
+   top 5% of trades contribute 143% of total R
+   exits: ma_exit 95%, max_hold 0%, structural_stop 5%
+   by year: 2016:0.09  2017:0.19  2018:-0.14  2019:-0.07  2020:0.19  2021:0.16  2022:-0.10  2023:0.36  2024:-0.01  2025:0.04  2026:0.08
+
+early/ema9: tail dependence and exit reasons
+   percentiles  p10=-1.00  p25=-1.00  p50=-0.37  p75=0.46  p90=2.93  p95=5.88  p99=19.15
+   top 5% of trades contribute 113% of total R
+   exits: ma_exit 59%, max_hold 0%, structural_stop 41%
+   by year: 2016:0.31  2017:0.74  2018:0.62  2019:0.09  2020:0.53  2021:0.82  2022:0.11  2023:1.74  2024:0.20  2025:0.85  2026:1.26
