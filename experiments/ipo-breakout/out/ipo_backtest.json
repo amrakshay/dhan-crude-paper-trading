@@ -1,0 +1,120 @@
+{
+  "summary": {
+    "start": 1000000,
+    "final": 3299514,
+    "cagr": 12.3,
+    "maxdd": -8.6,
+    "mar": 1.44,
+    "trades": 126,
+    "win": 58.7,
+    "avg_hold": 64.9,
+    "pf": 3.38,
+    "avg_win": 44589,
+    "avg_loss": -18750,
+    "best_mo": 10.2,
+    "worst_mo": -3.7,
+    "period": "2016-06-01 \u2192 2026-09-18",
+    "total_pnl": 2299514,
+    "signals": 126,
+    "skipped": 0,
+    "max_pos": 14,
+    "avg_pos": 3.2,
+    "exposure": 22.7,
+    "per_trade": 132855
+  },
+  "yearly": [
+    {
+      "y": 2016,
+      "ret": 12.9,
+      "n": 5,
+      "win": 100.0,
+      "pnl": 143611
+    },
+    {
+      "y": 2017,
+      "ret": 30.6,
+      "n": 10,
+      "win": 80.0,
+      "pnl": 293830
+    },
+    {
+      "y": 2018,
+      "ret": 2.1,
+      "n": 4,
+      "win": 75.0,
+      "pnl": 71681
+    },
+    {
+      "y": 2019,
+      "ret": 7.5,
+      "n": 6,
+      "win": 50.0,
+      "pnl": 56134
+    },
+    {
+      "y": 2020,
+      "ret": -2.2,
+      "n": 4,
+      "win": 75.0,
+      "pnl": 116609
+    },
+    {
+      "y": 2021,
+      "ret": 30.1,
+      "n": 10,
+      "win": 50.0,
+      "pnl": 404878
+    },
+    {
+      "y": 2022,
+      "ret": 7.5,
+      "n": 11,
+      "win": 63.6,
+      "pnl": 130346
+    },
+    {
+      "y": 2023,
+      "ret": 14.4,
+      "n": 23,
+      "win": 65.2,
+      "pnl": 415065
+    },
+    {
+      "y": 2024,
+      "ret": 25.7,
+      "n": 20,
+      "win": 60.0,
+      "pnl": 469551
+    },
+    {
+      "y": 2025,
+      "ret": -4.8,
+      "n": 21,
+      "win": 28.6,
+      "pnl": -35142
+    },
+    {
+      "y": 2026,
+      "ret": 8.8,
+      "n": 12,
+      "win": 58.3,
+      "pnl": 258042
+    }
+  ],
+  "args": {
+    "capital": 1000000,
+    "per_trade": 133000.0,
+    "cost": 0.003,
+    "setup": "base",
+    "profile": "strict",
+    "exit": "stop only",
+    "max_hold": 80,
+    "min_score": 0.0,
+    "skip_before_unlock": true,
+    "compound": false,
+    "slots": 10,
+    "out": "ipo_dashboard.html"
+  },
+  "n_signals": 184,
+  "n_trades": 126
+}

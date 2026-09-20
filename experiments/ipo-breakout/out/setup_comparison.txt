@@ -1,0 +1,27 @@
+Are the three setups one setup?
+===============================
+
+  base    184 signals on  184 listings, median entry at session 22 after listing
+  day1    188 signals on  188 listings, median entry at session 35 after listing
+  week1   210 signals on  210 listings, median entry at session 42 after listing
+
+Where the left-side high sits, for the `base` setup:
+  median session 2   25th 1   75th 10
+  on session 0-4 (i.e. the pivot IS the first week's high): 61% of signals
+
+Overlap. 'same listing' shares a symbol; 'same trade' also enters
+within 5 sessions of the other setup's entry.
+
+pair              same listing  same trade   of the smaller set
+---------------------------------------------------------------
+base vs day1               106          71                 39%
+base vs week1              111          86                 47%
+day1 vs week1              151         141                 75%
+
+Forward returns, from out/analysis_<setup>_strict.json:
+
+setup        n      r20   excess vs mkt               95% CI      r60   excess vs mkt
+-------------------------------------------------------------------------------------
+base       184   5.43%          3.93% [+1.28%,+6.67%]   9.39%          5.08%
+day1       188   5.63%          4.64% [+2.32%,+6.95%]  12.90%          9.20%
+week1      210   5.28%          4.48% [+2.15%,+6.83%]  11.22%          7.72%

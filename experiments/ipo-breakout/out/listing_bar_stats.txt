@@ -1,0 +1,41 @@
+The listing bar, measured
+=========================
+
+520 matched listings.
+
+VOLUME. The listing bar against the median of the twenty sessions
+after it:
+  median 21.0x   25th 11.4x   75th 36.3x   max 291x
+
+  This is why the listing bar is excluded from every average. A
+  50-session mean volume that includes it is dominated by it for
+  fifty sessions, and every 'volume 40% above average' test then
+  fails by construction.
+
+THE BAND. Moves from the listing (auction) price on day one:
+  high above open   median +5.00%   max +20.0%
+  low below open    median -3.60%   min -20.0%
+
+  closed exactly at the day's high     72  (14%)
+  closed exactly at the day's low      21  (4%)
+  an extreme sitting on a +-5% band    89  (17%)
+  an extreme sitting on a +-20% band   36  (7%)
+
+  A bar that closes exactly on its high, on a band, is frozen at a
+  circuit. Its high is the rulebook, not a price at which supply
+  met demand -- which is what makes the 'above the listing-day high'
+  setup (RESEARCH.md section 2, setup A) suspect before any return is
+  measured.
+
+Listings closing at an extreme, by year:
+  2016    2 /  23
+  2017    5 /  33
+  2018    1 /  21
+  2019    1 /  15
+  2020    4 /  13
+  2021    8 /  59
+  2022    6 /  36
+  2023   11 /  57
+  2024   19 /  88
+  2025   17 / 101
+  2026   19 /  74

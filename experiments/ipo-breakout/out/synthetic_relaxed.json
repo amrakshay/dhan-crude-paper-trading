@@ -1,0 +1,93 @@
+{
+  "profile": "relaxed",
+  "n_positive": 186,
+  "n_negative": 108,
+  "hits": 186,
+  "misses": 0,
+  "recall": 1.0,
+  "precision": 0.6326530612244898,
+  "signal_precision": 0.7096774193548387,
+  "fp_samples": 108,
+  "fp_signal_samples": 36,
+  "neg_detections": 2818,
+  "neg_signals": 45,
+  "neg_scans": 6192,
+  "fp_rate_per_1k": 455.1033591731266,
+  "signal_hits": 88,
+  "by_negative": {
+    "gap_and_bleed": 18,
+    "flat_drift": 18,
+    "random_walk": 18,
+    "expanding_base": 18,
+    "base_that_fails": 18,
+    "deep_collapse": 18
+  },
+  "by_negative_signal": {
+    "flat_drift": 7,
+    "random_walk": 10,
+    "expanding_base": 18,
+    "deep_collapse": 1
+  },
+  "by_depth_cell": {
+    "0-10%": [
+      25,
+      25
+    ],
+    "10-20%": [
+      52,
+      52
+    ],
+    "20-30%": [
+      37,
+      37
+    ],
+    "30-40%": [
+      42,
+      42
+    ],
+    "40-50%": [
+      30,
+      30
+    ]
+  },
+  "by_length_cell": {
+    "8": [
+      30,
+      30
+    ],
+    "12": [
+      39,
+      39
+    ],
+    "16": [
+      39,
+      39
+    ],
+    "22": [
+      39,
+      39
+    ],
+    "30": [
+      39,
+      39
+    ]
+  },
+  "miss_reasons": {},
+  "params": {
+    "min_history": 0,
+    "left_high_window": 35,
+    "allow_listing_bar_pivot": false,
+    "pivot_buffer_pct": 0.1,
+    "min_base_len": 5,
+    "max_base_len": 60,
+    "normal_depth_pct": 30.0,
+    "max_depth_pct": 50.0,
+    "max_age_sessions": 250,
+    "breakout_volume_ratio": 1.0,
+    "volume_lookback": 30,
+    "dryup_ratio": 1.1,
+    "require_hard_gates": false,
+    "require_breakout_volume": false,
+    "min_score": 0.0
+  }
+}

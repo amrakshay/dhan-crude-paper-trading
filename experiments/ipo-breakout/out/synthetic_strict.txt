@@ -1,0 +1,32 @@
+strict profile
+==============
+
+positives 186   negatives 108   negative bar-scans 6084
+
+  recall             100.0%   (186 hit, 0 missed)
+  precision           63.3%   (per-sample, any detection on a negative counts against)
+  signal precision    98.8%   (breakout-state only -- the ones that would have traded)
+  false alarms        275.3 per 1,000 bar-scans
+
+  false positives by control (any / breakout-state):
+    base_that_fails     18 /   0
+    deep_collapse       18 /   0
+    expanding_base      18 /   0
+    flat_drift          18 /   0
+    gap_and_bleed       18 /   0
+    random_walk         18 /   1
+
+  recall by measured base depth:
+    0-10%     25/25  100.0%
+    10-20%    52/52  100.0%
+    20-30%    37/37  100.0%
+    30-40%    42/42  100.0%
+    40-50%    30/30  100.0%
+
+  recall by drawn base length:
+      8 bars  30/30  100.0%
+     12 bars  39/39  100.0%
+     16 bars  39/39  100.0%
+     22 bars  39/39  100.0%
+     30 bars  39/39  100.0%
+

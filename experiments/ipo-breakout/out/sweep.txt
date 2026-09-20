@@ -1,0 +1,107 @@
+allow_listing_bar_pivot
+-----------------------
+     value   recall  signal prec    FA/1k
+     False   100.0%        98.4%    270.9   <- default
+      True   100.0%        98.4%    271.1
+  FLAT -- this threshold changes nothing on the benchmark
+
+breakout_volume_ratio
+---------------------
+     value   recall  signal prec    FA/1k
+       1.0   100.0%        90.9%    270.9
+       1.2   100.0%        93.8%    270.9
+       1.4   100.0%        98.4%    270.9   <- default
+       1.6   100.0%       100.0%    270.9
+       2.0   100.0%       100.0%    270.9
+  moves recall by 0.0%, signal precision by 9.1%
+
+dryup_ratio
+-----------
+     value   recall  signal prec    FA/1k
+       0.6   100.0%        98.4%    270.9
+      0.75   100.0%        98.4%    270.9
+      0.85   100.0%        98.4%    270.9   <- default
+       1.0   100.0%        98.4%    270.9
+       1.2   100.0%        98.4%    270.9
+  FLAT -- this threshold changes nothing on the benchmark
+
+left_high_window
+----------------
+     value   recall  signal prec    FA/1k
+        10    21.0%        94.4%    145.3
+        15    56.5%        97.0%    257.1
+        20    89.2%        98.1%    262.8
+        25   100.0%        98.4%    270.9   <- default
+        30   100.0%        98.4%    283.2
+        40   100.0%        98.4%    311.5
+  moves recall by 79.0%, signal precision by 3.9%
+
+max_age_sessions
+----------------
+     value   recall  signal prec    FA/1k
+        60   100.0%        98.4%    564.8
+       125   100.0%        98.4%    291.5
+       250   100.0%        98.4%    270.9   <- default
+       500   100.0%        98.4%    270.9
+  FLAT -- this threshold changes nothing on the benchmark
+
+max_base_len
+------------
+     value   recall  signal prec    FA/1k
+        15   100.0%        95.0%    102.8
+        20   100.0%        97.1%    145.5
+        25   100.0%        97.8%    175.5
+        30   100.0%        97.8%    208.7
+        40   100.0%        98.4%    270.9   <- default
+        60   100.0%        98.4%    397.0
+  moves recall by 0.0%, signal precision by 3.4%
+
+max_depth_pct
+-------------
+     value   recall  signal prec    FA/1k
+      20.0    61.8%        96.3%    231.1
+      30.0    82.3%        97.1%    270.6
+      40.0    92.5%        98.1%    270.9
+      50.0   100.0%        98.4%    270.9   <- default
+      65.0   100.0%        98.4%    270.9
+  moves recall by 38.2%, signal precision by 2.1%
+
+min_base_len
+------------
+     value   recall  signal prec    FA/1k
+         3   100.0%        94.9%    313.1
+         5   100.0%        98.5%    289.6
+         7   100.0%        98.4%    270.9   <- default
+        10    87.1%       100.0%    246.5
+        14    66.1%       100.0%    217.5
+  moves recall by 33.9%, signal precision by 5.1%
+
+normal_depth_pct
+----------------
+     value   recall  signal prec    FA/1k
+      10.0   100.0%        98.4%    270.9
+      15.0   100.0%        98.4%    270.9
+      20.0   100.0%        98.4%    270.9   <- default
+      25.0   100.0%        98.4%    270.9
+      30.0   100.0%        98.4%    270.9
+  FLAT -- this threshold changes nothing on the benchmark
+
+pivot_buffer_pct
+----------------
+     value   recall  signal prec    FA/1k
+       0.0   100.0%       100.0%    269.7
+       0.1   100.0%        98.4%    270.9   <- default
+       0.5   100.0%        98.4%    281.5
+       1.0   100.0%        98.4%    287.4
+       2.0   100.0%        98.4%    304.1
+  FLAT -- this threshold changes nothing on the benchmark
+
+volume_lookback
+---------------
+     value   recall  signal prec    FA/1k
+        10   100.0%        98.4%    270.9
+        20   100.0%        98.4%    270.9
+        30   100.0%        98.4%    270.9   <- default
+        50   100.0%        96.8%    270.9
+  FLAT -- this threshold changes nothing on the benchmark
+
