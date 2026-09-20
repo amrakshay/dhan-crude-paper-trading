@@ -1,0 +1,76 @@
+# ===========================================================================
+# THE RISK-FREE COMPARATOR
+#
+# A market-neutral strategy is not benchmarked against the index. Its
+# opportunity cost is the risk-free rate: a book that is long as much as it
+# is short has no market exposure to be paid for taking, so the question is
+# whether it beats leaving the money in treasury bills. A 6% "market-neutral"
+# return in a period when bills paid 6.5% is a LOSS, and reporting it against
+# a flat NIFTY would call it a win.
+#
+# WHAT THIS SERIES IS, exactly. It is the RBI policy repo rate, not the
+# 91-day treasury bill yield. The T-bill is the more correct instrument and
+# no machine-readable history of it was obtained: RBI's DBIE did not yield a
+# fetchable series and the aggregators that carry one are paywalled. The repo
+# rate is a documented, precisely dated substitute that the 91-day bill
+# tracks closely -- typically within about 25 basis points either side, and
+# wider only in liquidity stress (the bill traded well below repo through the
+# 2020-21 surplus).
+#
+# So: a SUBSTITUTION, stated rather than hidden, with no consistent sign to
+# its error. Every risk-free comparison in this experiment is therefore
+# accurate to roughly a quarter of a point, which is enough to decide the
+# question it is asked -- "did this beat cash, or not" -- unless the answer
+# comes out inside that band, in which case the write-up says so instead of
+# picking a side.
+#
+# Researched 2026-09-20.
+#
+# Confidence markers:
+#   CONFIRMED   - the value is the well-documented headline rate for that
+#                 date and two independent secondary sources agree
+#   DISPUTED    - the two sources disagreed; the value taken is noted
+# ===========================================================================
+
+version: "2026-09-20"
+name: "RBI policy repo rate"
+units: "annual percent"
+
+# source (secondary): https://www.basunivesh.com/rbi-repo-rate-history-from-2000/
+# source (secondary): a second published timeline, retrieved 2026-09-20, which
+#   disagreed with the first at the 5-basis-point level on five 2015-2019
+#   dates (7.75 vs 7.80, 7.25 vs 7.30, 6.25 vs 6.30, 5.75 vs 5.80, 5.15 vs
+#   5.20). The CANONICAL values -- 7.75, 7.25, 6.25, 5.75, 5.15 -- are taken,
+#   because those are the figures RBI's own policy statements announced and
+#   the other source appears to round. Marked DISPUTED below.
+# confidence: UNCONFIRMED against RBI's own press-release archive, which was
+#   not fetched. A 5-bps error on five dates moves an eleven-year average
+#   comparator by under one basis point.
+
+changes:
+  - { from: "2015-01-15", rate: 7.75, confidence: DISPUTED }
+  - { from: "2015-03-04", rate: 7.50, confidence: CONFIRMED }
+  - { from: "2015-06-02", rate: 7.25, confidence: DISPUTED }
+  - { from: "2015-09-29", rate: 6.75, confidence: DISPUTED }
+  - { from: "2016-04-05", rate: 6.50, confidence: CONFIRMED }
+  - { from: "2016-10-04", rate: 6.25, confidence: DISPUTED }
+  - { from: "2017-08-02", rate: 6.00, confidence: CONFIRMED }
+  - { from: "2018-06-06", rate: 6.25, confidence: CONFIRMED }
+  - { from: "2018-08-01", rate: 6.50, confidence: CONFIRMED }
+  - { from: "2019-02-07", rate: 6.25, confidence: DISPUTED }
+  - { from: "2019-04-04", rate: 6.00, confidence: CONFIRMED }
+  - { from: "2019-06-06", rate: 5.75, confidence: DISPUTED }
+  - { from: "2019-08-07", rate: 5.40, confidence: CONFIRMED }
+  - { from: "2019-10-04", rate: 5.15, confidence: DISPUTED }
+  - { from: "2020-03-27", rate: 4.40, confidence: CONFIRMED }
+  - { from: "2020-05-22", rate: 4.00, confidence: CONFIRMED }
+  - { from: "2022-05-04", rate: 4.40, confidence: CONFIRMED }
+  - { from: "2022-06-08", rate: 4.90, confidence: CONFIRMED }
+  - { from: "2022-08-05", rate: 5.40, confidence: CONFIRMED }
+  - { from: "2022-09-30", rate: 5.90, confidence: CONFIRMED }
+  - { from: "2022-12-07", rate: 6.25, confidence: CONFIRMED }
+  - { from: "2023-02-08", rate: 6.50, confidence: CONFIRMED }
+  - { from: "2025-02-07", rate: 6.25, confidence: CONFIRMED }
+  - { from: "2025-04-09", rate: 6.00, confidence: CONFIRMED }
+  - { from: "2025-06-06", rate: 5.50, confidence: CONFIRMED }
+  - { from: "2025-12-05", rate: 5.25, confidence: CONFIRMED }

@@ -1,0 +1,192 @@
+# ===========================================================================
+# NSE EQUITY DELIVERY (CNC) -- charge rates, DATE-AWARE
+#
+# Same format and the same rates as the application's
+# `backend/conf/charges/nse-equity-delivery.yaml`, with one addition that the
+# live application does not need and a backtest cannot do without: **a rate
+# may be a list of dated entries**, and the engine picks the one in force on
+# the trade date.
+#
+# That matters because the sample runs 2015-07 to 2026-09 and three of these
+# rates changed inside it. A single-rate card applied to an eleven-year
+# backtest silently charges 2026's taxes on a 2016 trade.
+#
+# Every rate carries a PRIMARY source URL and an as-of date. No rate is
+# hardcoded in Python.
+#
+# Confidence markers:
+#   CONFIRMED   - read from a primary source (NSE circular / SEBI /
+#                 incometaxindia.gov.in) or the broker's own published card
+#   UNCONFIRMED - no primary source obtained; corroborated by brokers only
+#
+# Researched 2026-09-20.
+# ===========================================================================
+
+version: "2026-09-20"
+currency: "INR"
+scope: "NSE cash segment, delivery (CNC)"
+
+labels:
+  brokerage: "Brokerage"
+  stt: "STT"
+  exchange_transaction_charge: "Exchange transaction charge"
+  sebi_turnover_fee: "SEBI turnover fee"
+  stamp_duty: "Stamp duty"
+  dp_charge: "Depository (DP) charge"
+  gst: "GST"
+
+levies:
+  - name: "brokerage"
+    kind: "brokerage"
+
+  - name: "stt"
+    kind: "percent_of_turnover"
+    rate_key: "stt.delivery_rate"
+    sides: ["BUY", "SELL"]
+    note: >-
+      BOTH legs, 0.1% each. This single line is the reason cash-segment pairs
+      trading does not work: a pair is two instruments, so a round trip pays
+      it four times -- 0.4% of gross notional before anything else.
+
+  - name: "exchange_transaction_charge"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.cash_market_total"
+    note: >-
+      Transaction charge PLUS the NSE IPFT contribution, as one line. The
+      application's card keeps them apart because it prints a contract note;
+      here only the total is used, and the total is the part both NSE
+      circulars agree on. See the rate's own note.
+
+  - name: "sebi_turnover_fee"
+    kind: "percent_of_turnover"
+    rate_key: "sebi_turnover_fee.rate"
+
+  - name: "stamp_duty"
+    kind: "percent_of_turnover"
+    rate_key: "stamp_duty.delivery_rate"
+    sides: ["BUY"]
+
+  - name: "dp_charge"
+    kind: "flat_per_order"
+    rate_key: "dp_charge.per_sell_order"
+    sides: ["SELL"]
+    note: >-
+      Per ISIN per day on a delivery sell, regardless of quantity. Charged
+      per order here, which overstates the cost when one scrip is sold in
+      several orders on one day -- an error in the pessimistic direction.
+
+  - name: "gst"
+    kind: "percent_of_components"
+    rate_key: "gst.rate"
+    applies_to: ["brokerage", "exchange_transaction_charge", "sebi_turnover_fee", "dp_charge"]
+    note: "Not on trade value, not on STT, not on stamp duty."
+
+brokerage:
+  mode: "flat"
+  flat_per_order: 0.00
+  # source (primary): https://dhan.co/pricing/ -- "Rs 0 (Zero Brokerage)" on equity delivery
+  # source (secondary): https://zerodha.com/charges/ -- "Zero Brokerage"
+  # as-of: 2026-09-20   confidence: CONFIRMED (commercial, not statutory)
+  #
+  # NOTE. Zero delivery brokerage is a recent commercial fact, not one that
+  # held across the whole sample -- delivery brokerage was commonly 0.1-0.5%
+  # in 2015. Using today's zero throughout FLATTERS the early years. The
+  # direction of the error is stated in COSTS.md and swept there; it is not
+  # corrected, because no sourced historical retail schedule was obtained.
+
+stt:
+  # Chapter VII of the Finance (No. 2) Act 2004. Delivery purchase and
+  # delivery sale of an equity share, 0.1% each, unchanged across the sample.
+  delivery_rate: 0.001
+  # source (primary): Finance (No. 2) Act 2004 Chapter VII, STT schedule
+  # source (secondary): https://dhan.co/pricing/ ("0.1% on buy & sell")
+  # source (secondary): https://zerodha.com/charges/ ("0.1% on buy & sell")
+  # as-of: 2026-09-20   confidence: CONFIRMED
+  #
+  # TRAP: the 0.025% entry in the same table is the INTRADAY sale rate, sell
+  # side only. It is a different taxable transaction -- see the intraday card.
+
+exchange_transaction_charge:
+  # Transaction charge + IPFT, as one total per side of traded value.
+  cash_market_total:
+    - from: "2015-07-01"
+      value: 0.0000325
+      # Rs 325 per crore. Pre-"true to label" the schedule was SLAB-based and
+      # depended on the trading member's own volume, so no single retail rate
+      # existed. Rs 325/crore is the top-slab figure brokers published.
+      # confidence: UNCONFIRMED -- no primary circular obtained for the slab
+      #   in force in 2015. It is 6% above the modern total and the whole line
+      #   is ~1% of a delivery round trip, so the error is immaterial; swept
+      #   in COSTS.md all the same.
+    - from: "2024-10-01"
+      value: 0.0000307
+      # Rs 2.97 per lakh transaction charge (= Rs 297/crore) + Rs 10/crore
+      # IPFT = Rs 307 per crore.
+      # source (primary): NSE circular NSE/FA/64232 dated 27 Sep 2024,
+      #   effective 01 Oct 2024, read verbatim:
+      #   "Cash Market: Rs. 2.97 each side per lakh of traded value"
+      #   https://nsearchives.nseindia.com/content/circulars/FA64232.pdf
+      # confidence: CONFIRMED
+    - from: "2026-03-01"
+      value: 0.0000307
+      # NSE circular NSE/FA/73061 dated 27 Feb 2026, effective 01 Mar 2026,
+      # re-split the same Rs 307 total between the transaction charge and the
+      # IPFT contribution (the application's card records the new split as
+      # Rs 306.99 + Rs 0.01). GST applies to both lines identically and both
+      # are percent-of-turnover, so the SPLIT cannot change the amount
+      # charged. Only the total is modelled here, and the total is unchanged.
+      # source (primary): https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+      # confidence: CONFIRMED for the total; the split is UNCONFIRMED and
+      #   immaterial by construction.
+
+sebi_turnover_fee:
+  rate:
+    - from: "2015-07-01"
+      value: 0.000002      # Rs 20 per crore
+      # confidence: UNCONFIRMED (the pre-2019 schedule; brokers' archived cards)
+    - from: "2019-04-01"
+      value: 0.000001      # Rs 10 per crore
+      # source (primary): SEBI board memorandum, March 2019 --
+      #   https://www.sebi.gov.in/sebi_data/meetingfiles/mar-2019/1553244864312_1.pdf
+      # source (secondary): https://zerodha.com/charges/ ("Rs 10 / crore")
+      # confidence: CONFIRMED for the rate; the operative regulation text did
+      #   not render when fetched, same caveat as the application's card.
+
+stamp_duty:
+  delivery_rate:
+    - from: "2015-07-01"
+      value: 0.0001
+      # Before 1 July 2020 stamp duty was levied by the STATE of the client's
+      # registered address and varied (Maharashtra 0.01% capped at Rs 50 per
+      # contract note; other states differed). 0.01% is the Maharashtra rate
+      # WITHOUT its cap, which overstates the charge on a large order.
+      # confidence: UNCONFIRMED -- there is no single national pre-2020 rate
+      #   to confirm. Swept in COSTS.md.
+    - from: "2020-07-01"
+      value: 0.00015       # 0.015% = Rs 1,500 per crore, BUY side only
+      # Indian Stamp (Collection of Stamp Duty through Stock Exchanges...)
+      # Rules 2019, Schedule I Article 56A(b), transfer on a delivery basis.
+      # source (secondary): https://zerodha.com/charges/ ("0.015% ... on buy side")
+      # source (secondary): https://dhan.co/pricing/ ("0.015% on turnover of buy orders")
+      # as-of: 2026-09-20
+      # confidence: UNCONFIRMED against the gazette text, CONFIRMED across
+      #   every broker checked. Same caveat as the application's card.
+      #
+      # TRAP: the 0.003% entry in the same article is the NON-delivery rate.
+
+dp_charge:
+  per_sell_order: 12.50
+  # source (primary): https://dhan.co/pricing/ -- "Rs 12.50 / instruction / ISIN + GST"
+  # as-of: 2026-09-20   confidence: CONFIRMED (commercial, not statutory)
+
+gst:
+  rate: 0.18
+  # source (secondary): https://dhan.co/pricing/ -- "18% on brokerage +
+  #   transaction charges + SEBI Turnover + IPFT/Other Tax"
+  # as-of: 2026-09-20
+  # confidence: UNCONFIRMED against a primary CBIC notification. Consistent
+  #   across every broker checked. Same caveat as the application's card.
+
+rounding:
+  mode: "exact"
+  final_total_decimal_places: 2

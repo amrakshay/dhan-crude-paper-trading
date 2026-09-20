@@ -1,0 +1,190 @@
+# ===========================================================================
+# NSE EQUITY FUTURES (single-stock and index futures) -- charge rates
+#
+# The card that makes a market-neutral pair possible at all. A short position
+# in the NSE cash segment cannot be carried overnight -- naked short selling
+# is prohibited and retail delivery shorts require SLB -- so the short leg of
+# an EOD pair has to be a futures short. See FEASIBILITY.md section 3.
+#
+# It is a different set of taxes from the delivery card, not the same taxes
+# at different rates:
+#
+#   * STT on the SELL side only, and an order of magnitude smaller than the
+#     0.1%-each-side delivery rate. This one line is why the same spread is
+#     worth trading in futures and not in cash.
+#   * NO depository charge -- nothing is delivered.
+#   * Stamp duty 0.002% rather than 0.015%.
+#   * A lower exchange transaction charge, Rs 173 vs Rs 297 per crore.
+#
+# Rates are DATE-AWARE: STT on futures changed twice inside the sample.
+#
+# Confidence markers as in the delivery card. Researched 2026-09-20.
+#
+# WHAT THIS CARD CANNOT PRICE, and it must be said here rather than only in
+# the write-up: this repository has NO futures price history (FEASIBILITY.md
+# section 2). The card charges a futures leg correctly; the PRICE of that leg
+# is modelled from cash, so basis noise, roll slippage and lot-size
+# granularity are not in any number this card produces.
+# ===========================================================================
+
+version: "2026-09-20"
+currency: "INR"
+scope: "NSE equity derivatives segment, FUTURES (FUTSTK and FUTIDX)"
+
+labels:
+  brokerage: "Brokerage"
+  stt: "STT"
+  exchange_transaction_charge: "Exchange transaction charge"
+  sebi_turnover_fee: "SEBI turnover fee"
+  stamp_duty: "Stamp duty"
+  gst: "GST"
+
+levies:
+  - name: "brokerage"
+    kind: "brokerage"
+
+  - name: "stt"
+    kind: "percent_of_turnover"
+    rate_key: "stt.sell_futures_rate"
+    sides: ["SELL"]
+    note: >-
+      Sale of a futures contract in securities. SELL side only -- so a long
+      futures leg opened and closed pays it once, on the close, and a short
+      leg pays it once, on the open.
+
+  - name: "exchange_transaction_charge"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.equity_futures_total"
+
+  - name: "sebi_turnover_fee"
+    kind: "percent_of_turnover"
+    rate_key: "sebi_turnover_fee.rate"
+
+  - name: "stamp_duty"
+    kind: "percent_of_turnover"
+    rate_key: "stamp_duty.futures_rate"
+    sides: ["BUY"]
+
+  - name: "gst"
+    kind: "percent_of_components"
+    rate_key: "gst.rate"
+    applies_to: ["brokerage", "exchange_transaction_charge", "sebi_turnover_fee"]
+
+brokerage:
+  mode: "lower_of"            # min(flat_per_order, percentage_of_turnover x turnover)
+  flat_per_order: 20.00
+  percentage_of_turnover: 0.0003
+  # source (primary): https://dhan.co/pricing/ -- "Rs 20 per executed order
+  #   for equity & commodity F&O"
+  # source (secondary): https://zerodha.com/charges/ -- "0.03% or Rs. 20
+  #   /executed order whichever is lower"
+  # as-of: 2026-09-20   confidence: CONFIRMED (commercial, not statutory)
+  #
+  # `lower_of` rather than Dhan's flat Rs 20 because the 0.03% limb binds on
+  # small orders and a pair's two legs are often small. Taking the lower of
+  # the two is the more generous reading; the flat-20 alternative is swept.
+
+stt:
+  sell_futures_rate:
+    - from: "2013-06-01"
+      value: 0.0001          # 0.01%
+      # confidence: UNCONFIRMED -- the pre-2023 rate, corroborated by brokers'
+      #   archived cards and by every report of the 2023 hike describing it as
+      #   "from the current 0.01%".
+    - from: "2023-04-01"
+      value: 0.000125        # 0.0125%
+      # Finance Act 2023, amendment to the Finance (No. 2) Act 2004 STT
+      # schedule, passed 24 March 2023 and effective 1 April 2023.
+      # source (secondary): Business Standard, 24 Mar 2023, "Finance Bill:
+      #   Centre hikes STT on futures and options trading by up to 25%"
+      # source (secondary): Angel One, "STT Hike on F&O Trade Effective Today
+      #   April 1"
+      # confidence: CONFIRMED by two independent contemporaneous reports;
+      #   UNCONFIRMED against the gazetted Act, which returned HTTP 403.
+    - from: "2024-10-01"
+      value: 0.0002          # 0.02%
+      # Finance (No. 2) Act 2024: "increase the rates of STT on sale of
+      # futures in securities from 0.0125 per cent to 0.02 per cent of the
+      # price at which such futures are traded", effective 1 October 2024.
+      # source (secondary): ELP, "Budget Buzz -- Increase in STT in F&O
+      #   segment", https://elplaw.in/wp-content/uploads/2024/07/Budget-Buzz-Increase-in-STT-in-FO-segment.pdf
+      # source (secondary): ICICI Direct, "New STT Rules in F&O Trading"
+      # confidence: CONFIRMED by two independent sources incl. a law firm's
+      #   briefing quoting the Budget speech; UNCONFIRMED against the gazette.
+
+exchange_transaction_charge:
+  # Transaction charge + IPFT, one total, per side of traded value.
+  equity_futures_total:
+    - from: "2015-07-01"
+      value: 0.0000200       # Rs 200 per crore
+      # Pre-"true to label" the schedule was slab-based on the member's own
+      # volume. Rs 190-200/crore is the figure brokers published for the top
+      # slab.
+      # confidence: UNCONFIRMED -- no primary circular obtained. It is ~9%
+      #   above the modern total and the line is ~4% of a futures round trip,
+      #   so worst case it moves a round trip by 0.4 basis points. Swept.
+    - from: "2024-10-01"
+      value: 0.0000183       # Rs 173/crore transaction charge + Rs 10/crore IPFT
+      # source (primary): NSE circular NSE/FA/64232 dated 27 Sep 2024,
+      #   effective 01 Oct 2024, read verbatim from the PDF:
+      #   "Equity Futures: Rs. 1.73 each side per lakh of traded value"
+      #   https://nsearchives.nseindia.com/content/circulars/FA64232.pdf
+      # source (secondary): https://zerodha.com/charges/ ("0.00183%")
+      # confidence: CONFIRMED
+    - from: "2026-03-01"
+      value: 0.0000183
+      # NSE circular NSE/FA/73061 effective 01 Mar 2026 re-split the same
+      # total between the transaction charge and the IPFT contribution. The
+      # circular's own recital gives the futures net movement as "Re.0.01 per
+      # crore of traded value", i.e. the total is unchanged to within one
+      # paisa per crore. GST treats both lines identically, so the split
+      # cannot change the amount charged.
+      # source (primary): https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+      # confidence: CONFIRMED for the total; the split is UNCONFIRMED and
+      #   immaterial by construction.
+
+sebi_turnover_fee:
+  rate:
+    - from: "2015-07-01"
+      value: 0.000002        # Rs 20 per crore   confidence: UNCONFIRMED
+    - from: "2019-04-01"
+      value: 0.000001        # Rs 10 per crore
+      # source (primary): SEBI board memorandum, March 2019
+      # source (secondary): https://zerodha.com/charges/ ("Rs 10 / crore")
+      # confidence: CONFIRMED for the rate
+
+stamp_duty:
+  futures_rate:
+    - from: "2015-07-01"
+      value: 0.00002
+      # Pre-1 July 2020 this was state-wise. 0.002% is used throughout for
+      # want of a sourced alternative; it is also the post-2020 national rate,
+      # so the assumption is that the uniform rate matched the common state
+      # rate. confidence: UNCONFIRMED.
+    - from: "2020-07-01"
+      value: 0.00002         # 0.002% = Rs 200 per crore, BUY side only
+      # Indian Stamp (Collection of Stamp Duty through Stock Exchanges...)
+      # Rules 2019, futures (non-delivery) basis.
+      # source (secondary): https://zerodha.com/charges/
+      #   ("0.002% or Rs 200 / crore on buy side")
+      # as-of: 2026-09-20   confidence: UNCONFIRMED against the gazette text
+
+gst:
+  rate: 0.18
+  # source (secondary): https://dhan.co/pricing/, https://zerodha.com/charges/
+  # as-of: 2026-09-20   confidence: UNCONFIRMED against a primary notification
+
+margin:
+  # NOT a charge -- an amount BLOCKED. It does not reduce P&L, it reduces how
+  # much of the book is free, and a market-neutral strategy lives or dies on
+  # it. Modelled as a flat fraction of the futures leg's notional because
+  # SPAN+exposure is contract-specific and no historical SPAN file is
+  # available here.
+  span_plus_exposure_fraction: 0.20
+  # NSE's SPAN margin for a liquid single-stock future is typically 12-18%
+  # plus a 3-5% exposure margin; 20% is the round number at the top of that
+  # band, so the book is modelled as MORE constrained than it would be.
+  # as-of: 2026-09-20
+  # confidence: APPROXIMATION -- this is a model input, not a published rate.
+  #   Swept in COSTS.md, and the backtest reports gross exposure so a reader
+  #   can re-derive the requirement at any other fraction.

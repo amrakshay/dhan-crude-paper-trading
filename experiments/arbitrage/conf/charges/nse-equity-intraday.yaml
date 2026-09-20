@@ -1,0 +1,90 @@
+# ===========================================================================
+# NSE EQUITY INTRADAY (MIS) -- charge rates
+#
+# Included for ONE reason: it is the only way a short cash leg is legal in
+# India without SLB, and it is therefore the cost of the one pairs variant
+# that could be executed in the cash segment. It cannot be BACKTESTED here --
+# this repository has daily bars and an intraday pair needs intraday ones --
+# so this card exists to price the counterfactual in COSTS.md, not to support
+# a simulation.
+#
+# Differences from the delivery card: STT is 0.025% on the SELL side only
+# rather than 0.1% on both; stamp duty is 0.003% rather than 0.015%; there is
+# no depository charge; brokerage is not zero.
+#
+# Researched 2026-09-20. Confidence markers as in the delivery card.
+# ===========================================================================
+
+version: "2026-09-20"
+currency: "INR"
+scope: "NSE cash segment, intraday (MIS), squared off the same day"
+
+labels:
+  brokerage: "Brokerage"
+  stt: "STT"
+  exchange_transaction_charge: "Exchange transaction charge"
+  sebi_turnover_fee: "SEBI turnover fee"
+  stamp_duty: "Stamp duty"
+  gst: "GST"
+
+levies:
+  - name: "brokerage"
+    kind: "brokerage"
+  - name: "stt"
+    kind: "percent_of_turnover"
+    rate_key: "stt.intraday_sell_rate"
+    sides: ["SELL"]
+    note: "TRAP: 0.025%, sell side only. Not the 0.1%-each-side delivery rate."
+  - name: "exchange_transaction_charge"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.cash_market_total"
+  - name: "sebi_turnover_fee"
+    kind: "percent_of_turnover"
+    rate_key: "sebi_turnover_fee.rate"
+  - name: "stamp_duty"
+    kind: "percent_of_turnover"
+    rate_key: "stamp_duty.intraday_rate"
+    sides: ["BUY"]
+  - name: "gst"
+    kind: "percent_of_components"
+    rate_key: "gst.rate"
+    applies_to: ["brokerage", "exchange_transaction_charge", "sebi_turnover_fee"]
+
+brokerage:
+  mode: "lower_of"
+  flat_per_order: 20.00
+  percentage_of_turnover: 0.0003
+  # source (primary): https://dhan.co/pricing/ -- "Rs 20 or 0.03% of trade
+  #   value per executed order, whichever is lower"
+  # as-of: 2026-09-20   confidence: CONFIRMED (commercial, not statutory)
+
+stt:
+  intraday_sell_rate: 0.00025            # 0.025%, SELL side only
+  # source (secondary): https://dhan.co/pricing/ ("0.025% on sell transactions")
+  # source (secondary): https://zerodha.com/charges/ ("0.025% on the sell side")
+  # as-of: 2026-09-20   confidence: CONFIRMED across brokers
+
+exchange_transaction_charge:
+  cash_market_total:
+    - { from: "2015-07-01", value: 0.0000325 }   # confidence: UNCONFIRMED (slab era)
+    - { from: "2024-10-01", value: 0.0000307 }   # NSE/FA/64232, CONFIRMED
+
+sebi_turnover_fee:
+  rate:
+    - { from: "2015-07-01", value: 0.000002 }
+    - { from: "2019-04-01", value: 0.000001 }
+
+stamp_duty:
+  intraday_rate:
+    - { from: "2015-07-01", value: 0.00002 }     # confidence: UNCONFIRMED (state-wise era)
+    - { from: "2020-07-01", value: 0.00003 }     # 0.003% = Rs 300/crore, buy side
+  # source (secondary): https://zerodha.com/charges/ ("0.003% or Rs 300 / crore on buy side")
+  # source (secondary): https://dhan.co/pricing/ ("0.003% on turnover of buy orders")
+  # as-of: 2026-09-20   confidence: UNCONFIRMED against the gazette text
+
+gst:
+  rate: 0.18
+
+rounding:
+  mode: "exact"
+  final_total_decimal_places: 2
