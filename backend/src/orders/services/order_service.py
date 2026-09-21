@@ -7,10 +7,20 @@ module, or anything it calls, contacts a broker.
 Lifecycle:
 
     PENDING -> FILLED             market order, full fill
-            -> PARTIALLY_FILLED   market order, book ran out (stays open)
+            -> PARTIALLY_FILLED   market order, book ran out -- TERMINAL
             -> OPEN               limit order resting away from the touch
             -> REJECTED           no depth, or validation failed
-    OPEN / PARTIALLY_FILLED -> FILLED | CANCELLED
+    OPEN -> FILLED | PARTIALLY_FILLED | CANCELLED
+    PARTIALLY_FILLED (limit) -> FILLED | CANCELLED
+
+**A PARTIALLY FILLED MARKET ORDER IS FINISHED, NOT RESTING.** There is no
+price for it to rest at, so `completed_at` is stamped and the unfilled
+remainder is abandoned -- not cancelled, and never filled later. Only LIMIT
+orders are worked by the matcher (`try_fill_open_orders` skips anything else),
+so the two states share a name and nothing else. This docstring used to say
+"(stays open)" and list `PARTIALLY_FILLED -> FILLED` without qualification,
+which reads as a market order that will eventually complete; it will not, and
+somebody waiting for it waits forever.
 
 Every transition is recorded as an OrderEvent with a millisecond timestamp, and
 every execution as an OrderFill. Charges are recomputed on the cumulative

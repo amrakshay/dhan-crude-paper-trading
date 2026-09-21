@@ -198,6 +198,66 @@ async def test_an_order_beyond_the_visible_book_partially_fills(ready_client):
     assert body["filledQuantity"] < body["quantity"]
 
 
+async def test_a_partially_filled_MARKET_order_is_never_offered_to_the_matcher(
+    ready_client,
+):
+    """It is finished. There is no price for a market order to rest at.
+
+    `list_open_orders` selected on STATUS alone, so it handed this order to the
+    matcher every 250 ms for ever, where it was dropped for not being a LIMIT.
+    Harmless, but the method is called "open orders" and the module docstring
+    said a partial fill "stays open" -- so the natural reading was that the
+    remainder might still fill. It cannot, and somebody waiting for it waits
+    for ever. Asserted on the repository because that is where the contract is.
+    """
+    from src.orders.database.db_operations.order_repository import OrderRepository
+
+    placed = (
+        await ready_client.post(
+            "/api/orders",
+            json={
+                "securityId": SECURITY_ID, "side": "BUY",
+                "orderType": "MARKET", "lots": 10,
+            },
+        )
+    ).json()
+    assert placed["status"] == "PARTIALLY_FILLED"
+
+    session = get_session_factory()()
+    try:
+        still_open = await OrderRepository(session).list_open_orders()
+    finally:
+        await session.close()
+
+    assert placed["clientOrderId"] not in [
+        one.client_order_id for one in still_open
+    ], "a terminal market order must not be listed as still eligible to fill"
+
+
+async def test_a_resting_LIMIT_order_is_still_offered_to_the_matcher(ready_client):
+    """The other half of the rule above: the matcher's real job is untouched."""
+    from src.orders.database.db_operations.order_repository import OrderRepository
+
+    placed = (
+        await ready_client.post(
+            "/api/orders",
+            json={
+                "securityId": SECURITY_ID, "side": "BUY",
+                "orderType": "LIMIT", "lots": 1, "limitPrice": "10.0",
+            },
+        )
+    ).json()
+    assert placed["status"] == "OPEN"
+
+    session = get_session_factory()()
+    try:
+        still_open = await OrderRepository(session).list_open_orders()
+    finally:
+        await session.close()
+
+    assert placed["clientOrderId"] in [one.client_order_id for one in still_open]
+
+
 async def test_a_passive_limit_order_rests(ready_client):
     response = await ready_client.post(
         "/api/orders",

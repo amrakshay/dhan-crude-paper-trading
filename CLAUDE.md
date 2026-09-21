@@ -579,6 +579,9 @@ backend/src/btst/services/scan_service.py   the filter funnel, B2-B8
 backend/src/btst/services/execution_service.py  the scan, and THE EXIT
 backend/scripts/verify_feed_session_fields.py   settles root CLAUDE.md's
                                    unverified high/low mapping, against a live feed
+backend/scripts/replay_btst_scan.py   rebuilds a past session's 15:20 book from
+                                   intraday bars and replays the scan read-only,
+                                   for the near-misses the journal's row cap drops
 backend/src/strategies/services/strategy_modules.py  which package owns a
                                    strategy's own rules, looked up by key
 backend/src/strategies/services/scheduling.py   JobRun and MissedRun, so two

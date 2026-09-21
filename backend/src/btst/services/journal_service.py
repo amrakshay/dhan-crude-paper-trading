@@ -35,7 +35,7 @@ from src.btst.database.db_models.btst_session_model import (
 )
 from src.btst.services.btst_parameters import BtstParameters
 from src.btst.services.btst_policy import BtstPolicy
-from src.btst.services.scan_service import ScanResult
+from src.btst.services.scan_service import FILTER_STAGES, ScanResult
 from src.core.time_utils import utc_now
 from src.logging_config import get_logger
 
@@ -49,6 +49,12 @@ logger = get_logger("btst.journal")
 # the funnel counts carry the rest.
 REJECTION_STAGES_WORTH_A_ROW = ("breakout", "volume", "close_strength", "trend", "momentum")
 MAX_REJECTION_ROWS = 40
+
+# HOW DEEP EACH STAGE IS, derived from the scan's own funnel so the two cannot
+# drift apart. Used to order the rows before the cap applies -- see
+# `rejection_decisions`, and read the bug in its docstring before changing it.
+_STAGE_DEPTH = {key: depth for depth, (key, _) in enumerate(FILTER_STAGES)}
+_STAGE_LABEL = dict(FILTER_STAGES)
 
 
 def _money(value: Optional[float]) -> Optional[Decimal]:
@@ -281,25 +287,57 @@ class BtstJournalService:
 
 
 def rejection_decisions(scan: ScanResult, limit: int = MAX_REJECTION_ROWS) -> List[Decision]:
-    """The near-misses, as decision rows.
+    """The near-misses, as decision rows, DEEPEST FIRST.
 
     Not every rejection. The universe is ~289 names and almost all of them fail
     at the first filter almost every day; a row each would be 289 rows a
     session saying "did not break out", which is noise that makes the
     interesting rows harder to find rather than easier. The funnel counts on
     the session carry the whole population; these are the names that got past
-    the breakout and still failed, which are the ones somebody looks for.
+    the liquidity and price filters and still failed, which are the ones
+    somebody looks for.
+
+    **ORDER BEFORE THE CAP, and that is the whole point of this function.**
+    It used to slice `scan.rejections` in scan order, which is the universe's
+    order, which is ALPHABETICAL. On 2026-09-21 the funnel was 241 -> 7 at the
+    breakout, so 234 names failed there; the forty rows went to 3MINDIA
+    through BHARTIHEXA saying "not above its 55-day high", and the ONE name
+    that cleared B4, B5, B6 and B7 and died at B8 -- the only row anybody
+    would have looked for -- was crowded out and lost. The funnel counts said
+    a name had reached B8 and the journal could not say which.
     """
     from src.btst.database.db_models.btst_session_model import ACTION_SKIPPED
 
     interesting = [
         one for one in scan.rejections if one.stage in REJECTION_STAGES_WORTH_A_ROW
     ]
+    # Deepest first, then alphabetical so a session's rows are stable between
+    # runs. `-depth` rather than `reverse=True` so the symbol tiebreak stays
+    # ascending.
+    interesting.sort(key=lambda one: (-_STAGE_DEPTH.get(one.stage, 0), one.symbol))
     return [
         Decision(
             symbol=one.symbol,
             action=ACTION_SKIPPED,
-            reason=f"Did not qualify: {one.reason}",
+            # The STAGE, spelled out. "Did not qualify: below the volume
+            # multiple" does not say how far the name got; "Reached B5 volume
+            # multiple" does, and how far it got is the question these rows
+            # exist to answer.
+            reason=(
+                f"Did not qualify at "
+                f"{_STAGE_LABEL.get(one.stage, one.stage)}: {one.reason}"
+            ),
+            security_id=one.security_id,
+            price=one.price,
+            session_high=one.session_high,
+            session_low=one.session_low,
+            session_volume=one.session_volume,
+            vol_ratio=one.vol_ratio,
+            clv=one.clv,
+            breakout_high=one.breakout_high,
+            momentum=one.momentum,
+            sma=one.sma,
+            turnover=one.turnover,
         )
         for one in interesting[:limit]
     ]

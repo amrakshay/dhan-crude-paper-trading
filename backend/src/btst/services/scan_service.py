@@ -256,6 +256,27 @@ class Rejection:
     reason: str
     # The stage it fell at, so the funnel and the per-symbol list agree.
     stage: str
+    # THE LIVE INPUTS, from the BREAKOUT stage on. The module docstring's rule
+    # -- store the inputs, not just the conclusion -- applied to the names that
+    # did NOT make it, because a near-miss with no numbers is the same bare
+    # sentence every session. A candidate's running high, low and cumulative
+    # volume at 15:20 exist in the feed and nowhere else; an hour later they
+    # can only be recovered as a finished bar, which is a different number.
+    #
+    # None before B4: a name rejected for illiquidity or a missing quote has
+    # not been measured, and inventing zeros for it would make the journal
+    # read as though it had.
+    security_id: Optional[str] = None
+    price: Optional[float] = None
+    session_high: Optional[float] = None
+    session_low: Optional[float] = None
+    session_volume: Optional[float] = None
+    vol_ratio: Optional[float] = None
+    clv: Optional[float] = None
+    breakout_high: Optional[float] = None
+    momentum: Optional[float] = None
+    sma: Optional[float] = None
+    turnover: Optional[float] = None
 
 
 @dataclass
@@ -307,6 +328,31 @@ class ScanResult:
             f"{self.index_close:,.1f} is below its long-run SMA of "
             f"{self.index_sma:,.1f}"
         )
+
+
+def _measured(quote, window, price: float, **extra) -> Dict[str, Any]:
+    """The live inputs known once a name has reached B4, for a `Rejection`.
+
+    Assembled in one place so a near-miss row and the `Candidate` row it
+    nearly became carry the same numbers under the same names. `extra` adds
+    the ones that only exist further down the funnel -- `vol_ratio` after B5,
+    `clv` after B6, `sma` after B7 -- so each rejection carries exactly what
+    had been computed by the time it fell, and nothing invented.
+    """
+    def _maybe(value) -> Optional[float]:
+        return None if value is None else float(value)
+
+    return {
+        "security_id": quote.security_id,
+        "price": price,
+        "session_high": _maybe(quote.session_high),
+        "session_low": _maybe(quote.session_low),
+        "session_volume": _maybe(quote.session_volume),
+        "breakout_high": _maybe(window.breakout_high),
+        "momentum": _maybe(window.momentum),
+        "turnover": _maybe(window.turnover),
+        **extra,
+    }
 
 
 def build_window(
@@ -433,8 +479,10 @@ def evaluate(
     rejections: List[Rejection] = []
     candidates: List[Candidate] = []
 
-    def reject(symbol: str, reason: str, stage: str) -> None:
-        rejections.append(Rejection(symbol=symbol, reason=reason, stage=stage))
+    def reject(symbol: str, reason: str, stage: str, **metrics: Any) -> None:
+        rejections.append(
+            Rejection(symbol=symbol, reason=reason, stage=stage, **metrics)
+        )
 
     for symbol in universe:
         counts["universe"] += 1
@@ -485,7 +533,10 @@ def evaluate(
 
         # B4 -- above the PRIOR 55-session high.
         if window.breakout_high is None or price <= window.breakout_high:
-            reject(symbol, SKIP_NO_BREAKOUT, "breakout")
+            reject(
+                symbol, SKIP_NO_BREAKOUT, "breakout",
+                **_measured(quote, window, price),
+            )
             continue
         counts["breakout"] += 1
 
@@ -495,11 +546,16 @@ def evaluate(
             or window.average_volume <= 0
             or quote.session_volume is None
         ):
-            reject(symbol, SKIP_VOLUME, "volume")
+            reject(
+                symbol, SKIP_VOLUME, "volume", **_measured(quote, window, price)
+            )
             continue
         vol_ratio = float(quote.session_volume) / float(window.average_volume)
         if vol_ratio < parameters.volume_multiple:
-            reject(symbol, SKIP_VOLUME, "volume")
+            reject(
+                symbol, SKIP_VOLUME, "volume",
+                **_measured(quote, window, price, vol_ratio=vol_ratio),
+            )
             continue
         counts["volume"] += 1
 
@@ -508,7 +564,10 @@ def evaluate(
             price, float(quote.session_low), float(quote.session_high)
         )
         if clv is None or clv <= parameters.close_location_minimum:
-            reject(symbol, SKIP_CLOSE_WEAK, "close_strength")
+            reject(
+                symbol, SKIP_CLOSE_WEAK, "close_strength",
+                **_measured(quote, window, price, vol_ratio=vol_ratio, clv=clv),
+            )
             continue
         counts["close_strength"] += 1
 
@@ -516,16 +575,24 @@ def evaluate(
         # today's unfinished close.
         sma = window.sma_with(price if substitute_price_in_sma else None)
         if sma is None or price <= sma:
-            reject(symbol, SKIP_BELOW_SMA, "trend")
+            reject(
+                symbol, SKIP_BELOW_SMA, "trend",
+                **_measured(
+                    quote, window, price, vol_ratio=vol_ratio, clv=clv, sma=sma
+                ),
+            )
             continue
         counts["trend"] += 1
 
         # B8 -- six-month momentum. Undefined is not a pass.
+        deepest = _measured(
+            quote, window, price, vol_ratio=vol_ratio, clv=clv, sma=sma
+        )
         if window.momentum is None:
-            reject(symbol, SKIP_NO_MOMENTUM, "momentum")
+            reject(symbol, SKIP_NO_MOMENTUM, "momentum", **deepest)
             continue
         if window.momentum <= parameters.momentum_floor:
-            reject(symbol, SKIP_MOMENTUM, "momentum")
+            reject(symbol, SKIP_MOMENTUM, "momentum", **deepest)
             continue
         counts["momentum"] += 1
 

@@ -27,13 +27,24 @@ class OrderRepository(BaseRepository[Order]):
         return result.scalar_one_or_none()
 
     async def list_open_orders(self) -> List[Order]:
-        """Orders still eligible to fill. The matcher polls these."""
+        """Orders still eligible to fill. The matcher polls these.
+
+        `completed_at IS NULL` is what makes the name true. A MARKET order
+        that half-filled against a thin book is left in PARTIALLY_FILLED and
+        stamped `completed_at` -- it is finished, there being no price for it
+        to rest at (`order_service._finalise`, `terminal_when_incomplete`).
+        Selecting on status alone returned it to the matcher every 250 ms
+        forever, where it was silently dropped for not being a LIMIT order:
+        harmless, but it made this method's own docstring false and invited
+        the reader to think the remainder might still fill.
+        """
         result = await self.session.execute(
             select(Order)
             .where(
                 Order.status.in_(
                     [OrderStatus.OPEN.value, OrderStatus.PARTIALLY_FILLED.value]
-                )
+                ),
+                Order.completed_at.is_(None),
             )
             .order_by(Order.placed_at.asc())
         )
