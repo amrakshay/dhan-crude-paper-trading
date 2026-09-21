@@ -12,7 +12,7 @@ def main() -> None:
     logger = get_logger("server")
 
     host = config_utils.get_property_value("server.host", "0.0.0.0")
-    port = config_utils.get_property_value_int("server.port", 8000)
+    port = config_utils.get_property_value_int("server.port", 24601)
     workers = config_utils.get_property_value_int("server.uvicorn_workers", 1)
 
     if workers != 1:

@@ -11,7 +11,19 @@
 
 server:
   host: "0.0.0.0"
-  port: 8000
+
+  # NOT 8000, AND THAT IS THE POINT. On 2026-09-21 an unrelated process took
+  # :8000 and shut this one down mid-session -- 8000 is the default for so
+  # many frameworks that sharing a machine with any of them is a coin toss,
+  # and the failure is silent until something that had to run did not.
+  #
+  # 24601 is unregistered in /etc/services, and it sits well below macOS's
+  # ephemeral range (`sysctl net.inet.ip.portrange.first` = 49152), so the
+  # kernel will never hand it to an outgoing socket and race the bind.
+  #
+  # Overridable with SERVER_PORT for a throwaway instance -- which is what a
+  # second copy for testing should use rather than taking this one's port.
+  port: "${SERVER_PORT:24601}"
   uvicorn_workers: 1          # MUST stay 1: the upstream feed is a single
                               # process-wide connection (see market_feed below).
   cors_origins:
@@ -21,11 +33,11 @@ server:
   # ---------------------------------------------------------------------
   # SINGLE-PORT MODE. When this directory holds a built frontend
   # (frontend/npm run build), the backend serves the UI as well as the API,
-  # so http://localhost:8000 is the whole application and no Node process is
+  # so http://localhost:24601 is the whole application and no Node process is
   # needed. Relative paths resolve against the backend directory.
   #
   # This is additive: the two-port dev setup (Vite on :5173 proxying /api and
-  # /ws to :8000) keeps working exactly as before and is still the
+  # /ws to :24601) keeps working exactly as before and is still the
   # development default. If the directory has no index.html, the app logs how
   # to build it and serves the API only -- it does not fail.
   #

@@ -124,7 +124,7 @@ cd backend
 .venv/bin/python -m pytest tests/test_no_secrets_in_logs.py -q  # no-secrets-in-logs suite
 LOG_LEVEL=DEBUG CONFIG_PATH=conf .venv/bin/python server.py # verbose run; logs/ is gitignored
 CONFIG_PATH=conf .venv/bin/alembic upgrade head            # migrate
-CONFIG_PATH=conf .venv/bin/python server.py                # serve on :8000
+CONFIG_PATH=conf .venv/bin/python server.py                # serve on :24601
 
 # daily bars (the swing rotation's inputs)
 CONFIG_PATH=conf .venv/bin/python scripts/import_daily_bars.py \
@@ -142,8 +142,8 @@ Login is `trader@abc.com` / `APP_ADMIN_PASSWORD`. `APP_USERNAME` /
 `APP_PASSWORD` were removed and authenticate nobody — see `backend/CLAUDE.md`
 §10 for the users module, its role gates and the seeded-admin guard rails.
 
-Two-port dev (Vite :5173 + backend :8000) is the default. `./run-single-port.sh`
-from the project root builds the frontend and serves UI + API from :8000 alone;
+Two-port dev (Vite :5173 + backend :24601) is the default. `./run-single-port.sh`
+from the project root builds the frontend and serves UI + API from :24601 alone;
 see `backend/CLAUDE.md` §9 for the route-ordering rules that make that safe.
 
 `server.py` forces `workers=1`. Do not "fix" that — see §4.

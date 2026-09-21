@@ -2,7 +2,7 @@
 #
 # Build the frontend, then serve the whole application from one port.
 #
-# http://localhost:8000 gives both the UI and the API -- no Node process left
+# http://localhost:24601 gives both the UI and the API -- no Node process left
 # running. For day-to-day development use two ports instead (`npm run dev` on
 # :5173 alongside `python server.py`), which keeps hot reload.
 #

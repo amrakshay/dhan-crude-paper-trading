@@ -61,7 +61,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 CONFIG_PATH=conf .venv/bin/alembic upgrade head
-CONFIG_PATH=conf .venv/bin/python server.py        # http://127.0.0.1:8000
+CONFIG_PATH=conf .venv/bin/python server.py        # http://127.0.0.1:24601
 ```
 
 **Frontend** (separate terminal)
@@ -515,7 +515,7 @@ Configuration lives under `chart_trading:` in `conf/default-config.yaml`
 ## Running it on one port
 
 By default the app runs on two ports in development: Vite on `:5173` for the UI,
-the backend on `:8000` for the API, with Vite proxying `/api` and `/ws` so the
+the backend on `:24601` for the API, with Vite proxying `/api` and `/ws` so the
 browser sees one origin. **That setup is unchanged and is still the development
 default** — it is what gives you hot reload.
 
@@ -534,12 +534,12 @@ cd frontend && npm run build
 cd ../backend && CONFIG_PATH=conf .venv/bin/python server.py
 ```
 
-Then <http://localhost:8000> serves both the UI and the API.
+Then <http://localhost:24601> serves both the UI and the API.
 
 | | Two-port (dev) | Single-port |
 |---|---|---|
-| UI | Vite `:5173` | FastAPI `:8000` |
-| API | `:8000` via the Vite proxy | `:8000` directly |
+| UI | Vite `:5173` | FastAPI `:24601` |
+| API | `:24601` via the Vite proxy | `:24601` directly |
 | Hot reload | yes | no — rebuild to see changes |
 | Node running | yes | no |
 
@@ -1745,7 +1745,7 @@ the label itself.
 Edit the file, then either restart or reload at runtime:
 
 ```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/charges/rates/reload
+curl -b cookies.txt -X POST http://127.0.0.1:24601/api/charges/rates/reload
 ```
 
 Orders record the `rates_version` they were charged under, so an old order can

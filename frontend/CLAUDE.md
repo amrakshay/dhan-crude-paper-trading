@@ -529,7 +529,7 @@ than anywhere except the health page.
   component.
 - Formatting goes through `src/utils/format.js` (`formatPrice`, `formatQty`,
   `formatCompact`, `formatAge`). Do not inline `toFixed` in JSX.
-- The Vite dev server proxies `/api` and `/ws` to `:8000` so the browser sees one
+- The Vite dev server proxies `/api` and `/ws` to `:24601` so the browser sees one
   origin — that is what makes the session cookie work on the WebSocket
   handshake. Keep relative URLs.
 - `npm run build` must pass before committing.

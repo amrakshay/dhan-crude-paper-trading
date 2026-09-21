@@ -438,7 +438,7 @@ a handler at a call site.
 ## 9. Serving the frontend (single-port mode)
 
 `src/static_serving.py` lets the backend serve `frontend/dist` so one port gives
-both UI and API. It is additive — two-port dev (Vite on :5173 proxying to :8000)
+both UI and API. It is additive — two-port dev (Vite on :5173 proxying to :24601)
 is unchanged and is still the development default.
 
 - **`mount_spa(app)` must be the last thing `main.py` does.** It registers a
