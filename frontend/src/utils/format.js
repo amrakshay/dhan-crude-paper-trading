@@ -58,6 +58,30 @@ export function formatTime(msOrIso) {
   });
 }
 
+/**
+ * A day and a time, rendered in IST whatever the browser's timezone is.
+ *
+ * `formatTime` renders in the BROWSER's zone, which is right for a live clock
+ * and wrong for a journal: this application speaks IST everywhere -- the
+ * schedule, the market hours, the session dates -- and a row reading 13:01
+ * beside a page that says 18:31 is the plausible-looking wrong number this
+ * project cares most about. The backend sends the offset (`+05:30`); this
+ * pins the rendering to match it.
+ */
+export function formatIstDateTime(iso, fallback = '—') {
+  if (!iso) return fallback;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 /** Absolute and percentage change of LTP against the previous close. */
 export function computeChange(row) {
   if (!row || row.ltp === null || row.ltp === undefined) return { absolute: null, percent: null };

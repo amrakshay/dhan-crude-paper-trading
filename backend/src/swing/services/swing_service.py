@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import json
 
+from src.core.time_utils import to_ist
 from src.logging_config import get_logger
 from src.strategies.services import market_clock
 from src.strategies.services.strategy_definition import StrategyDefinition
@@ -628,8 +629,23 @@ class SwingService:
             "runKind": row.run_kind,
             "status": row.status,
             "portfolioId": row.portfolio_id,
-            "startedAt": row.started_at.isoformat() if row.started_at else None,
-            "completedAt": row.completed_at.isoformat() if row.completed_at else None,
+            # WHEN THE RUN HAPPENED, which is not `sessionDate`. The session is
+            # the newest stored bar date -- the data the decision was computed
+            # FROM -- and the two are routinely different days: Dhan publishes
+            # a daily bar after the nightly's 18:15 slot, so a run on Monday
+            # evening decides Friday's session and the journal correctly says
+            # so. Without this on the row there is no way to tell a run that
+            # happened tonight from one that happened last week.
+            #
+            # `to_ist`, and the key says Ist, for the reason backend/CLAUDE.md
+            # section 10f-bis gives: these are stored naive UTC, and a naive
+            # ISO string is parsed by the browser as LOCAL, so the column would
+            # read five and a half hours early beside an IST clock showing the
+            # right time. That shipped once already on the health tab.
+            "startedAtIst": to_ist(row.started_at).isoformat() if row.started_at else None,
+            "completedAtIst": (
+                to_ist(row.completed_at).isoformat() if row.completed_at else None
+            ),
             "indexSymbol": row.index_symbol,
             "indexClose": _money(row.index_close),
             "indexSma": _money(row.index_sma),

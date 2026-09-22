@@ -295,6 +295,64 @@ async def test_every_timestamp_carries_its_offset(auth_client):
     assert abs((now - datetime.fromisoformat(stamp)).total_seconds()) < 120
 
 
+async def test_the_journal_says_when_a_run_HAPPENED_not_only_what_it_decided(
+    auth_client, db_session
+):
+    """`sessionDate` and the run's own clock are different facts.
+
+    The session is the newest stored bar date -- the data a decision was
+    computed FROM. WHEN the run happened is not derivable from it and is
+    routinely a different day: Dhan publishes a daily bar after the nightly's
+    18:15 slot, so a run on Monday evening decides Friday's session and says
+    so. Read without a timestamp the journal looks stale when it is being
+    accurate, which is what prompted this.
+
+    Carries the offset for the same reason
+    `test_every_timestamp_carries_its_offset` does one endpoint over: stored
+    naive UTC rendered by a browser as local time reads five and a half hours
+    early. That guarantee had never covered this endpoint.
+    """
+    from datetime import date, datetime
+
+    from src.core.time_utils import to_ist, utc_now
+    from src.swing.database.db_operations.swing_session_repository import (
+        SwingSessionRepository,
+    )
+
+    ran_at = utc_now()
+    await SwingSessionRepository(db_session).create(
+        strategy_key=STRATEGY,
+        portfolio_id=1,
+        # A session THREE DAYS before the run, which is the real shape.
+        session_date=date(2026, 9, 18),
+        run_kind="NIGHTLY",
+        status="COMPLETED",
+        started_at=ran_at,
+        completed_at=ran_at,
+        created_at=ran_at,
+        updated_at=ran_at,
+    )
+    await db_session.commit()
+
+    body = (await auth_client.get(f"/api/swing/history?strategyKey={STRATEGY}")).json()
+    row = next(one for one in body["sessions"] if one["sessionDate"] == "2026-09-18")
+
+    assert row["startedAtIst"].endswith("+05:30"), row["startedAtIst"]
+    assert row["completedAtIst"].endswith("+05:30"), row["completedAtIst"]
+
+    # The instant, not merely the format: an offset bolted onto a naive UTC
+    # value would pass the assertion above and still be wrong by 5h30.
+    reported = datetime.fromisoformat(row["startedAtIst"])
+    assert abs((reported - to_ist(ran_at)).total_seconds()) < 5
+
+    # And it is NOT the session date, which is the whole point of the column.
+    assert reported.date() != date(2026, 9, 18)
+
+    # Naive UTC must not leave the endpoint under the old key either.
+    assert "startedAt" not in row
+    assert "completedAt" not in row
+
+
 async def test_the_problems_list_is_filtered_to_this_strategys_loggers(auth_client):
     """A component's own warnings, picked by LOGGER NAME rather than by text.
 

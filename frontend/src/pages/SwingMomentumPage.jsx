@@ -37,7 +37,12 @@ import JobProgress from '../components/JobProgress';
 import SwingExplainer from '../components/SwingExplainer';
 import { useAuth } from '../auth/AuthContext';
 import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
-import { formatCountdownLong, formatPrice, formatQty } from '../utils/format';
+import {
+  formatCountdownLong,
+  formatIstDateTime,
+  formatPrice,
+  formatQty,
+} from '../utils/format';
 
 const STRATEGY = 'nse-swing-momentum';
 
@@ -811,6 +816,14 @@ function SessionRow({ session, onOpen, open, detail }) {
     <>
       <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => onOpen(session.id)}>
         <TableCell>{session.sessionDate}</TableCell>
+        {/* WHEN IT RAN, which is routinely a different day from the session it
+            decided -- Dhan publishes a daily bar after the nightly's slot, so
+            a Monday evening run decides Friday's session. Without this column
+            the two are indistinguishable and the journal looks wrong when it
+            is being accurate. */}
+        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+          {formatIstDateTime(session.startedAtIst)}
+        </TableCell>
         <TableCell>{RUN_LABELS[session.runKind] ?? session.runKind}</TableCell>
         <TableCell>{session.status}</TableCell>
         <TableCell align="right" className="numeric">
@@ -845,7 +858,7 @@ function SessionRow({ session, onOpen, open, detail }) {
         </TableCell>
       </TableRow>
       <TableRow>
-        <TableCell colSpan={8} sx={{ py: 0, border: 0 }}>
+        <TableCell colSpan={9} sx={{ py: 0, border: 0 }}>
           <Collapse in={open} unmountOnExit>
             <Box sx={{ py: 1.5 }}>
               {!detail ? (
@@ -1299,6 +1312,7 @@ export default function SwingMomentumPage() {
             <TableHead>
               <TableRow>
                 <TableCell>Session</TableCell>
+                <TableCell>Ran at</TableCell>
                 <TableCell>Run</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell align="right">Gate</TableCell>
@@ -1320,7 +1334,7 @@ export default function SwingMomentumPage() {
               ))}
               {!history?.sessions?.length ? (
                 <TableRow>
-                  <TableCell colSpan={8}>
+                  <TableCell colSpan={9}>
                     <Typography variant="body2" color="text.disabled">
                       Nothing recorded yet. The nightly run writes a record every
                       session, including the sessions where it decides to do
