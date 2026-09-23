@@ -37,9 +37,30 @@ Request/response per https://dhanhq.co/docs/v2/authentication/, read
                "givenPowerOfAttorney": bool, "accessToken": str,
                "expiryTime": "YYYY-MM-DDTHH:MM:SS"}
 
+**WHAT THE LIVE API ACTUALLY RETURNS IS NOT THAT.** Measured 2026-09-23,
+three times, on three separate Dhan Web tokens:
+
+    {"createTime": "2026-09-23T12:57:50.555",
+     "expiryTime": "2026-09-24T12:57:50.553",
+     "token": "<327-character JWT>"}
+
+One field name in common. The new credential arrives as `token`, not
+`accessToken`, and `expiryTime` is 24 hours from the CALL rather than from
+the original token's issue -- so renewing early wastes no validity.
+
+`renew()` reads either key. Note the header too: this endpoint wants
+`dhanClientId`, while every market-data endpoint wants `client-id`; sending
+the market-data header here returns DH-905 "Missing required header:
+dhanClientId", which is the same code it uses for bad parameters.
+
 Documented limits: it renews only a token that is still ACTIVE -- renewing an
 expired one is an error -- and only tokens generated from Dhan Web. Both are
 reported rather than worked around.
+
+**THE CALL ROTATES THE CREDENTIAL WHETHER OR NOT THE CALLER USES THE
+RESULT.** The old token is refused (DH-906) within seconds. There is no
+dry run, and a caller that discards the response has ended its own session --
+which is exactly what this module did until 2026-09-23.
 """
 import time
 from typing import Any, Dict, Optional
@@ -212,27 +233,44 @@ class DhanTokenClient:
             self.last_error = "Dhan returned a body that is not JSON"
             raise TokenRenewalError("Dhan returned a body that is not JSON") from error
 
-        token = (payload or {}).get("accessToken")
+        # `token` OR `accessToken`, AND THAT COST A WEEK. The documentation
+        # says the new credential comes back as `accessToken`; the live API
+        # returns it as `token`, in a body of {createTime, expiryTime, token}
+        # that shares one field name with the documented shape.
+        #
+        # Reading only `accessToken` made every renewal look like a refusal --
+        # while the call had ALREADY rotated the credential, so the old token
+        # was correctly dead a second later. That produced a daily "the token
+        # expired, replace it by hand", and a theory (twice written down here)
+        # that tokens generated under an application did not qualify. Neither
+        # was true. Proven 2026-09-23: a renewal returned `token`, the old
+        # token then failed with DH-906, and the RETURNED value authenticated
+        # against /charts/historical on the next call -- HTTP 200.
+        #
+        # Both keys are read because the documented one may start working, and
+        # a client that only understood the undocumented one would break on
+        # the day they fix it.
+        payload = payload or {}
+        token = payload.get("accessToken") or payload.get("token")
         if not token:
             self.failures += 1
-            keys = ", ".join(sorted((payload or {}).keys())) or "nothing"
-            self.last_error = f"Dhan returned no accessToken (keys: {keys})"
+            keys = ", ".join(sorted(payload.keys())) or "nothing"
+            self.last_error = f"Dhan returned no token (keys: {keys})"
             # REFUSED, not "try later". A 200 carrying no token will not start
             # carrying one on the next attempt, and classifying it as transient
             # is the same mistake the 400 made on 2026-09-19 -- it retries
-            # until the token dies and nobody is told in time. Observed for
-            # real against a live, working token on 2026-09-19: one 200 with no
-            # accessToken, then DH-906 "Invalid Token" on every call after,
-            # while the same token went on serving market data perfectly.
+            # until the token dies and nobody is told in time.
+            #
+            # THIS PATH IS NOW GENUINELY UNEXPECTED. It no longer means "this
+            # kind of token cannot be renewed"; it means the response carried
+            # neither key, which would be a shape nobody here has seen. Say
+            # exactly that rather than repeating a diagnosis that was wrong.
             raise TokenRenewalRefused(
-                f"Dhan accepted the renewal request but returned no access "
-                f"token (the response carried: {keys}). Dhan documents "
-                f"RenewToken as working only for tokens generated from Dhan "
-                f"Web -- a token created under an APPLICATION on the "
-                f"\"Generate Access Token / API Key\" screen appears not to "
-                f"qualify, even though it authenticates for market data. "
-                f"Renewal cannot recover this; the token has to be replaced by "
-                f"hand before it expires."
+                f"Dhan accepted the renewal request but returned neither an "
+                f"'accessToken' nor a 'token' field (the response carried: "
+                f"{keys}). The renewal has almost certainly rotated the "
+                f"credential anyway, so the token now held is probably dead "
+                f"and has to be replaced by hand."
             )
 
         self.renewals += 1

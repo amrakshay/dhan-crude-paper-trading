@@ -506,6 +506,24 @@ status code, and reports `needsHuman` so the alert goes out while there is still
 time to act. The monitor remembers which token was refused and resumes the
 moment a different one is stored.
 
+**And on 2026-09-23 the renewal turned out to have been WORKING all along.**
+Dhan returns the new credential as `token`; this client read only
+`accessToken`, found nothing, threw the replacement away and reported a
+refusal — while the call had already rotated the credential, so the token
+still held was correctly dead a second later. A week of "the token expired
+again", and a theory written into this file that application-generated tokens
+did not qualify, were both that one field name. Proven on three separate Dhan
+Web tokens: the value returned under `token` authenticated against
+`/charts/historical` on the very next call. `renew()` now reads either key.
+
+Two things follow. **The call rotates the credential whether or not the caller
+uses the result** — there is no dry run, and anything that calls it must
+persist what comes back or it has ended its own session. And the lesson is not
+about Dhan's documentation: a diagnosis that explains every symptom is not the
+same as one that has been tested. This one was written down confidently, twice,
+and survived for days because nobody tried the 327-character JWT sitting in the
+response body.
+
 **The Dhan access token is encrypted at rest and never leaves the server.**
 Responses carry a mask and decoded JWT metadata only. If you add a settings
 field, decide explicitly whether it is a secret; secrets go in

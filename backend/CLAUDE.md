@@ -297,6 +297,28 @@ by-expiry / by-strike slices and the equity curve possible at all.
   rather than taking one as an argument, so no caller has to hold a token to
   use it. Its failure modes are two types, not one: `TokenExpiredError` means
   stop and tell a person, `TokenRenewalError` means try again later.
+- **THE NEW TOKEN COMES BACK AS `token`, NOT `accessToken`, AND THAT COST A
+  WEEK.** Dhan's documentation describes the renewal response as carrying
+  `accessToken`; the live API returns `{createTime, expiryTime, token}`, which
+  shares one field name with the documented shape. Reading only `accessToken`
+  made every renewal look like a refusal -- while the call had ALREADY rotated
+  the credential, so the old token was correctly dead a second later. That
+  produced a daily "replace the token by hand", and a written-down theory that
+  application-generated tokens did not qualify. Neither was true. Proven
+  2026-09-23 on three separate Dhan Web tokens: the renewal returned `token`,
+  the old token then failed DH-906, and the RETURNED value authenticated
+  against `/charts/historical` on the next call. `renew()` reads either key,
+  because the documented one may start working and a client that understood
+  only the undocumented one would break that day.
+- **The call ROTATES the credential whether or not the caller uses the
+  result**, so there is no dry run and a caller that discards the response has
+  ended its own session. Anything that calls `renew()` must persist what comes
+  back.
+- **The renewal endpoint wants a different header from every other one.**
+  `dhanClientId` here; `client-id` on all the market-data endpoints. Sending
+  the market-data header returns DH-905 "Missing required header:
+  dhanClientId" -- the same code Dhan uses for bad parameters, so it reads as
+  a token fault rather than a header fault.
 - **A renewal handles two secrets at once**, which nothing else here does — the
   old token goes out and a new one comes back. Neither is ever logged, and an
   httpx exception's MESSAGE is deliberately not interpolated into the log or

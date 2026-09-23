@@ -474,3 +474,101 @@ async def test_a_200_carrying_no_token_is_a_refusal_not_a_retry(monkeypatch):
     assert "dhanClientId" in str(caught.value)
     assert "status" in str(caught.value)
     assert "replaced by hand" in str(caught.value)
+
+
+async def test_the_new_token_arrives_as_token_not_accessToken(monkeypatch):
+    """The live API contradicts its own documentation, and it cost a week.
+
+    Dhan documents the renewal response as carrying `accessToken`. Measured
+    2026-09-23, three times, on three separate Dhan Web tokens, what actually
+    comes back is:
+
+        {"createTime": ..., "expiryTime": ..., "token": "<327-char JWT>"}
+
+    Reading only `accessToken` made every renewal look like a refusal -- while
+    the call had ALREADY rotated the credential, so the old token was dead a
+    second later. That produced a daily hand-replacement and a written-down
+    theory that application-generated tokens did not qualify. Neither was
+    true: the returned `token` authenticated against /charts/historical on the
+    next call.
+
+    Both keys are read, because the documented one may start working and a
+    client that only understood the undocumented one would break that day.
+    """
+    from src.market.services import dhan_token_client
+
+    class _LiveShape:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, **kwargs):
+            class _Ok:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {
+                        "createTime": "2026-09-23T12:57:50.555",
+                        "expiryTime": "2026-09-24T12:57:50.553",
+                        "token": "the-renewed-token",
+                    }
+
+            return _Ok()
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _LiveShape)
+    client = dhan_token_client.DhanTokenClient()
+    _patch_credentials(monkeypatch)
+
+    payload = await client.renew()
+
+    assert (payload.get("accessToken") or payload.get("token")) == "the-renewed-token"
+    assert client.renewals == 1
+    assert client.last_error is None
+
+
+async def test_a_body_with_neither_key_is_still_refused(monkeypatch):
+    """Widening the read must not turn "no token at all" into a success.
+
+    The refusal path stays, and its message no longer blames how the token was
+    generated -- that diagnosis was wrong. It says the credential has probably
+    been rotated anyway, which is the part that matters to whoever reads it.
+    """
+    from src.market.services import dhan_token_client
+
+    class _Empty:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, **kwargs):
+            class _Ok:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"createTime": "x", "expiryTime": "y"}
+
+            return _Ok()
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _Empty)
+    client = dhan_token_client.DhanTokenClient()
+    _patch_credentials(monkeypatch)
+
+    with pytest.raises(dhan_token_client.TokenRenewalRefused) as refused:
+        await client.renew()
+
+    message = str(refused.value)
+    assert "accessToken" in message and "token" in message
+    assert "rotated" in message
+    assert "Dhan Web" not in message, "the old, wrong diagnosis must not return"
