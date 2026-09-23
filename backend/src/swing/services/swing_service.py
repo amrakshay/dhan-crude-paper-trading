@@ -31,6 +31,7 @@ from src.strategies.services import market_clock
 from src.strategies.services.strategy_definition import StrategyDefinition
 from src.swing.database.db_models.swing_session_model import (
     RUN_NIGHTLY,
+    STATUS_COMPLETED,
     RUN_REBALANCE,
 )
 from src.swing.database.db_models.swing_stop_model import (
@@ -491,7 +492,28 @@ class SwingService:
             portfolio_id=portfolio_id,
         )
         balances = self._balances()
-        latest = await self.sessions.latest(self.definition.key, RUN_NIGHTLY)
+        # THE NEWEST RANKING, WHICHEVER RUN PRODUCED IT -- not the newest
+        # NIGHTLY. Both run kinds rank the same universe with the same code and
+        # both store `top` plus every held name's own rank
+        # (`_ranking_payload`), so neither is more authoritative; the nightly is
+        # simply the one that usually runs last.
+        #
+        # Reading the nightly alone pinned this column to a broken run. On
+        # 2026-09-23 the 08:49 nightly ranked against a universe where 371 of
+        # 500 symbols had failed to download, recording five of six holdings as
+        # unranked. The bars were gap-filled and the 09:16 rebalance ranked all
+        # six correctly -- 1, 2, 3, 4, 8, 12 -- but that is a REBALANCE row, so
+        # the book went on showing "unranked" against a tooltip reading "a
+        # rotation exit is due". No exit was due; the rebalance had already
+        # looked and held all six. The display asserted a liquidation that the
+        # trading had declined to make.
+        #
+        # COMPLETED only: a run that refused on stale bars stamps a SKIPPED row
+        # carrying no ranking, and falling back to it would replace a stale
+        # answer with no answer.
+        latest = await self.sessions.latest(
+            self.definition.key, statuses=[STATUS_COMPLETED]
+        )
         ranks = self._ranks_from(latest)
 
         rows: List[Dict[str, Any]] = []
@@ -548,6 +570,17 @@ class SwingService:
             "unmarkedPositions": unmarked,
             "rankedAsOf": (
                 latest.session_date.isoformat() if latest is not None else None
+            ),
+            # WHICH RUN produced those ranks, and when it happened. A rank is
+            # only as good as the run behind it, and "unranked" from a refresh
+            # that failed most of its universe is not the same claim as
+            # "unranked" from a clean one -- the page asserted a rotation exit
+            # on the strength of the first.
+            "rankedBy": latest.run_kind if latest is not None else None,
+            "rankedRunAtIst": (
+                to_ist(latest.started_at).isoformat()
+                if latest is not None and latest.started_at
+                else None
             ),
         }
 

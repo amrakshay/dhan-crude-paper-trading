@@ -166,3 +166,121 @@ def test_the_floor_is_crossed_not_approached(parameters):
     planner = RebalancePlanner(parameters, STRATEGY)
     assert planner.plan_sells(exactly, [_Holding("HELD")]).sells, "at the floor, act"
     assert not planner.plan_sells(just_under, [_Holding("HELD")]).sells, "below it, hold"
+
+
+# --- and what the page reads --------------------------------------------------
+
+
+async def test_the_book_ranks_from_the_NEWEST_run_not_the_newest_nightly(
+    db_session, monkeypatch
+):
+    """A broken nightly must not pin the Rank column all day.
+
+    2026-09-23: the 08:49 nightly ranked against a universe where 371 of 500
+    symbols had failed to download and recorded five of six holdings as
+    unranked. The bars were gap-filled, and the 09:16 REBALANCE ranked all six
+    correctly -- 1, 2, 3, 4, 8, 12. The book read `latest(RUN_NIGHTLY)`, so it
+    went on showing "unranked" beside a tooltip reading "a rotation exit is
+    due", asserting a liquidation the trading had already declined to make.
+
+    Both run kinds rank the same universe with the same code and both store
+    every held name's own rank, so the newest is simply the newest.
+    """
+    import json
+
+    from src.swing.database.db_models.swing_session_model import (
+        RUN_NIGHTLY,
+        RUN_REBALANCE,
+        STATUS_COMPLETED,
+    )
+    from src.swing.database.db_operations.swing_session_repository import (
+        SwingSessionRepository,
+    )
+    from src.core.time_utils import utc_now
+    from src.swing.services.swing_service import SwingService
+
+    sessions = SwingSessionRepository(db_session)
+    common = dict(
+        strategy_key=STRATEGY,
+        portfolio_id=1,
+        session_date=date(2026, 9, 22),
+        status=STATUS_COMPLETED,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+
+    # The broken nightly: WELCORP ranked, the rest absent.
+    await sessions.create(
+        run_kind=RUN_NIGHTLY,
+        started_at=utc_now(),
+        completed_at=utc_now(),
+        ranking_json=json.dumps({
+            "top": [{"symbol": "WELCORP", "rank": 1}],
+            "held": [{"symbol": "HFCL", "rank": None, "ranked": False}],
+        }),
+        **common,
+    )
+    # The rebalance, after the gap-fill: both ranked.
+    await sessions.create(
+        run_kind=RUN_REBALANCE,
+        started_at=utc_now(),
+        completed_at=utc_now(),
+        ranking_json=json.dumps({
+            "top": [{"symbol": "HFCL", "rank": 1}, {"symbol": "WELCORP", "rank": 2}],
+            "held": [],
+        }),
+        **common,
+    )
+    await db_session.commit()
+
+    service = SwingService.for_strategy(db_session, STRATEGY)
+    latest = await service.sessions.latest(STRATEGY, statuses=[STATUS_COMPLETED])
+    ranks = service._ranks_from(latest)  # noqa: SLF001
+
+    assert latest.run_kind == RUN_REBALANCE, "the newest ranking, whichever run"
+    assert ranks["HFCL"] == 1, "the gap-filled rebalance ranked it; the page must say so"
+    assert ranks["WELCORP"] == 2
+
+
+async def test_a_SKIPPED_run_does_not_replace_a_real_ranking(db_session):
+    """A refusal carries no ranking; falling back to it would show nothing.
+
+    A rebalance that refuses on stale bars stamps a SKIPPED row. Preferring the
+    newest row regardless of status would swap a stale answer for no answer.
+    """
+    import json
+
+    from src.swing.database.db_models.swing_session_model import (
+        RUN_NIGHTLY,
+        RUN_REBALANCE,
+        STATUS_COMPLETED,
+        STATUS_SKIPPED,
+    )
+    from src.swing.database.db_operations.swing_session_repository import (
+        SwingSessionRepository,
+    )
+    from src.core.time_utils import utc_now
+    from src.swing.services.swing_service import SwingService
+
+    sessions = SwingSessionRepository(db_session)
+    common = dict(
+        strategy_key=STRATEGY, portfolio_id=1, session_date=date(2026, 9, 22),
+        created_at=utc_now(), updated_at=utc_now(),
+    )
+    await sessions.create(
+        run_kind=RUN_NIGHTLY, status=STATUS_COMPLETED, started_at=utc_now(),
+        completed_at=utc_now(),
+        ranking_json=json.dumps({"top": [{"symbol": "HFCL", "rank": 3}], "held": []}),
+        **common,
+    )
+    await sessions.create(
+        run_kind=RUN_REBALANCE, status=STATUS_SKIPPED, started_at=utc_now(),
+        completed_at=utc_now(), ranking_json=None, **common,
+    )
+    await db_session.commit()
+
+    service = SwingService.for_strategy(db_session, STRATEGY)
+    latest = await service.sessions.latest(STRATEGY, statuses=[STATUS_COMPLETED])
+
+    assert latest.run_kind == RUN_NIGHTLY
+    assert service._ranks_from(latest)["HFCL"] == 3  # noqa: SLF001
