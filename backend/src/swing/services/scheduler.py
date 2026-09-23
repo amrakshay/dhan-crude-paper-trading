@@ -133,6 +133,19 @@ class SwingScheduler:
             "swing.missed_run_lookback_sessions", 10
         )
 
+    @staticmethod
+    def _tolerated_failure_fraction() -> float:
+        """How much of a refresh may fail and still count as DONE.
+
+        A property of this process, not of the rule, so it sits here rather
+        than in the strategy YAML. The default of 2% is roughly ten symbols in
+        five hundred: comfortably above the one or two that fail on an ordinary
+        day, and far below anything that would leave the book undecidable.
+        """
+        return config_utils.get_property_value_float(
+            "swing.tolerated_refresh_failure_fraction", 0.02
+        )
+
     # --- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -583,12 +596,45 @@ class SwingScheduler:
                     DailyBarRepository(session), InstrumentRepository(session)
                 ).refresh_strategy(definition, on_progress=self._set_progress)
                 await session.commit()
-            return (
-                f"Bars: {len(result.refreshed)} refreshed, {len(result.failed)} "
+
+            failed = len(result.failed)
+            considered = len(result.symbols)
+            detail = (
+                f"Bars: {len(result.refreshed)} refreshed, {failed} "
                 f"failed, {sum(one.inserted for one in result.symbols)} inserted "
-                f"in {result.duration_seconds:.0f}s.",
-                True,
+                f"in {result.duration_seconds:.0f}s."
             )
+
+            # DONE MEANS THE UNIVERSE IS CURRENT, NOT MERELY THAT NOTHING
+            # RAISED. This returned True for any run that completed, so on
+            # 2026-09-23 a refresh against an expired token reported "129
+            # refreshed, 371 failed", marked the nightly done for the day, and
+            # declined to retry once the credential was fixed. The universe was
+            # left a quarter updated with the regime index among the quarter --
+            # which advances the session date while most of the book has no bar
+            # on it, and `plan_sells` came within fourteen minutes of reading
+            # that as five rotation exits.
+            #
+            # A proportion rather than "any failure": one or two names failing
+            # is the ordinary state of this job (a delisting, a moved security
+            # id) and retrying five hundred symbols for those would recreate
+            # the every-fifteen-minutes pull this guard exists to prevent.
+            tolerated = self._tolerated_failure_fraction()
+            ok = considered == 0 or failed <= considered * tolerated
+            if not ok:
+                detail += (
+                    f" NOT marked done: {failed} of {considered} symbols failed, "
+                    f"above the {tolerated:.0%} tolerated, so the universe is "
+                    f"not current and this will be retried."
+                )
+                logger.warning(
+                    "Daily bar refresh for %s failed %s of %s symbols, above the "
+                    "%.0f%% tolerated. The nightly is NOT marked done and will "
+                    "retry, because a partly-refreshed universe advances the "
+                    "session date while most of the book has no bar on it.",
+                    definition.key, failed, considered, tolerated * 100,
+                )
+            return detail, ok
         except DailyBarRefreshError as error:
             logger.error(
                 "Nightly bar refresh for %s could not run: %s. The decision below "

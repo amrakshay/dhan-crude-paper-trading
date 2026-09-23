@@ -44,13 +44,38 @@ from src.swing.database.db_models.swing_session_model import (
     ACTION_SKIPPED,
 )
 from src.swing.services.journal_service import Decision
-from src.swing.services.ranking_service import RankingSnapshot
+from src.swing.services.ranking_service import (
+    SKIP_NO_BAR,
+    SKIP_NOT_TRADED,
+    RankingSnapshot,
+)
 from src.swing.services.swing_parameters import SwingParameters
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.swing.services.gate_policy import GatePolicy
 
 logger = get_logger("swing.rebalance")
+
+# The two skip reasons that mean "this name contributed no data to this
+# session", as against the filters, which mean "it was measured and refused".
+# A rotation exit may be inferred from the second and, when the session is
+# poorly covered, not from the first -- see `plan_sells`.
+DATA_ABSENT_REASONS = (SKIP_NO_BAR, SKIP_NOT_TRADED)
+
+# How much of the universe must have a bar on the session before absence is
+# allowed to mean anything. Below this, a holding that did not trade is read as
+# a data gap rather than a rotation exit.
+#
+# A CONSTANT, not a YAML key and not a config property, on purpose. It is not
+# one of the rule's parameters -- P1-P19 decide what is traded and live in the
+# strategy file where they can be checked against the specification's own table
+# (root CLAUDE.md section 7). This decides whether the data is trustworthy
+# enough to act on at all, which is a property of this code. Nor is it a knob
+# worth tuning: 0.90 is far above any real session, where absence runs at one
+# or two names out of five hundred, and far below the 26% seen on 2026-09-23
+# when the download failed. Anything in between is not a judgement call, it is
+# a broken refresh.
+MINIMUM_SESSION_COVERAGE = 0.90
 
 MONEY = Decimal("0.01")
 ZERO = Decimal("0")
@@ -277,6 +302,11 @@ class SellPlan:
     # still goes through the rotation exit below, so a name can be here and in
     # `sells` at once.
     exempt: List[str] = field(default_factory=list)
+    # True when at least one holding was kept only because the session was too
+    # thinly covered to read absence as an exit. The caller REPORTS this: a
+    # rebalance that silently declined to act on its own rule is exactly the
+    # kind of quiet divergence this journal exists to make visible.
+    data_gap: bool = False
 
     @property
     def symbols(self) -> List[str]:
@@ -359,6 +389,52 @@ class RebalancePlanner:
                 plan.exempt.append(holding.symbol)
 
             if rank is None:
+                why = snapshot.skipped.get(holding.symbol, "failed a filter")
+
+                # A MISSING BAR IS NOT A SELL SIGNAL, and on 2026-09-23 the two
+                # were indistinguishable here. The nightly ran against an
+                # expired Dhan token, 371 of 500 symbols failed to refresh, and
+                # five of six holdings were left without a bar on the session.
+                # Unranked for that reason reads exactly like unranked for
+                # falling out of the top 15, so the rebalance was ~14 minutes
+                # from liquidating a book worth Rs 4.4 lakh because a
+                # credential had lapsed.
+                #
+                # Telling them apart needs one more fact than the symbol's own
+                # skip reason, because a genuinely delisted name is ALSO
+                # "did not trade on this session" -- that is JBCHEPHARM, and
+                # selling it is right. The fact is how much of the UNIVERSE is
+                # in the same state: one name absent is a delisting, four
+                # hundred absent is a broken download. Coverage below the floor
+                # means no exit can be inferred from absence at all.
+                #
+                # The asymmetry decides the default. Holding a name a session
+                # too long costs one session of exposure and the position still
+                # has its chandelier stop under it; selling one that should
+                # have been held costs the position, the round trip's charges
+                # and the re-entry, and is irreversible.
+                coverage = snapshot.session_coverage
+                floor = MINIMUM_SESSION_COVERAGE
+                if why in DATA_ABSENT_REASONS and coverage is not None and coverage < floor:
+                    plan.holds.append(
+                        Decision(
+                            symbol=holding.symbol,
+                            action=ACTION_HELD,
+                            rank=None,
+                            quantity=holding.quantity,
+                            reason=(
+                                f"Held despite being unranked: {holding.symbol} "
+                                f"has no bar on this session ({why}), and only "
+                                f"{coverage:.1%} of the universe does -- below "
+                                f"the {floor:.0%} floor. That is a data gap, "
+                                f"not a rotation signal, so no exit is inferred "
+                                f"from it. The trailing stop still applies."
+                            ),
+                        )
+                    )
+                    plan.data_gap = True
+                    continue
+
                 plan.sells.append(
                     SellIntent(
                         symbol=holding.symbol,
@@ -366,10 +442,7 @@ class RebalancePlanner:
                         quantity=holding.quantity,
                         kind=EXIT_ROTATION,
                         rank=None,
-                        reason=(
-                            f"Rotation exit: {holding.symbol} is no longer ranked "
-                            f"({snapshot.skipped.get(holding.symbol, 'failed a filter')})."
-                        ),
+                        reason=f"Rotation exit: {holding.symbol} is no longer ranked ({why}).",
                     )
                 )
                 continue

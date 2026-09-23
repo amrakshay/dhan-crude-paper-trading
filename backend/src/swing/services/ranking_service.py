@@ -176,6 +176,31 @@ class RankingSnapshot:
                 return candidate.rank
         return None
 
+    @property
+    def absent_from_session(self) -> int:
+        """How many symbols have no bar ON the session being decided.
+
+        Not `symbols_with_bars`, which counts a symbol with ANY stored history
+        -- including one whose newest bar is a week old. This counts the two
+        reasons that mean "this name contributed nothing to today": no stored
+        bars at all, and a newest bar that predates the session.
+        """
+        return sum(
+            1 for reason in self.skipped.values()
+            if reason in (SKIP_NO_BAR, SKIP_NOT_TRADED)
+        )
+
+    @property
+    def session_coverage(self) -> Optional[float]:
+        """The fraction of the universe that actually traded on this session.
+
+        `None` when the universe size is unknown, which is not 0.0 -- see the
+        `undefined is not zero` rule in `backend/CLAUDE.md` section 10e.
+        """
+        if not self.universe_size:
+            return None
+        return (self.universe_size - self.absent_from_session) / self.universe_size
+
     def as_dict(self, top: Optional[int] = 15) -> Dict[str, Any]:
         shown = self.candidates if top is None else self.candidates[:top]
         return {
