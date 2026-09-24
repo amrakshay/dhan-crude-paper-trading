@@ -282,6 +282,19 @@ class DhanTokenClient:
             "valid until %s",
             elapsed_ms, len(token), payload.get("expiryTime") or "an unstated time",
         )
+
+        # NORMALISED BEFORE IT LEAVES THIS MODULE, so no caller has to know
+        # which key Dhan used. Reading either key HERE and leaving the payload
+        # as it arrived fixed half the problem and broke the other half: on
+        # 2026-09-24 the renewal succeeded, `token_refresh_service` did
+        # `payload["accessToken"]`, raised KeyError, and the new credential was
+        # dropped on the floor -- while the call had already rotated it, so the
+        # token in the database was dead within the second. Exactly the failure
+        # the original bug caused, reached by a different route.
+        #
+        # One shape at the boundary is the fix. Which key Dhan sent is this
+        # module's business and nobody else's.
+        payload["accessToken"] = token
         return payload
 
     @staticmethod

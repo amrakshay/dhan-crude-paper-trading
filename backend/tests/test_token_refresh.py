@@ -527,7 +527,13 @@ async def test_the_new_token_arrives_as_token_not_accessToken(monkeypatch):
 
     payload = await client.renew()
 
-    assert (payload.get("accessToken") or payload.get("token")) == "the-renewed-token"
+    # NORMALISED: every caller sees `accessToken`, whichever key Dhan used.
+    # Reading either key inside renew() but returning the payload untouched is
+    # what broke on 2026-09-24 -- the renewal succeeded, the refresh service
+    # did payload["accessToken"], raised KeyError, and threw away a credential
+    # the call had already rotated. The token was dead within the second.
+    assert payload["accessToken"] == "the-renewed-token"
+    assert payload.get("token") == "the-renewed-token", "the original key survives"
     assert client.renewals == 1
     assert client.last_error is None
 
@@ -572,3 +578,66 @@ async def test_a_body_with_neither_key_is_still_refused(monkeypatch):
     assert "accessToken" in message and "token" in message
     assert "rotated" in message
     assert "Dhan Web" not in message, "the old, wrong diagnosis must not return"
+
+
+async def test_a_token_only_renewal_reaches_the_DATABASE(db_session, monkeypatch):
+    """End to end through the REAL client, because the seam is what broke.
+
+    `test_the_new_token_arrives_as_token_not_accessToken` proves `renew()`
+    normalises. This proves the whole path stores the result -- and it is the
+    step that failed on 2026-09-24.
+
+    `renew()` had been fixed to read either key but returned the payload as it
+    arrived; `TokenRefreshService` then did `payload["accessToken"]`, raised
+    KeyError, and dropped a credential the call had ALREADY rotated. The token
+    in the database was dead within the second, the feed and the charts
+    stopped, and the alert said "KeyError: 'accessToken'" -- which names the
+    symptom and not one word of the cause.
+
+    So this patches httpx rather than the client: a fake client returns
+    whatever dict the test hands it and would have passed throughout.
+    """
+    from src.market.services import dhan_token_client
+    from src.settings.services import token_refresh_service as module
+    from src import config_utils
+    from src.settings.database.db_operations.app_setting_repository import (
+        AppSettingRepository,
+    )
+    from src.settings.services.settings_service import SettingsService
+
+    await _store(db_session, _token(hours_left=2))
+    fresh = _token(hours_left=24)
+
+    class _TokenOnly:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, **kwargs):
+            class _Ok:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    # Exactly what Dhan sends: no `accessToken` anywhere.
+                    return {
+                        "createTime": "2026-09-24T06:59:00.000",
+                        "expiryTime": "2026-09-25T06:59:00.000",
+                        "token": fresh,
+                    }
+
+            return _Ok()
+
+    monkeypatch.setattr(dhan_token_client.httpx, "AsyncClient", _TokenOnly)
+
+    outcome = await module.TokenRefreshService(db_session).refresh_if_due()
+
+    assert outcome.renewed is True, "a token-only response is a successful renewal"
+    stored = await SettingsService(AppSettingRepository(db_session)).load_stored()
+    assert stored[KEY_ACCESS_TOKEN] == fresh, "the new credential must be PERSISTED"
+    assert config_utils.get_property_value("dhan.access_token") == fresh
