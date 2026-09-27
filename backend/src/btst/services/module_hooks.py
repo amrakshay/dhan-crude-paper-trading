@@ -44,6 +44,7 @@ from src.btst.services.btst_schedule import (
 )
 from src.database.session import session_scope
 from src.logging_config import get_logger
+from src.strategies.services import market_clock
 from src.strategies.services.scheduling import JobRun, MissedRun
 from src.strategies.services.strategy_definition import StrategyDefinition
 from src.strategies.services.strategy_modules import ModuleRuleRefused
@@ -112,6 +113,17 @@ async def tick_strategy(
     when it executes its sells before sizing its buys.
     """
     ran: List[JobRun] = []
+    if not market_clock.is_trading_day(definition, now):
+        # Not a weekday the exchange trades, so nothing here can do anything.
+        # The rotation's clock has always had this guard; this one did not,
+        # and "bounded only at the bottom" then meant a position bought on
+        # Friday was retried every fifteen minutes from 09:16 to 15:30 on
+        # Saturday AND Sunday -- each pass refused by the per-instrument guard,
+        # each refusal an ERROR, each pass a stuck-exit alert. The exit is not
+        # LATE on a weekend: `_due_at` already skips non-trading days, so
+        # Monday's 09:16 is on time.
+        return ran
+
     parameters = BtstParameters.from_definition(definition)
     # Read on every pass rather than cached at start-up, so a change from the
     # Configuration tab takes effect at the next run instead of at the next

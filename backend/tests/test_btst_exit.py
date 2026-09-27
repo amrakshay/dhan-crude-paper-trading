@@ -644,3 +644,40 @@ async def test_a_position_closed_BY_HAND_leaves_the_row_NOT_HELD_and_places_noth
     assert holding.exit_price is None
     assert holding.overnight_gap is None
     assert "already closed" in holding.exit_reason
+
+
+class _ClockThatMustNotRun:
+    """A scheduler whose every job hook fails the test if it is reached."""
+
+    def __init__(self):
+        self._warmed = {}
+        self.asked = []
+
+    def _may_attempt(self, key, kind, today, now):
+        self.asked.append(kind)
+        return True
+
+    def __getattr__(self, name):
+        raise AssertionError(f"the clock reached {name} on a non-trading day")
+
+
+@pytest.mark.parametrize("day", [date(2026, 9, 26), date(2026, 9, 27)])
+@pytest.mark.parametrize("at", [time(9, 14), time(9, 16), time(13, 10), time(15, 20)])
+async def test_the_exit_and_the_scan_do_not_run_at_the_weekend(definition, day, at):
+    """A Friday entry is due on MONDAY, not retried all weekend.
+
+    On 2026-09-26 and 27 the exit was attempted every fifteen minutes from
+    09:16 to 15:30 on both days: each pass refused by the per-instrument guard,
+    two ERRORs and a stuck-exit alert apiece, all of it on Telegram. Nothing
+    can execute on a day the exchange does not trade, so nothing is attempted.
+    """
+    from src.btst.services.module_hooks import tick_strategy
+
+    clock = _ClockThatMustNotRun()
+    ran = await tick_strategy(
+        clock, definition, datetime.combine(day, at).replace(tzinfo=IST)
+    )
+
+    assert ran == []
+    assert clock.asked == []
+    assert clock._warmed == {}
