@@ -545,33 +545,17 @@ depends on them without re-verifying will produce silently wrong numbers.
 | Option vs futures expiry | **Different dates.** Sep options expire 2026-09-17, the Sep future 2026-09-21. Map an option expiry to the earliest future expiring on or after it — never by month name. |
 | Exchange transaction charge | 0.0418% (MCX circular MCX/F&A/631/2024). The 0.053% figure appears in no MCX circular. |
 | CTT vs STT | Commodity options attract **CTT**, on the sell side of the premium. The 0.125% entry in the same statute is for *options in goods* — a different transaction. |
+| Quote/Full price fields | Open, close, **high, low** in that order, as the SDK has it. **Verified 2026-09-28** with `scripts/verify_feed_session_fields.py` mid-session (14:19 IST): session high and low matched `/charts/intraday` to the paisa on 8/8 names (RELIANCE, TCS, INFY, SBIN, ITC, HDFCBANK, ICICIBANK, IEX). BTST's B6 CLV is computed on correctly ordered fields. |
+| Session aggregates on a late subscription | The packet carries the **session's aggregate** high, low and cumulative volume, not a delta since subscribing. **Verified the same day**: the FIRST packet after a 14:21 subscription reported the full day's volume on all 8 names (HDFCBANK 17.15 M vs 16.83 M in the bars, which lag the live tape by up to a minute). BTST's 14:45 `window_opens_at` is safe. |
 
-**Unverified, flagged in code, and now LOAD-BEARING:** the Quote/Full packet
-maps its four price fields as open, close, high, low per the SDK. Never checked
-against a live feed.
-
-It stopped being cosmetic on 2026-09-19. NSE BTST Overnight's B6 is
-`CLV = (price - low) / (high - low) > 0.8` measured on the session so far, so a
-transposition does not make that filter drift -- it INVERTS it, and the strategy
-buys the weakest closes in the market while every number it produces looks
-plausible.
-
-`scripts/verify_feed_session_fields.py` is the standing answer: it subscribes a
-few names mid-session and compares the packet's session high and low against
-`/charts/intraday` for the same day. **It has not been run yet** -- it must run
-during a session with a working token, and it refuses outside market hours
-because the comparison would mean nothing. WHEN IT IS RUN, RECORD THE FINDING
-IN THE TABLE ABOVE and delete this note.
-
-Until then `scan_service.Quote.usable` refuses a quote whose high is below its
-low, or whose last trade is outside its own session range. That does not verify
-the mapping; it makes the failure a scan that qualifies nothing and says why,
-instead of a book of inverted trades.
-
-The same script settles a second unverified claim, the one BTST's subscription
-window rests on: that the packet carries the session AGGREGATE high, low and
-volume rather than a delta since subscription. If it is a delta, the fix is to
-open the window at 09:15 in the strategy YAML rather than at 14:45.
+The verifier's first live run failed twice before it answered, and both are
+fixed in it: it never applied the settings stored from the UI, so it saw `.env`
+only and reported no credentials (section 4, "Settings from the UI beat .env");
+and it compared VOLUMES with the 10 bps PRICE tolerance, so a feed that plainly
+carried the whole session -- 17 M shares against a delta that would have been a
+few thousand -- was reported as a delta. `scan_service.Quote.usable` still
+refuses a quote whose high is below its low; it is now a guard against a bad
+packet rather than against a wrong mapping.
 
 ---
 
@@ -595,8 +579,8 @@ backend/src/btst/                  the NSE overnight hold: the 15:20 scan, the
                                    defended exit, its own journal -- see its README
 backend/src/btst/services/scan_service.py   the filter funnel, B2-B8
 backend/src/btst/services/execution_service.py  the scan, and THE EXIT
-backend/scripts/verify_feed_session_fields.py   settles root CLAUDE.md's
-                                   unverified high/low mapping, against a live feed
+backend/scripts/verify_feed_session_fields.py   checks the feed's high/low
+                                   mapping against a live session (verified 2026-09-28)
 backend/scripts/replay_btst_scan.py   rebuilds a past session's 15:20 book from
                                    intraday bars and replays the scan read-only,
                                    for the near-misses the journal's row cap drops

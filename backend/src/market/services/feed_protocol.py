@@ -16,12 +16,9 @@ Every response packet starts with the same 8-byte header:
     uint8   exchange segment     (5 = MCX_COMM)
     uint32  security id
 
-UNVERIFIED: the SDK maps the four price fields of the Quote and Full packets in
-the order open, close, high, low -- not the conventional OHLC. That ordering is
-reproduced here because the SDK is the best available source, but it has not
-been checked against a live feed (no market-data credentials were available at
-build time). If highs and lows look transposed against the chart, this is the
-first place to look: see FULL_IDX_OPEN/CLOSE/HIGH/LOW below.
+The Quote and Full packets carry their four price fields in the order open,
+close, high, low -- not the conventional OHLC -- as the SDK has it. VERIFIED 2026-09-28 against a live session (14:19 IST; RELIANCE, TCS, INFY, SBIN, ITC, HDFCBANK, ICICIBANK, IEX): session high and low matched /charts/intraday to the
+paisa. See root CLAUDE.md section 5 and FULL_IDX_OPEN/CLOSE/HIGH/LOW below.
 """
 import struct
 from typing import Any, Dict, List, Optional, Tuple

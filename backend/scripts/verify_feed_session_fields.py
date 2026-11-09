@@ -208,6 +208,19 @@ async def main() -> int:
     args = _parse_args()
     now = ist_now()
 
+    # The token configured on the Connections page lives in the database, not
+    # in `.env`. Without this overlay the script sees `.env` only and reports
+    # "credentials are not configured" on a machine whose app is streaming
+    # happily -- root CLAUDE.md section 4, "Settings from the UI beat .env".
+    # First run on a live session (2026-09-28) failed exactly this way.
+    from src.settings.database.db_operations.app_setting_repository import (
+        AppSettingRepository,
+    )
+    from src.settings.services.settings_service import SettingsService
+
+    async with session_scope() as session:
+        await SettingsService(AppSettingRepository(session)).apply_to_config()
+
     symbols = [one.strip().upper() for one in args.symbols.split(",") if one.strip()]
     instruments = await _instruments(symbols)
     if not instruments:
@@ -272,7 +285,15 @@ async def main() -> int:
         if args.late_subscribe:
             first = first_seen.get(instrument["security_id"])
             if first and intraday:
-                whole = _close(first.get("volume"), intraday["volume"])
+                # NOT `_close()`: that is a 10 bps PRICE tolerance, and volume
+                # keeps growing between the packet and the bar fetch, so the
+                # first live run (2026-09-28) read HDFCBANK's 17,065,824
+                # against the bars' 16,766,845 as "not the whole session".
+                # The question is aggregate-vs-delta, and a delta since a
+                # mid-afternoon subscription is a few thousand shares against
+                # millions -- orders of magnitude, not basis points.
+                first_volume = first.get("volume") or 0
+                whole = first_volume >= 0.9 * intraday["volume"]
                 print(
                     f"{'':12} {'':12} late-subscribe: the FIRST packet reported "
                     f"volume {first.get('volume'):,} against the session's "

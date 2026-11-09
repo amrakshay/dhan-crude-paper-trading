@@ -134,12 +134,11 @@ subscription:
   # `window_closes_at` is when it leaves again; outside that window this
   # strategy subscribes what it HOLDS, exactly like the rotation.
   #
-  # ** THAT AGGREGATE CLAIM IS UNVERIFIED AGAINST A LIVE FEED. ** It is the
-  # second of the two things scripts/verify_feed_session_fields.py exists to
-  # settle. If it turns out Dhan accumulates from the moment of subscription
-  # instead, move `window_opens_at` to 09:15 and accept the cost; the scan
-  # refuses a symbol whose session fields look partial rather than trading on
-  # them (see src/btst/services/scan_service.py).
+  # ** THAT AGGREGATE CLAIM WAS VERIFIED 2026-09-28 ** by
+  # scripts/verify_feed_session_fields.py --late-subscribe: the FIRST packet
+  # after a 14:21 subscription carried the whole day's volume on 8/8 names
+  # (root CLAUDE.md section 5). The scan still refuses a symbol whose session
+  # fields look partial (see src/btst/services/scan_service.py).
   # ---------------------------------------------------------------------------
   kind: "universe"
   window_opens_at: "14:45"
@@ -224,12 +223,10 @@ parameters:
   # B6 -- close strength. CLV = (price - low) / (high - low), measured on the
   # session SO FAR, must exceed this.
   #
-  # ** THIS IS THE PARAMETER THAT DEPENDS ON AN UNVERIFIED FACT. ** Root
-  # CLAUDE.md section 5 records that the Quote/Full packet's four price fields
-  # are mapped open/close/high/low per the SDK and have never been checked
-  # against a live feed. If high and low are transposed, CLV is not merely
-  # wrong -- it is INVERTED, and this strategy buys the weakest closes in the
-  # market instead of the strongest. See scripts/verify_feed_session_fields.py.
+  # This parameter depends on the packet's high/low mapping: were they
+  # transposed, CLV would be INVERTED and this strategy would buy the weakest
+  # closes in the market. The mapping was VERIFIED against a live session on
+  # 2026-09-28 (root CLAUDE.md section 5, scripts/verify_feed_session_fields.py).
   close_location_minimum: 0.8
 
   # B7 -- trend qualifier: price above its own 200-session SMA.

@@ -113,9 +113,9 @@ class Quote:
     `session_high`, `session_low` and `session_volume` come straight off the
     Quote/Full packet's own aggregate fields.
 
-    ** `usable` IS THE UNVERIFIED-MAPPING GUARD. ** Root `CLAUDE.md` section 5
-    records that the packet's four price fields are mapped open/close/high/low
-    per the SDK and have never been checked against a live feed. If high and
+    ** `usable` WAS THE UNVERIFIED-MAPPING GUARD. ** The mapping was verified
+    against a live session on 2026-09-28 (root `CLAUDE.md` section 5), so it
+    now guards against a bad PACKET rather than a wrong mapping. If high and
     low are transposed, B6's CLV inverts and this strategy buys the weakest
     closes in the market. A transposition shows up here as a high below a low,
     or a last trade outside the session's own range, and a quote that fails
