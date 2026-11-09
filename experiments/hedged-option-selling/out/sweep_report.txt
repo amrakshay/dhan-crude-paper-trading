@@ -1,0 +1,101 @@
+============================================================================================================
+PARAMETER SWEEP -- one dimension at a time
+============================================================================================================
+  sample 2016-01-01 .. 2026-09-17  (2643 sessions)
+  base   iron_condor 0.16d wing@0.05d DTE30+-10 [PT50%]
+
+  Read the trade-off, not the maximum. A best cell picked from a grid
+  this size is a selection artefact, and on a strategy whose result is
+  decided by two trades in sixty it is close to meaningless.
+
+  'R/risk /yr' is the annualised return per rupee-year of MAXIMUM LOSS
+  deployed -- the capital actually at risk, and the only figure here
+  that can honestly be set beside the risk-free rate (5.64% over this
+  sample). 'RoM /yr' is the same thing against MARGIN, which is a
+  LEVERAGED number: the exchange collateralises a median of only ~26%
+  of a structure's maximum loss, so it flatters every cell by ~4x.
+
+============================================================================================================
+SWEEP: STRUCTURE -- and the unhedged twins
+  * UNHEDGED, shown as the comparator the wing must beat. Not traded.
+============================================================================================================
+  cell                      n    total P&L  R/risk /yr   RoM /yr       worst     worst1%  maxL/mgn    win   held
+  iron_condor             205      -95,632     -25.91%   -93.01%     -43,086     -39,530   -666.9%  83.9%   18.4
+  bull_put_spread         308       98,180      26.00%    89.55%     -48,812     -38,224   -555.3%  94.2%   11.8
+  bear_call_spread        297     -253,967     -88.07%  -238.69%     -44,796     -41,986   -438.2%  88.2%   12.5
+  naked_strangle *        220      134,865   unbounded    22.13%    -135,030     -75,361   -286.1%  85.0%   17.0
+  naked_put *             319      293,246   unbounded    73.02%    -138,110     -66,555   -450.6%  95.0%   11.4
+
+============================================================================================================
+SWEEP: DAYS TO EXPIRY at entry
+  Theta grows into expiry; so does gamma, which is what turns an adverse move into an unmanageable loss.
+============================================================================================================
+  cell                      n    total P&L  R/risk /yr   RoM /yr       worst     worst1%  maxL/mgn    win   held
+  DTE 7                   538     -187,946    -109.82%  -176.33%     -32,709     -26,281   -361.5%  80.7%    5.8
+  DTE 14                  325     -123,034     -50.86%  -117.88%     -64,281     -43,666   -952.6%  83.1%    9.8
+  DTE 21                  264      -96,339     -29.83%   -89.25%     -43,086     -41,212   -666.9%  84.1%   13.7
+  DTE 30                  205      -95,632     -25.91%   -93.01%     -43,086     -39,530   -666.9%  83.9%   18.4
+  DTE 45                  131     -140,725     -29.89%  -162.96%     -67,584     -59,325   -854.2%  83.2%   29.2
+  DTE 60                   68     -207,424     -62.84%  -433.01%     -62,329     -62,329   -914.0%  75.0%   39.3
+
+============================================================================================================
+SWEEP: SHORT-STRIKE DELTA
+  Further out = higher win rate and less premium. The win rate is not the point; what happens when it is wrong is.
+============================================================================================================
+  cell                      n    total P&L  R/risk /yr   RoM /yr       worst     worst1%  maxL/mgn    win   held
+  short 0.08d             233      -41,029     -25.18%  -105.93%     -24,830     -18,402   -520.7%  89.7%   15.5
+  short 0.10d             225      -46,875     -20.34%   -82.49%     -30,531     -24,580   -544.2%  88.4%   16.4
+  short 0.16d             205      -95,632     -25.91%   -93.01%     -43,086     -39,530   -666.9%  83.9%   18.4
+  short 0.20d             192      -18,350      -4.26%   -15.08%     -56,511     -52,265   -649.4%  80.7%   19.5
+  short 0.30d             168      114,036      22.73%    74.74%     -54,754     -51,251   -444.3%  72.6%   22.4
+  short 0.40d             152      -71,898     -12.99%   -40.81%    -121,769     -93,999   -556.5%  61.2%   25.2
+
+============================================================================================================
+SWEEP: WING DELTA -- how far out the protection sits
+  Cheaper wing = more credit and more maximum loss. Return on MARGIN is the test, not credit captured.
+============================================================================================================
+  cell                      n    total P&L  R/risk /yr   RoM /yr       worst     worst1%  maxL/mgn    win   held
+  wing 0.02d              208      -12,068      -1.79%    -8.69%     -71,892     -48,739   -724.0%  84.6%   18.0
+  wing 0.03d              212      -81,378     -15.10%   -64.75%     -72,010     -48,615   -838.5%  84.0%   17.8
+  wing 0.05d              205      -95,632     -25.91%   -93.01%     -43,086     -39,530   -666.9%  83.9%   18.4
+  wing 0.08d              189      -46,438     -20.87%   -66.84%     -31,458     -29,126   -527.0%  83.1%   19.7
+  wing 0.10d              186       -8,307      -5.23%   -15.18%     -31,458     -23,006   -466.3%  83.3%   20.0
+
+============================================================================================================
+SWEEP: WING WIDTH -- fixed point distance instead
+  A fixed width does not adapt to volatility, which is the same objection that rules out percentage-of-spot strike selection.
+============================================================================================================
+  cell                      n    total P&L  R/risk /yr   RoM /yr       worst     worst1%  maxL/mgn    win   held
+  wing +200pt             178     -138,887    -140.23%  -305.88%     -12,622     -12,592   -483.6%  80.3%   20.1
+  wing +300pt             183      -56,502     -37.58%   -90.36%     -19,110     -19,031   -484.9%  84.2%   19.1
+  wing +500pt             175      -90,809     -35.65%  -102.89%     -32,904     -32,377   -544.4%  80.6%   19.5
+  wing +800pt             169       29,592       7.79%    28.09%     -52,645     -49,171   -662.6%  84.6%   18.3
+  wing +1200pt            111      -37,474     -10.45%   -47.88%     -84,175     -76,971   -594.8%  88.3%   17.1
+
+============================================================================================================
+SWEEP: MANAGEMENT RULE
+  The published claim is that closing at 50% of maximum profit beats holding. It is a claim, not a result -- this tests it.
+============================================================================================================
+  cell                      n    total P&L  R/risk /yr   RoM /yr       worst     worst1%  maxL/mgn    win   held
+  hold to expiry          131      -77,512     -20.40%   -81.10%     -51,824     -41,469   -556.1%  70.2%   29.7
+  profit take 25%         294       10,665       3.01%    10.56%     -36,699     -34,913   -551.9%  91.2%   12.5
+  profit take 50%         205      -95,632     -25.91%   -93.01%     -43,086     -39,530   -666.9%  83.9%   18.4
+  profit take 75%         158       53,658      14.18%    54.35%     -61,269     -49,108   -551.9%  81.0%   24.0
+  exit at 10 DTE          162       84,494      20.79%    90.87%     -35,327     -30,783   -470.6%  70.4%   23.1
+  exit at 5 DTE           140       40,884      10.30%    41.70%     -55,740     -47,312   -513.5%  74.3%   27.9
+  PT50 + stop 2x          219      -44,583     -12.29%   -45.36%     -23,295     -22,144   -301.7%  76.7%   16.9
+  PT50 + stop 1x          254      -11,283      -3.03%   -11.47%     -26,010     -18,063   -187.3%  68.5%   14.4
+
+============================================================================================================
+SENSITIVITY: SLIPPAGE -- the assumption with no data behind it
+============================================================================================================
+  The bhavcopy carries no bid-ask. The wing is 2-3 orders of
+  magnitude thinner than the leg it protects (NIFTY 2025-08-01: the
+  near-money put traded 40,466 times, the 5-delta wing 101), so this
+  is the assumption most able to flip the answer.
+  cell                      n    total P&L  R/risk /yr   RoM /yr       worst     worst1%  maxL/mgn    win   held
+  none (unreal)           209      -46,150     -12.62%   -45.28%     -42,981     -39,301   -665.1%  84.2%   18.0
+  0.5% / 1 tick           207      -85,174     -22.85%   -81.85%     -43,033     -39,450   -666.0%  84.1%   18.3
+  1% / 1 tick             205      -95,632     -25.91%   -93.01%     -43,086     -39,530   -666.9%  83.9%   18.4
+  2% / 2 ticks            199     -171,030     -46.93%  -168.53%     -43,191     -40,976   -668.7%  83.4%   18.9
+  4% / 4 ticks            188     -116,154     -31.74%  -118.97%     -43,401     -40,434   -672.3%  84.6%   19.8

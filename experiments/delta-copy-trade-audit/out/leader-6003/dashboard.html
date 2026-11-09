@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delta Leader Audit</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f5f5f3; --surface: #fcfcfb; --border: #e3e2de;
+  --text: #0b0b0b; --text-2: #52514e; --muted: #85847f;
+  --pos: #2a78d6; --neg: #e34948; --gross: #eb6834; --net: #2a78d6;
+  --grid: #ecebe7; --warn-bg: #fff6e0; --warn-border: #eda100;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2e2e2b;
+    --text: #ffffff; --text-2: #c3c2b7; --muted: #8e8d86;
+    --pos: #3987e5; --neg: #e66767; --gross: #d95926; --net: #3987e5;
+    --grid: #262624; --warn-bg: #2a2310; --warn-border: #c98500;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110; --surface: #1a1a19; --border: #2e2e2b;
+  --text: #ffffff; --text-2: #c3c2b7; --muted: #8e8d86;
+  --pos: #3987e5; --neg: #e66767; --gross: #d95926; --net: #3987e5;
+  --grid: #262624; --warn-bg: #2a2310; --warn-border: #c98500;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+.sub { color: var(--text-2); margin: 0 0 20px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px; margin-bottom: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.tile .label { color: var(--text-2); font-size: 12px; }
+.tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.warn { background: var(--warn-bg); border-color: var(--warn-border); }
+.warn ul, .assume ul { margin: 6px 0 0; padding-left: 20px; }
+.assume { color: var(--text-2); font-size: 13px; }
+.chart-box { position: relative; height: 300px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { color: var(--text-2); font-weight: 600; cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--surface); }
+.pos { color: var(--text); } .neg { color: var(--text); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.dot.pos { background: var(--pos); } .dot.neg { background: var(--neg); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.filters select, .filters input { background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font: inherit; }
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; color: var(--text-2); }
+.pager button { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.legend { display: flex; gap: 16px; color: var(--text-2); font-size: 12px; margin-bottom: 8px; }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.tag { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title"></h1>
+  <p class="sub" id="sub"></p>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card warn" id="exposure"></div>
+
+  <div class="card">
+    <h2 id="eqTitle"></h2>
+    <div class="legend"><span><i style="background:var(--gross)"></i>Gross (the export's P&amp;L)</span><span><i style="background:var(--net)"></i>Net of taker fees + GST</span></div>
+    <div class="chart-box"><canvas id="equity"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly net P&amp;L (taker fees + GST)</h2>
+    <div class="legend"><span><span class="dot pos"></span>Profit</span><span><span class="dot neg"></span>Loss</span></div>
+    <div class="chart-box"><canvas id="monthlyChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly P&amp;L table</h2>
+    <div class="table-wrap"><table id="monthly"></table></div>
+  </div>
+
+  <div class="card">
+    <h2>By instrument type</h2>
+    <div class="table-wrap"><table id="kinds"></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Every trade</h2>
+    <div class="filters">
+      <input id="q" placeholder="Search symbol">
+      <select id="fk"><option value="">All types</option></select>
+      <select id="fm"><option value="">All months</option></select>
+      <select id="fr"><option value="">Win &amp; loss</option><option value="w">Net winners</option><option value="l">Net losers</option><option value="f">Gross win → net loss</option></select>
+    </div>
+    <div class="table-wrap"><table id="trades"></table></div>
+    <div class="pager"><button id="prev">‹ Prev</button><span id="pinfo"></span><button id="next">Next ›</button></div>
+  </div>
+
+  <div class="card assume" id="assume"></div>
+</main>
+<script>
+const D = {"meta": {"title": "Leader 6003 on Shark Exchange", "time_label": "by trade time (the export has no separate exit time)", "exit_header": "\u201cExit\u201d (export; likely the stop)", "exposure_html": "<h2>\u26a0 This export can't be fully trusted: read this first</h2>\n  <ul>\n    <li><b>Entry time equals exit time on every row.</b> How long trades were held, and how many were open at once, can't be known from this file, so the exposure against $500 can't be checked. The equity curve is plotted at the entry time.</li>\n    <li><b>The \"Exit Price\" column is not the exit.</b> On 136 of 136 rows it sits on the losing side of entry (below it for a Buy, above it for a Short), even though 90% of trades made money. It looks like the <b>stop-loss</b>, a median 7.9% from entry. Exit fees are therefore charged at the entry price.</li>\n    <li><b>If it is the stop,</b> a typical trade risked <b>$15.76</b> to make <b>$6.08</b>. That is how a 90% win rate is usually built: many small wins and occasional large stops. Only 136 trades over 2026-05 to 2026-09 is too short a sample to show how often the large losses come.</li>\n    <li><b>On 5 rows the Qty can't have made the P&amp;L</b> (it would need a move of more than 20% in one trade). The quantity actually traded was larger, so those rows' fees are understated.</li>\n    <li>Trade sizes: median $199 notional, largest $1,119. That is within reach of $500 at modest leverage, unlike leader 6001.</li>\n  </ul>", "notes": ["<b>Fees:</b> Shark Exchange's current schedule (read 2026-09-28): stock perp 0.040% taker / 0.016% maker, commodity perp 0.040% taker / 0.016% maker, of notional, on each side, plus 18% GST on the fee. Taker on both sides is the headline; maker is the best case.", "Shark's fee page doesn't say whether stock and commodity perps are charged the crypto futures rate; they are assumed to be (unverified). Its zero-fee scalping offer, which waives the closing fee within 30 minutes on \"select\" pairs, is <b>not</b> applied: hold times aren't in the export.", "<b>Gross P&amp;L</b> is the export's own figure. It can't be reconciled against the prices on any row, because the Exit Price column isn't an exit.", "<b>Funding is not included.</b> Perpetual funding payments aren't in the export and can move the result either way.", "<b>Duplicates:</b> 0 exact-duplicate rows dropped (their gross $0.00).", "0 calendar months in the range have no closed trades. Times are as exported (IST for Delta; unverified for Shark)."]}, "summary": {"rows_in_file": 136, "duplicates_dropped": 0, "duplicate_gross": 0.0, "leader": "6003", "venue": "Shark Exchange", "trades": 136, "first_entry": "2026-05-07 13:29:56", "last_exit": "2026-09-22 14:30:16", "start_capital": 500.0, "gross": 875.6281, "fees_taker": 33.28350914240001, "net_taker": 842.3445908576, "fees_maker": 13.313403656960002, "net_maker": 862.31469634304, "end_equity": 1342.3445908576, "min_equity": 487.15852206704, "min_equity_at": "2026-05-15 01:09:04", "max_drawdown": -16.70229729280004, "max_drawdown_at": "2026-06-03 14:24:36", "win_rate_gross": 0.8970588235294118, "win_rate_net": 0.8897058823529411, "flipped_to_loss": 1, "best_trade": 48.8594333696, "worst_trade": -16.7022972928, "options": 0, "options_cap_bound": 0, "options_settled": 0, "empty_months": 0, "by_kind": [{"kind": "Commodity perp", "trades": 37, "gross": 89.8683, "fees": 7.0073276704, "net": 82.8609723296}, {"kind": "Stock perp", "trades": 99, "gross": 785.7598, "fees": 26.276181472, "net": 759.483618528}], "median_trade_notional": 199.27800000000002, "max_trade_notional": 1119.404, "stop_on_losing_side": 136, "median_stop_distance_pct": 7.921917185444398, "median_risk_at_stop": 15.760449999999997, "median_win": 6.081049999999999, "qty_mismatch_rows": 5}, "monthly": [{"month": "2026-05", "trades": 20, "gross": 0.6930999999999987, "fees": 3.07855501504, "net": -2.3854550150400016, "net_maker": -0.5383220060160003, "wins": 13, "start_equity": 500.0, "end_equity": 497.61454498496, "return_pct": -0.47709100300800034}, {"month": "2026-06", "trades": 27, "gross": 230.1118, "fees": 7.273330161600001, "net": 222.8384698384, "net_maker": 227.20246793536, "wins": 23, "start_equity": 497.61454498496, "end_equity": 720.45301482336, "return_pct": 44.78134172005264}, {"month": "2026-07", "trades": 32, "gross": 224.1907, "fees": 6.942934976, "net": 217.247765024, "net_maker": 221.4135260096, "wins": 29, "start_equity": 720.45301482336, "end_equity": 937.7007798473601, "return_pct": 30.154327978940387}, {"month": "2026-08", "trades": 33, "gross": 283.8749, "fees": 8.48625662672, "net": 275.38864337328, "net_maker": 280.480397349312, "wins": 33, "start_equity": 937.70077984736, "end_equity": 1213.08942322064, "return_pct": 29.368498916904823}, {"month": "2026-09", "trades": 24, "gross": 136.7576, "fees": 7.5024323630400005, "net": 129.25516763696, "net_maker": 133.756627054784, "wins": 23, "start_equity": 1213.08942322064, "end_equity": 1342.3445908576, "return_pct": 10.655040359168208}], "equity": {"t": ["2026-05-07 13:29", "2026-05-07 13:34", "2026-05-07 13:38", "2026-05-07 13:39", "2026-05-07 17:42", "2026-05-07 22:55", "2026-05-07 22:57", "2026-05-07 22:58", "2026-05-07 23:59", "2026-05-08 06:31", "2026-05-08 11:57", "2026-05-08 19:03", "2026-05-11 11:22", "2026-05-12 04:17", "2026-05-12 20:49", "2026-05-15 01:09", "2026-05-15 09:31", "2026-05-26 15:03", "2026-05-29 13:30", "2026-05-29 20:34", "2026-06-01 12:14", "2026-06-02 12:44", "2026-06-03 14:05", "2026-06-03 14:06", "2026-06-03 14:24", "2026-06-04 13:56", "2026-06-04 15:32", "2026-06-04 15:37", "2026-06-05 13:52", "2026-06-12 18:15", "2026-06-13 07:00", "2026-06-13 19:10", "2026-06-18 15:30", "2026-06-18 18:07", "2026-06-19 09:45", "2026-06-22 06:00", "2026-06-22 19:00", "2026-06-23 19:00", "2026-06-24 12:15", "2026-06-25 01:45", "2026-06-25 18:17", "2026-06-26 00:00", "2026-06-26 13:00", "2026-06-28 13:30", "2026-06-28 14:15", "2026-06-29 21:45", "2026-06-30 12:15", "2026-07-03 08:30", "2026-07-03 10:00", "2026-07-03 22:15", "2026-07-04 23:47", "2026-07-06 20:15", "2026-07-09 11:45", "2026-07-10 09:45", "2026-07-10 16:45", "2026-07-12 06:00", "2026-07-14 19:00", "2026-07-14 19:15", "2026-07-17 19:45", "2026-07-17 20:00", "2026-07-18 23:32", "2026-07-19 00:02", "2026-07-19 03:27", "2026-07-19 05:29", "2026-07-19 07:15", "2026-07-19 08:45", "2026-07-19 14:30", "2026-07-23 06:00", "2026-07-24 12:47", "2026-07-25 08:15", "2026-07-25 08:15", "2026-07-25 10:45", "2026-07-25 11:45", "2026-07-25 23:02", "2026-07-28 21:00", "2026-07-30 00:30", "2026-07-30 07:15", "2026-07-30 14:00", "2026-07-30 19:15", "2026-08-02 22:30", "2026-08-03 02:45", "2026-08-03 20:15", "2026-08-07 01:30", "2026-08-07 20:00", "2026-08-08 16:45", "2026-08-10 05:45", "2026-08-11 07:15", "2026-08-11 15:00", "2026-08-11 22:45", "2026-08-13 13:00", "2026-08-14 06:00", "2026-08-15 16:45", "2026-08-17 08:32", "2026-08-18 10:30", "2026-08-18 14:48", "2026-08-19 06:45", "2026-08-19 07:00", "2026-08-19 07:00", "2026-08-21 07:45", "2026-08-21 18:15", "2026-08-22 18:30", "2026-08-24 15:45", "2026-08-24 22:00", "2026-08-25 06:30", "2026-08-25 20:15", "2026-08-25 21:15", "2026-08-26 19:15", "2026-08-29 07:30", "2026-08-29 13:47", "2026-08-30 20:30", "2026-08-31 09:15", "2026-08-31 12:15", "2026-09-01 05:45", "2026-09-01 19:15", "2026-09-01 19:45", "2026-09-07 12:45", "2026-09-07 22:45", "2026-09-08 16:00", "2026-09-09 04:15", "2026-09-09 07:30", "2026-09-09 08:15", "2026-09-09 11:45", "2026-09-09 19:15", "2026-09-09 20:15", "2026-09-12 17:45", "2026-09-12 20:15", "2026-09-13 05:15", "2026-09-13 20:11", "2026-09-13 20:15", "2026-09-14 01:30", "2026-09-14 02:45", "2026-09-16 17:15", "2026-09-17 06:00", "2026-09-17 06:45", "2026-09-22 09:00", "2026-09-22 14:30"], "net": [497.41, 498.18, 495.95, 488.71, 490.44, 489.67, 490.13, 490.41, 491.8, 491.55, 491.8, 492.09, 492.52, 492.91, 493.33, 487.16, 503.54, 504.92, 496.35, 497.61, 507.81, 514.88, 532.77, 581.63, 564.93, 569.89, 570.89, 572.56, 578.44, 590.86, 601.06, 637.14, 645.75, 648.52, 661.62, 677.19, 686.49, 686.95, 692.14, 696.55, 713.79, 713.06, 712.81, 713.26, 713.07, 718.95, 720.45, 722.21, 723.86, 734.98, 741.9, 766.57, 775.58, 774.86, 773.9, 778.17, 784.7, 792.82, 798.23, 804.05, 820.23, 834.12, 839.32, 843.64, 851.75, 858.47, 868.08, 877.82, 883.46, 889.78, 898.2, 904.68, 898.58, 904.48, 909.84, 919.09, 924.64, 931.5, 937.7, 946.19, 958.03, 964.83, 968.8, 978.97, 985.61, 991.17, 997.5, 1002.33, 1007.13, 1012.09, 1018.0, 1042.89, 1061.04, 1069.51, 1074.42, 1089.37, 1096.12, 1101.98, 1136.15, 1138.49, 1141.74, 1147.81, 1156.89, 1162.9, 1166.48, 1169.85, 1176.0, 1192.02, 1196.02, 1201.99, 1207.94, 1213.09, 1219.91, 1223.04, 1235.46, 1237.38, 1245.86, 1250.58, 1249.6, 1251.59, 1255.65, 1262.49, 1266.5, 1271.84, 1281.51, 1292.07, 1300.38, 1302.61, 1311.87, 1314.41, 1319.41, 1323.41, 1329.28, 1333.88, 1338.16, 1342.34], "gross": [497.88, 498.78, 496.7, 489.93, 491.71, 490.98, 491.49, 491.82, 493.25, 493.05, 493.35, 493.68, 494.15, 494.59, 495.06, 489.1, 506.42, 507.85, 499.29, 500.69, 511.94, 519.1, 537.84, 586.84, 570.42, 575.6, 576.69, 578.46, 584.44, 597.04, 607.63, 643.92, 653.09, 656.42, 669.53, 685.29, 694.97, 695.61, 700.99, 705.59, 723.02, 722.48, 722.42, 723.05, 723.05, 729.11, 730.8, 732.75, 734.59, 746.09, 753.19, 777.88, 787.08, 786.54, 785.77, 790.42, 797.13, 805.44, 811.04, 817.04, 833.59, 847.67, 853.07, 857.57, 865.87, 872.78, 882.58, 892.69, 898.52, 905.02, 913.82, 920.48, 914.55, 920.65, 926.19, 935.63, 941.55, 948.42, 955.0, 963.7, 975.72, 982.71, 986.87, 997.23, 1004.23, 1010.16, 1016.68, 1021.7, 1026.69, 1031.82, 1037.92, 1062.99, 1081.51, 1090.17, 1095.26, 1110.58, 1117.7, 1123.94, 1158.82, 1161.9, 1165.32, 1171.58, 1181.03, 1187.22, 1190.98, 1194.55, 1200.88, 1217.08, 1221.26, 1227.41, 1233.54, 1238.87, 1245.85, 1249.16, 1262.12, 1264.59, 1273.44, 1278.72, 1277.93, 1280.3, 1285.11, 1292.51, 1296.7, 1302.24, 1311.99, 1322.91, 1331.6, 1334.21, 1343.64, 1346.38, 1351.56, 1355.93, 1361.99, 1366.78, 1371.25, 1375.63]}, "trades": [["PAXGUSDT", "Commodity perp", "Buy", 0.105, 4730.25, 4637.9, "2026-05-07 13:29", "2026-05-07 13:29", -2.1231, 0.4689, -2.592, false], ["XAUUSDT", "Commodity perp", "Short", 0.031, 4751.84, 4876.02, "2026-05-07 13:34", "2026-05-07 13:34", 0.9061, 0.1391, 0.767, false], ["BZUSDT", "Commodity perp", "Buy", 1.51, 98.88, 97.37, "2026-05-07 13:38", "2026-05-07 13:38", -2.0861, 0.1409, -2.227, false], ["CLUSDT", "Commodity perp", "Short", 5.37, 93.02, 94.17, "2026-05-07 13:39", "2026-05-07 13:39", -6.7662, 0.4715, -7.2377, false], ["BZUSDT", "Commodity perp", "Short", 0.49, 99.64, 101.08, "2026-05-07 17:42", "2026-05-07 17:42", 1.7785, 0.0461, 1.7324, false], ["BZUSDT", "Commodity perp", "Short", 0.49, 100.22, 101.66, "2026-05-07 22:55", "2026-05-07 22:55", -0.7252, 0.0464, -0.7716, false], ["BZUSDT", "Commodity perp", "Short", 0.49, 101.71, 103.19, "2026-05-07 22:57", "2026-05-07 22:57", 0.5047, 0.047, 0.4577, false], ["XAUUSDT", "Commodity perp", "Buy", 0.01, 4694.24, 4571.65, "2026-05-07 22:58", "2026-05-07 22:58", 0.3275, 0.0443, 0.2832, false], ["BZUSDT", "Commodity perp", "Short", 0.49, 102.58, 104.05, "2026-05-07 23:59", "2026-05-07 23:59", 1.4316, 0.0474, 1.3842, false], ["BZUSDT", "Commodity perp", "Buy", 0.49, 100.5, 99.04, "2026-05-08 06:31", "2026-05-08 06:31", -0.196, 0.0465, -0.2425, false], ["BZUSDT", "Commodity perp", "Buy", 0.5, 99.37, 97.89, "2026-05-08 11:57", "2026-05-08 11:57", 0.295, 0.0469, 0.2481, false], ["XAUUSDT", "Commodity perp", "Short", 0.01, 4738.7, 4862.52, "2026-05-08 19:03", "2026-05-08 19:03", 0.3305, 0.0447, 0.2858, false], ["XAUUSDT", "Commodity perp", "Buy", 0.01, 4659.24, 4538.07, "2026-05-11 11:22", "2026-05-11 11:22", 0.4721, 0.044, 0.4281, false], ["XAUUSDT", "Commodity perp", "Short", 0.01, 4755.64, 4880.17, "2026-05-12 04:17", "2026-05-12 04:17", 0.4398, 0.0449, 0.3949, false], ["XAUUSDT", "Commodity perp", "Buy", 0.01, 4664.01, 4542.42, "2026-05-12 20:49", "2026-05-12 20:49", 0.4662, 0.044, 0.4222, false], ["XAUUSDT", "Commodity perp", "Buy", 0.051, 4598.3, 4482.12, "2026-05-15 01:09", "2026-05-15 01:09", -5.9528, 0.2214, -6.1742, false], ["PAXGUSDT", "Commodity perp", "Short", 0.216, 4609.62, 4698.47, "2026-05-15 09:31", "2026-05-15 09:31", 17.3167, 0.9399, 16.3768, false], ["XAUUSDT", "Commodity perp", "Buy", 0.011, 4455.05, 4343.06, "2026-05-26 15:03", "2026-05-26 15:03", 1.4324, 0.0463, 1.3861, false], ["PAXGUSDT", "Commodity perp", "Short", 0.002, 4436.58, 4595.3, "2026-05-29 13:30", "2026-05-29 13:30", -8.5585, 0.0084, -8.5669, false], ["XAUUSDT", "Commodity perp", "Buy", 0.034, 4359.41, 3798.73, "2026-05-29 20:34", "2026-05-29 20:34", 1.3999, 0.1399, 1.26, false], ["CRCLUSDT", "Stock perp", "Buy", 13.39, 83.6, 49.46, "2026-06-01 12:14", "2026-06-01 12:14", 11.2476, 1.0567, 10.1909, false], ["INTCUSDT", "Stock perp", "Buy", 0.85, 107.41, 11.06, "2026-06-02 12:44", "2026-06-02 12:44", 7.157, 0.0862, 7.0708, false], ["MSTRUSDT", "Stock perp", "Buy", 8.56, 105.2, 72.23, "2026-06-03 14:05", "2026-06-03 14:05", 18.7464, 0.8501, 17.8963, false], ["SPCXUSDT", "Stock perp", "Buy", 0.79, 180.04, 143.98, "2026-06-03 14:06", "2026-06-03 14:06", 48.9937, 0.1343, 48.8594, false], ["PLTRUSDT", "Stock perp", "Buy", 2.24, 133.88, 13.72, "2026-06-03 14:24", "2026-06-03 14:24", -16.4192, 0.2831, -16.7023, false], ["CBRSUSDT", "Stock perp", "Buy", 1.1, 213.56, 196.56, "2026-06-04 13:56", "2026-06-04 13:56", 5.181, 0.2218, 4.9592, false], ["INTCUSDT", "Stock perp", "Buy", 0.9, 108.96, 11.2, "2026-06-04 15:32", "2026-06-04 15:32", 1.089, 0.0926, 0.9964, false], ["COINUSDT", "Stock perp", "Buy", 0.6, 162.86, 131.67, "2026-06-04 15:37", "2026-06-04 15:37", 1.77, 0.0922, 1.6778, false], ["MUUSDT", "Stock perp", "Buy", 0.11, 995.5, 900.76, "2026-06-05 13:52", "2026-06-05 13:52", 5.9846, 0.1034, 5.8812, false], ["CLUSDT", "Commodity perp", "Buy", 2.5, 79.99, 62.97, "2026-06-12 18:15", "2026-06-12 18:15", 12.6007, 0.1888, 12.4119, false], ["BZUSDT", "Commodity perp", "Buy", 4.9, 81.5, 66.2, "2026-06-13 07:00", "2026-06-13 07:00", 10.584, 0.377, 10.207, false], ["CBRSUSDT", "Stock perp", "Buy", 1.21, 192.21, 169.77, "2026-06-13 19:10", "2026-06-13 19:10", 36.2934, 0.2195, 36.0739, false], ["AMDUSDT", "Stock perp", "Buy", 1.12, 527.44, 486.38, "2026-06-18 15:30", "2026-06-18 15:30", 9.1728, 0.5577, 8.6151, false], ["WMTUSDT", "Stock perp", "Buy", 5.2, 114.86, 101.16, "2026-06-18 18:07", "2026-06-18 18:07", 3.328, 0.5638, 2.7642, false], ["METAUSDT", "Stock perp", "Buy", 0.02, 560.47, 508.99, "2026-06-19 09:45", "2026-06-19 09:45", 13.1112, 0.0106, 13.1006, false], ["MUUSDT", "Stock perp", "Buy", 0.17, 1143.86, 989.73, "2026-06-22 06:00", "2026-06-22 06:00", 15.7539, 0.1836, 15.5703, false], ["HOODUSDT", "Stock perp", "Buy", 4.0, 99.73, 84.45, "2026-06-22 19:00", "2026-06-22 19:00", 9.68, 0.3766, 9.3034, false], ["XPTUSDT", "Commodity perp", "Buy", 0.12, 1654.33, 1486.48, "2026-06-23 19:00", "2026-06-23 19:00", 0.6456, 0.1874, 0.4582, false], ["NATGASUSDT", "Commodity perp", "Buy", 62.5, 3.199, 3.153, "2026-06-24 12:15", "2026-06-24 12:15", 5.375, 0.1887, 5.1863, false], ["INTCUSDT", "Stock perp", "Buy", 1.48, 134.81, 13.9, "2026-06-25 01:45", "2026-06-25 01:45", 4.6028, 0.1883, 4.4145, false], ["BABAUSDT", "Stock perp", "Buy", 2.05, 97.43, 87.39, "2026-06-25 18:17", "2026-06-25 18:17", 17.425, 0.1885, 17.2365, false], ["MSFTUSDT", "Stock perp", "Buy", 0.56, 358.02, 329.86, "2026-06-26 00:00", "2026-06-26 00:00", -0.532, 0.1893, -0.7213, false], ["NVDAUSDT", "Stock perp", "Buy", 1.03, 193.64, 178.34, "2026-06-26 13:00", "2026-06-26 13:00", -0.0618, 0.1883, -0.2501, false], ["AMDUSDT", "Stock perp", "Buy", 0.38, 518.52, 477.39, "2026-06-28 13:30", "2026-06-28 13:30", 0.627, 0.186, 0.441, false], ["MUUSDT", "Stock perp", "Buy", 0.17, 1139.21, 1079.26, "2026-06-28 14:15", "2026-06-28 14:15", 0.0017, 0.1828, -0.1811, false], ["MUUSDT", "Stock perp", "Buy", 0.18, 1102.99, 1044.85, "2026-06-29 21:45", "2026-06-29 21:45", 6.0642, 0.1874, 5.8768, false], ["NATGASUSDT", "Commodity perp", "Buy", 62.6, 3.193, 3.147, "2026-06-30 12:15", "2026-06-30 12:15", 1.6902, 0.1887, 1.5015, false], ["AMDUSDT", "Stock perp", "Buy", 0.38, 524.15, 482.57, "2026-07-03 08:30", "2026-07-03 08:30", 1.9494, 0.188, 1.7614, false], ["MUUSDT", "Stock perp", "Buy", 0.2, 1005.7, 952.68, "2026-07-03 10:00", "2026-07-03 10:00", 1.832, 0.1899, 1.6421, false], ["CBRSUSDT", "Stock perp", "Buy", 2.05, 194.13, 164.32, "2026-07-03 22:15", "2026-07-03 22:15", 11.5005, 0.3757, 11.1248, false], ["METAUSDT", "Stock perp", "Buy", 0.33, 590.55, 543.84, "2026-07-04 23:47", "2026-07-04 23:47", 7.1016, 0.184, 6.9176, false], ["MUUSDT", "Stock perp", "Buy", 0.02, 961.1, 859.01, "2026-07-06 20:15", "2026-07-06 20:15", 24.6906, 0.0181, 24.6725, false], ["AMDUSDT", "Stock perp", "Buy", 0.38, 521.13, 479.88, "2026-07-09 11:45", "2026-07-09 11:45", 9.196, 0.1869, 9.0091, false], ["INTCUSDT", "Stock perp", "Buy", 1.77, 112.99, 11.55, "2026-07-10 09:45", "2026-07-10 09:45", -0.531, 0.1888, -0.7198, false], ["INTCUSDT", "Stock perp", "Buy", 1.8, 110.85, 11.34, "2026-07-10 16:45", "2026-07-10 16:45", -0.774, 0.1884, -0.9624, false], ["NATGASUSDT", "Commodity perp", "Buy", 140.9, 2.841, 2.609, "2026-07-12 06:00", "2026-07-12 06:00", 4.6497, 0.3779, 4.2718, false], ["METAUSDT", "Stock perp", "Buy", 0.3, 651.42, 599.77, "2026-07-14 19:00", "2026-07-14 19:00", 6.714, 0.1845, 6.5295, false], ["PLTRUSDT", "Stock perp", "Buy", 1.57, 127.16, 117.1, "2026-07-14 19:15", "2026-07-14 19:15", 8.3053, 0.1885, 8.1168, false], ["MUUSDT", "Stock perp", "Buy", 0.23, 865.34, 819.66, "2026-07-17 19:45", "2026-07-17 19:45", 5.6028, 0.1879, 5.4149, false], ["AMDUSDT", "Stock perp", "Buy", 0.4, 487.77, 449.0, "2026-07-17 20:00", "2026-07-17 20:00", 6.0, 0.1842, 5.8158, false], ["METAUSDT", "Stock perp", "Buy", 0.66, 596.42, 487.01, "2026-07-18 23:32", "2026-07-18 23:32", 16.553, 0.3716, 16.1814, false], ["HOODUSDT", "Stock perp", "Buy", 2.0, 99.9, 92.03, "2026-07-19 00:02", "2026-07-19 00:02", 14.08, 0.1886, 13.8914, false], ["PLTRUSDT", "Stock perp", "Buy", 1.51, 132.24, 121.76, "2026-07-19 03:27", "2026-07-19 03:27", 5.3907, 0.1885, 5.2022, false], ["BABAUSDT", "Stock perp", "Buy", 1.72, 115.78, 106.6, "2026-07-19 05:29", "2026-07-19 05:29", 4.5064, 0.188, 4.3184, false], ["CBRSUSDT", "Stock perp", "Buy", 1.18, 169.56, 156.08, "2026-07-19 07:15", "2026-07-19 07:15", 8.2954, 0.1889, 8.1065, false], ["INTCUSDT", "Stock perp", "Buy", 2.14, 93.35, 86.01, "2026-07-19 08:45", "2026-07-19 08:45", 6.9122, 0.1886, 6.7236, false], ["NVDAUSDT", "Stock perp", "Buy", 0.98, 202.31, 186.29, "2026-07-19 14:30", "2026-07-19 14:30", 9.8, 0.1872, 9.6128, false], ["BABAUSDT", "Stock perp", "Buy", 3.44, 115.69, 106.49, "2026-07-23 06:00", "2026-07-23 06:00", 10.1136, 0.3757, 9.7379, false], ["PLTRUSDT", "Stock perp", "Buy", 1.61, 123.61, 113.82, "2026-07-24 12:47", "2026-07-24 12:47", 5.8282, 0.1879, 5.6403, false], ["MUUSDT", "Stock perp", "Buy", 0.21, 925.12, 876.65, "2026-07-25 08:15", "2026-07-25 08:15", 6.5016, 0.1834, 6.3182, false], ["CBRSUSDT", "Stock perp", "Buy", 1.99, 200.36, 184.6, "2026-07-25 08:15", "2026-07-25 08:15", 8.7958, 0.3764, 8.4194, false], ["INTCUSDT", "Stock perp", "Buy", 2.27, 86.05, 75.81, "2026-07-25 10:45", "2026-07-25 10:45", 6.6643, 0.1844, 6.4799, false], ["AMDUSDT", "Stock perp", "Buy", 0.39, 464.67, 395.67, "2026-07-25 11:45", "2026-07-25 11:45", -5.9329, 0.1711, -6.104, false], ["HOODUSDT", "Stock perp", "Buy", 2.11, 94.84, 87.36, "2026-07-25 23:02", "2026-07-25 23:02", 6.0979, 0.1889, 5.909, false], ["CBRSUSDT", "Stock perp", "Buy", 1.07, 186.51, 171.73, "2026-07-28 21:00", "2026-07-28 21:00", 5.5426, 0.1884, 5.3542, false], ["CBRSUSDT", "Stock perp", "Buy", 1.09, 182.72, 162.63, "2026-07-30 00:30", "2026-07-30 00:30", 9.4394, 0.188, 9.2514, false], ["MUUSDT", "Stock perp", "Buy", 0.52, 755.78, 700.7, "2026-07-30 07:15", "2026-07-30 07:15", 5.9228, 0.371, 5.5518, false], ["HOODUSDT", "Stock perp", "Buy", 0.08, 88.97, 80.61, "2026-07-30 14:00", "2026-07-30 14:00", 6.8656, 0.0067, 6.8589, false], ["PLTRUSDT", "Stock perp", "Buy", 3.24, 123.3, 113.53, "2026-07-30 19:15", "2026-07-30 19:15", 6.5772, 0.3771, 6.2001, false], ["MUUSDT", "Stock perp", "Buy", 0.27, 829.66, 752.83, "2026-08-02 22:30", "2026-08-02 22:30", 8.7048, 0.2115, 8.4933, false], ["CBRSUSDT", "Stock perp", "Buy", 1.01, 196.91, 181.34, "2026-08-03 02:45", "2026-08-03 02:45", 12.019, 0.1877, 11.8313, false], ["INTCUSDT", "Stock perp", "Buy", 2.22, 89.78, 82.66, "2026-08-03 20:15", "2026-08-03 20:15", 6.993, 0.1882, 6.8048, false], ["BABAUSDT", "Stock perp", "Buy", 1.57, 126.87, 116.86, "2026-08-07 01:30", "2026-08-07 01:30", 4.1605, 0.188, 3.9725, false], ["CBRSUSDT", "Stock perp", "Buy", 0.92, 216.57, 199.39, "2026-08-07 20:00", "2026-08-07 20:00", 10.3592, 0.1881, 10.1711, false], ["MUUSDT", "Stock perp", "Buy", 0.44, 880.32, 816.32, "2026-08-08 16:45", "2026-08-08 16:45", 7.0004, 0.3656, 6.6348, false], ["AMDUSDT", "Stock perp", "Buy", 0.81, 479.62, 441.61, "2026-08-10 05:45", "2026-08-10 05:45", 5.9292, 0.3667, 5.5625, false], ["INTCUSDT", "Stock perp", "Buy", 2.06, 98.2, 90.41, "2026-08-11 07:15", "2026-08-11 07:15", 6.516, 0.191, 6.325, false], ["NVDAUSDT", "Stock perp", "Buy", 0.9, 219.97, 202.52, "2026-08-11 15:00", "2026-08-11 15:00", 5.022, 0.1869, 4.8351, false], ["CBRSUSDT", "Stock perp", "Buy", 0.86, 232.38, 213.98, "2026-08-11 22:45", "2026-08-11 22:45", 4.988, 0.1887, 4.7993, false], ["MSFTUSDT", "Stock perp", "Buy", 0.39, 491.18, 452.49, "2026-08-13 13:00", "2026-08-13 13:00", 5.1363, 0.1808, 4.9555, false], ["BABAUSDT", "Stock perp", "Buy", 1.56, 123.0, 113.35, "2026-08-14 06:00", "2026-08-14 06:00", 6.0996, 0.1811, 5.9185, false], ["CBRSUSDT", "Stock perp", "Buy", 0.84, 220.87, 203.48, "2026-08-15 16:45", "2026-08-15 16:45", 25.0656, 0.1751, 24.8905, false], ["HOODUSDT", "Stock perp", "Buy", 4.2, 93.83, 84.98, "2026-08-17 08:32", "2026-08-17 08:32", 18.522, 0.372, 18.15, false], ["AMDUSDT", "Stock perp", "Buy", 0.39, 502.36, 418.18, "2026-08-18 10:30", "2026-08-18 10:30", 8.6541, 0.1849, 8.4692, false], ["PLTRUSDT", "Stock perp", "Buy", 1.16, 171.25, 157.67, "2026-08-18 14:48", "2026-08-18 14:48", 5.0924, 0.1875, 4.9049, false], ["NVDAUSDT", "Stock perp", "Buy", 1.8, 218.07, 194.52, "2026-08-19 06:45", "2026-08-19 06:45", 15.318, 0.3705, 14.9475, false], ["MUUSDT", "Stock perp", "Buy", 0.42, 943.16, 893.65, "2026-08-19 07:00", "2026-08-19 07:00", 7.1274, 0.3739, 6.7535, false], ["INTCUSDT", "Stock perp", "Buy", 4.16, 95.47, 79.79, "2026-08-19 07:00", "2026-08-19 07:00", 6.24, 0.3749, 5.8651, false], ["CBRSUSDT", "Stock perp", "Buy", 3.95, 190.47, 157.22, "2026-08-21 07:45", "2026-08-21 07:45", 34.8785, 0.7102, 34.1683, false], ["BABAUSDT", "Stock perp", "Buy", 6.69, 117.51, 101.47, "2026-08-21 18:15", "2026-08-21 18:15", 3.0774, 0.7421, 2.3353, false], ["WMTUSDT", "Stock perp", "Buy", 1.72, 104.0, 96.32, "2026-08-22 18:30", "2026-08-22 18:30", 3.4228, 0.1689, 3.2539, false], ["CRCLUSDT", "Stock perp", "Buy", 2.31, 88.59, 81.57, "2026-08-24 15:45", "2026-08-24 15:45", 6.2601, 0.1932, 6.0669, false], ["MUUSDT", "Stock perp", "Buy", 0.42, 916.34, 868.53, "2026-08-24 22:00", "2026-08-24 22:00", 9.4458, 0.3633, 9.0825, false], ["HOODUSDT", "Stock perp", "Buy", 1.86, 104.43, 96.18, "2026-08-25 06:30", "2026-08-25 06:30", 6.1938, 0.1834, 6.0104, false], ["XPTUSDT", "Commodity perp", "Buy", 0.107, 1860.23, 1789.13, "2026-08-25 20:15", "2026-08-25 20:15", 3.761, 0.1879, 3.5731, false], ["XAGUSDT", "Commodity perp", "Buy", 2.898, 68.99, 66.92, "2026-08-25 21:15", "2026-08-25 21:15", 3.5645, 0.1887, 3.3758, false], ["PLTRUSDT", "Stock perp", "Buy", 1.16, 172.42, 158.75, "2026-08-26 19:15", "2026-08-26 19:15", 6.3336, 0.1888, 6.1448, false], ["CRCLUSDT", "Stock perp", "Buy", 2.09, 87.62, 80.66, "2026-08-29 07:30", "2026-08-29 07:30", 16.1975, 0.1729, 16.0246, false], ["HOODUSDT", "Stock perp", "Buy", 1.81, 104.52, 96.26, "2026-08-29 13:47", "2026-08-29 13:47", 4.1811, 0.1786, 4.0025, false], ["NVDAUSDT", "Stock perp", "Buy", 0.88, 219.12, 201.74, "2026-08-30 20:30", "2026-08-30 20:30", 6.1512, 0.182, 5.9692, false], ["NATGASUSDT", "Commodity perp", "Buy", 68.9, 2.883, 2.815, "2026-08-31 09:15", "2026-08-31 09:15", 6.1321, 0.1875, 5.9446, false], ["MSTRUSDT", "Stock perp", "Buy", 1.44, 129.02, 118.87, "2026-08-31 12:15", "2026-08-31 12:15", 5.328, 0.1754, 5.1526, false], ["XPTUSDT", "Commodity perp", "Buy", 0.092, 1773.75, 1693.61, "2026-09-01 05:45", "2026-09-01 05:45", 6.9794, 0.154, 6.8254, false], ["MSFTUSDT", "Stock perp", "Buy", 0.39, 504.48, 464.53, "2026-09-01 19:15", "2026-09-01 19:15", 3.3111, 0.1857, 3.1254, false], ["PLTRUSDT", "Stock perp", "Buy", 3.24, 175.41, 155.93, "2026-09-01 19:45", "2026-09-01 19:45", 12.96, 0.5365, 12.4235, false], ["PLTRUSDT", "Stock perp", "Buy", 3.43, 171.13, 157.6, "2026-09-07 12:45", "2026-09-07 12:45", 2.4696, 0.5541, 1.9155, false], ["HOODUSDT", "Stock perp", "Buy", 3.42, 113.02, 96.5, "2026-09-07 22:45", "2026-09-07 22:45", 8.847, 0.3649, 8.4821, false], ["CRCLUSDT", "Stock perp", "Buy", 6.22, 96.47, 85.19, "2026-09-08 16:00", "2026-09-08 16:00", 5.287, 0.5664, 4.7206, false], ["MSFTUSDT", "Stock perp", "Buy", 0.4, 494.67, 455.79, "2026-09-09 04:15", "2026-09-09 04:15", -0.796, 0.1868, -0.9828, false], ["MSTRUSDT", "Stock perp", "Buy", 2.96, 134.86, 122.27, "2026-09-09 07:30", "2026-09-09 07:30", 2.368, 0.3768, 1.9912, false], ["CBRSUSDT", "Stock perp", "Buy", 4.08, 195.28, 168.39, "2026-09-09 08:15", "2026-09-09 08:15", 4.8144, 0.7521, 4.0623, false], ["NVDAUSDT", "Stock perp", "Buy", 2.72, 219.52, 198.35, "2026-09-09 11:45", "2026-09-09 11:45", 7.3984, 0.5637, 6.8347, false], ["MUUSDT", "Stock perp", "Buy", 0.19, 1011.3, 958.01, "2026-09-09 19:15", "2026-09-09 19:15", 4.1952, 0.1814, 4.0138, false], ["NATGASUSDT", "Commodity perp", "Buy", 68.3, 2.927, 2.851, "2026-09-09 20:15", "2026-09-09 20:15", 5.5323, 0.1887, 5.3436, false], ["INTCUSDT", "Stock perp", "Buy", 0.89, 101.45, 90.44, "2026-09-12 17:45", "2026-09-12 17:45", 9.751, 0.0852, 9.6658, false], ["MUUSDT", "Stock perp", "Buy", 0.4, 957.51, 879.78, "2026-09-12 20:15", "2026-09-12 20:15", 10.924, 0.3616, 10.5624, false], ["XAGUSDT", "Commodity perp", "Buy", 6.247, 64.09, 61.62, "2026-09-13 05:15", "2026-09-13 05:15", 8.6833, 0.3779, 8.3054, false], ["XPTUSDT", "Commodity perp", "Buy", 0.223, 1788.53, 1707.99, "2026-09-13 20:11", "2026-09-13 20:11", 2.6113, 0.3765, 2.2348, false], ["AMDUSDT", "Stock perp", "Buy", 0.39, 497.91, 458.42, "2026-09-13 20:15", "2026-09-13 20:15", 9.438, 0.1833, 9.2547, false], ["BZUSDT", "Commodity perp", "Buy", 1.98, 101.89, 100.21, "2026-09-14 01:30", "2026-09-14 01:30", 2.7324, 0.1904, 2.542, false], ["METAUSDT", "Stock perp", "Buy", 0.3, 645.49, 594.29, "2026-09-14 02:45", "2026-09-14 02:45", 5.187, 0.1828, 5.0042, false], ["CRCLUSDT", "Stock perp", "Buy", 4.75, 84.08, 74.99, "2026-09-16 17:15", "2026-09-16 17:15", 4.37, 0.377, 3.993, false], ["MSTRUSDT", "Stock perp", "Buy", 1.55, 128.43, 118.28, "2026-09-17 06:00", "2026-09-17 06:00", 6.0605, 0.1879, 5.8726, false], ["BZUSDT", "Commodity perp", "Buy", 2.06, 98.63, 91.28, "2026-09-17 06:45", "2026-09-17 06:45", 4.7902, 0.1918, 4.5984, false], ["NATGASUSDT", "Commodity perp", "Buy", 66.7, 3.012, 2.971, "2026-09-22 09:00", "2026-09-22 09:00", 4.4689, 0.1896, 4.2793, false], ["XAGUSDT", "Commodity perp", "Buy", 3.017, 65.67, 64.68, "2026-09-22 14:30", "2026-09-22 14:30", 4.3746, 0.187, 4.1876, false]]};
+const S = D.summary;
+document.title = D.meta.title;
+document.getElementById("title").textContent = D.meta.title;
+document.getElementById("eqTitle").textContent = "Equity from $500, " + D.meta.time_label;
+const usd = (v, d = 2) => (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});
+const sgn = v => (v > 0 ? "+" : "") + usd(v);
+const pct = v => (v * 100).toFixed(1) + "%";
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const dot = v => `<span class="dot ${v >= 0 ? "pos" : "neg"}"></span>`;
+
+document.getElementById("sub").textContent =
+  `${S.trades.toLocaleString()} closed trades · ${S.first_entry.slice(0,10)} → ${S.last_exit.slice(0,10)} · starting capital ${usd(S.start_capital, 0)} · leader's quantities used as-is`;
+
+const tiles = [
+  ["Gross P&L (export)", sgn(S.gross), "before any fee"],
+  ["Fees paid (taker + GST)", usd(S.fees_taker), `${pct(S.fees_taker / S.gross)} of gross profit`],
+  ["Net P&L", sgn(S.net_taker), `maker-only best case ${sgn(S.net_maker)}`],
+  ["Ending equity", usd(S.end_equity), `${pct(S.net_taker / S.start_capital)} on $500`],
+  ["Lowest equity", usd(S.min_equity), S.min_equity_at.slice(0,10)],
+  ["Max drawdown", usd(S.max_drawdown), S.max_drawdown_at.slice(0,10)],
+  ["Win rate", `${pct(S.win_rate_net)}`, `gross ${pct(S.win_rate_gross)} · ${S.flipped_to_loss} flipped to loss by fees`],
+];
+document.getElementById("tiles").innerHTML = tiles.map(([l, v, n]) =>
+  `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
+
+document.getElementById("exposure").innerHTML = D.meta.exposure_html;
+
+// Equity chart
+const grid = css("--grid"), tick = css("--text-2");
+Chart.defaults.color = tick; Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+new Chart(document.getElementById("equity"), {
+  type: "line",
+  data: { datasets: [
+    { label: "Gross", data: D.equity.t.map((t, i) => ({x: Date.parse(t.replace(" ", "T")), y: D.equity.gross[i]})), borderColor: css("--gross"), borderWidth: 2, pointRadius: 0, tension: 0 },
+    { label: "Net", data: D.equity.t.map((t, i) => ({x: Date.parse(t.replace(" ", "T")), y: D.equity.net[i]})), borderColor: css("--net"), borderWidth: 2, pointRadius: 0, tension: 0 },
+  ]},
+  options: { maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+    plugins: { legend: { display: false }, tooltip: { callbacks: {
+      title: items => D.equity.t[items[0].dataIndex] + " IST",
+      label: c => `${c.dataset.label}: ${usd(c.parsed.y)}` } } },
+    scales: { x: { type: "linear", min: Date.parse(D.equity.t[0].replace(" ", "T")), max: Date.parse(D.equity.t.at(-1).replace(" ", "T")), ticks: { maxTicksLimit: 9, callback: v => new Date(v).toISOString().slice(0, 7) }, grid: { display: false } },
+              y: { grid: { color: grid }, ticks: { callback: v => usd(v, 0) } } } }
+});
+
+// Monthly chart
+const M = D.monthly;
+new Chart(document.getElementById("monthlyChart"), {
+  type: "bar",
+  data: { labels: M.map(r => r.month), datasets: [{ data: M.map(r => r.net),
+    backgroundColor: M.map(r => r.net >= 0 ? css("--pos") : css("--neg")), borderRadius: 4, borderSkipped: "start", maxBarThickness: 28 }] },
+  options: { maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false }, tooltip: { callbacks: {
+      label: c => { const r = M[c.dataIndex]; return [`Net ${sgn(r.net)}`, `Gross ${sgn(r.gross)} · fees ${usd(r.fees)}`, `${r.trades} trades`]; } } } },
+    scales: { x: { grid: { display: false } }, y: { grid: { color: grid }, ticks: { callback: v => usd(v, 0) } } } }
+});
+
+// Monthly table
+document.getElementById("monthly").innerHTML =
+  `<thead><tr><th>Month</th><th>Trades</th><th>Gross</th><th>Fees</th><th>Net</th><th>Net (maker case)</th><th>Start equity</th><th>End equity</th><th>Return</th></tr></thead><tbody>` +
+  M.map(r => `<tr><td>${r.month}${r.trades ? "" : ' <span class="tag">no trades</span>'}</td><td>${r.trades}</td><td>${sgn(r.gross)}</td><td>${usd(r.fees)}</td>
+    <td>${dot(r.net)}${sgn(r.net)}</td><td>${sgn(r.net_maker)}</td><td>${usd(r.start_equity)}</td><td>${usd(r.end_equity)}</td>
+    <td>${r.return_pct == null ? "—" : (r.return_pct > 0 ? "+" : "") + r.return_pct.toFixed(1) + "%"}</td></tr>`).join("") +
+  `<tr style="font-weight:600"><td>Total</td><td>${S.trades}</td><td>${sgn(S.gross)}</td><td>${usd(S.fees_taker)}</td><td>${dot(S.net_taker)}${sgn(S.net_taker)}</td><td>${sgn(S.net_maker)}</td><td>${usd(S.start_capital)}</td><td>${usd(S.end_equity)}</td><td>${(S.net_taker / S.start_capital * 100).toFixed(1)}%</td></tr></tbody>`;
+
+document.getElementById("kinds").innerHTML =
+  `<thead><tr><th>Type</th><th>Trades</th><th>Gross</th><th>Fees</th><th>Net</th><th>Fees / gross</th></tr></thead><tbody>` +
+  S.by_kind.map(k => `<tr><td>${k.kind}</td><td>${k.trades}</td><td>${sgn(k.gross)}</td><td>${usd(k.fees)}</td><td>${dot(k.net)}${sgn(k.net)}</td>
+    <td>${k.gross > 0 ? pct(k.fees / k.gross) : "—"}</td></tr>`).join("") + `</tbody>`;
+
+// Trades table
+const COLS = ["Symbol","Type","Side","Qty","Entry",D.meta.exit_header,"Entry time","Exit time","Gross","Fees","Net"];
+const T = D.trades; // [sym, kind, side, qty, entry, exit, et, xt, gross, fees, net, settled]
+let sortCol = 7, sortDir = -1, page = 0; const PER = 50;
+const kinds = [...new Set(T.map(r => r[1]))].sort(), months = [...new Set(T.map(r => r[7].slice(0,7)))].sort().reverse();
+kinds.forEach(k => fk.insertAdjacentHTML("beforeend", `<option>${k}</option>`));
+months.forEach(m => fm.insertAdjacentHTML("beforeend", `<option>${m}</option>`));
+function rows() {
+  const qv = q.value.trim().toUpperCase();
+  return T.filter(r => (!qv || r[0].includes(qv)) && (!fk.value || r[1] === fk.value) && (!fm.value || r[7].startsWith(fm.value))
+    && (fr.value !== "w" || r[10] > 0) && (fr.value !== "l" || r[10] <= 0) && (fr.value !== "f" || (r[8] > 0 && r[10] <= 0)))
+    .sort((a, b) => (a[sortCol] > b[sortCol] ? 1 : a[sortCol] < b[sortCol] ? -1 : 0) * sortDir);
+}
+function render() {
+  const all = rows(), pages = Math.max(1, Math.ceil(all.length / PER)); page = Math.min(page, pages - 1);
+  const sum = all.reduce((a, r) => [a[0] + r[8], a[1] + r[9], a[2] + r[10]], [0, 0, 0]);
+  trades.innerHTML = `<thead><tr>${COLS.map((c, i) => `<th class="${i < 3 ? "l" : ""}" data-i="${i}">${c}${i === sortCol ? (sortDir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead><tbody>` +
+    all.slice(page * PER, page * PER + PER).map(r => `<tr><td>${r[0]}</td><td class="l">${r[1]}</td><td class="l">${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td>
+      <td>${r[5]}${r[11] ? ' <span class="tag">settled</span>' : ""}</td><td>${r[6]}</td><td>${r[7]}</td><td>${sgn(r[8])}</td><td>${usd(r[9], 4)}</td><td>${dot(r[10])}${sgn(r[10])}</td></tr>`).join("") +
+    `<tr style="font-weight:600"><td colspan="8">${all.length} trades shown</td><td>${sgn(sum[0])}</td><td>${usd(sum[1])}</td><td>${sgn(sum[2])}</td></tr></tbody>`;
+  pinfo.textContent = `Page ${page + 1} of ${pages}`;
+  trades.querySelectorAll("th").forEach(th => th.onclick = () => { const i = +th.dataset.i; sortDir = i === sortCol ? -sortDir : -1; sortCol = i; render(); });
+}
+[q, fk, fm, fr].forEach(el => el.oninput = () => { page = 0; render(); });
+prev.onclick = () => { page = Math.max(0, page - 1); render(); };
+next.onclick = () => { page++; render(); };
+render();
+
+document.getElementById("assume").innerHTML = "<h2>How this was computed</h2><ul>" + D.meta.notes.map(n => `<li>${n}</li>`).join("") + "</ul>";
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+ "pre_loss_rate": 0.0538,
+ "post_losses": 4,
+ "post_trades": 48,
+ "binomial_p_at_least_that_many_losses": 0.258,
+ "pre_mean_return_on_max_loss": 0.0075,
+ "post_mean_return_on_max_loss": -0.0205,
+ "bootstrap_p_pre_draws_this_bad_or_worse": 0.123,
+ "trades_needed_to_separate_pre_edge_from_breakeven": 761,
+ "trades_per_month_historically": 2.44,
+ "years_of_forward_trading_needed": 26.0
+}

@@ -1,0 +1,268 @@
+# ===========================================================================
+# NSE INDEX OPTIONS -- charge rates, 2016-01-01 .. 2026-09-17
+#
+# This card exists because a premium SELLER is taxed differently from a buyer,
+# and the difference is the strategy's largest single cost.
+#
+#   * STT is charged on the SELL side, on the PREMIUM. A seller pays it at
+#     entry, on revenue, before knowing whether the trade works.
+#   * The rate rose FIVE times inside this sample, from 0.017% to 0.15% --
+#     roughly NINE-FOLD. A backtest quoting one average across that span has
+#     measured a market that never existed.
+#   * A buyer's STT is zero on the premium. The wing costs nothing in STT
+#     terms, which is one of the few things that makes the hedge cheap.
+#
+# Rates are DATE-AWARE. `nse_index_options.py` resolves each rate at the
+# TRADE's date, never at "today". A rate list is read newest-applicable-first.
+#
+# Confidence markers, as used by the repo's other cards:
+#   CONFIRMED     - read verbatim from a primary source (NSE circular PDF,
+#                   incometaxindia.gov.in, SEBI circular)
+#   UNCONFIRMED   - no primary source obtained; corroborated by brokers only
+#   APPROXIMATION - a model input, not a published rate
+#
+# Researched 2026-09-20.  See CHARGES.md for the assertion against a published
+# broker calculator and for the divergences, which are RECORDED, not tuned.
+# ===========================================================================
+
+version: "2026-09-20"
+currency: "INR"
+scope: "NSE equity derivatives segment, INDEX OPTIONS (OPTIDX / FinInstrmTp=IDO)"
+
+labels:
+  brokerage: "Brokerage"
+  stt: "STT"
+  stt_exercise: "STT (on exercise)"
+  exchange_transaction_charge: "Exchange transaction charge"
+  sebi_turnover_fee: "SEBI turnover fee"
+  stamp_duty: "Stamp duty"
+  gst: "GST"
+
+levies:
+  - name: "brokerage"
+    kind: "brokerage"
+    note: >-
+      Per EXECUTED ORDER, not per leg-lot. A four-legged iron condor opened and
+      closed is 8 orders; a two-legged vertical is 4. This is why leg count is
+      a real cost and not a presentation detail.
+
+  - name: "stt"
+    kind: "percent_of_turnover"
+    rate_key: "stt.sell_option_premium_rate"
+    sides: ["SELL"]
+    note: >-
+      Sale of an option in securities, on the option PREMIUM, payable by the
+      seller. Finance (No. 2) Act 2004, Chapter VII schedule.
+
+  - name: "exchange_transaction_charge"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.index_options_total"
+    note: "Transaction charge + NSE IPFT contribution, as one total."
+
+  - name: "sebi_turnover_fee"
+    kind: "percent_of_turnover"
+    rate_key: "sebi_turnover_fee.rate"
+
+  - name: "stamp_duty"
+    kind: "percent_of_turnover"
+    rate_key: "stamp_duty.option_premium_rate"
+    sides: ["BUY"]
+
+  - name: "gst"
+    kind: "percent_of_components"
+    rate_key: "gst.rate"
+    applies_to: ["brokerage", "exchange_transaction_charge", "sebi_turnover_fee"]
+    note: "NOT on premium, NOT on STT, NOT on stamp duty."
+
+# ---------------------------------------------------------------------------
+brokerage:
+  mode: "flat"
+  flat_per_order: 20.00
+  # Options brokerage is flat at every discount broker checked -- unlike
+  # futures, there is no 0.03% limb to fall below it.
+  # source (secondary): https://zerodha.com/charges/ -- "Flat Rs. 20 per
+  #   executed order"
+  # source (secondary): https://dhan.co/pricing/
+  # as-of: 2026-09-20   confidence: CONFIRMED (commercial, not statutory)
+
+# ---------------------------------------------------------------------------
+stt:
+  # Sale of an option in securities -- on PREMIUM, SELL side.
+  sell_option_premium_rate:
+    - from: "2008-06-01"
+      value: 0.00017          # 0.017%
+      # confidence: UNCONFIRMED -- the long-standing pre-2016 rate, described
+      #   as "the current 0.017%" by every contemporaneous report of the 2016
+      #   hike. Only the first five months of this sample use it.
+    - from: "2016-06-01"
+      value: 0.0005           # 0.05%
+      # Finance Act 2016 (assent 14 May 2016).
+      # source (secondary): Business Standard / PTI, 17 May 2016, "Higher STT
+      #   on sale of option contracts from June 1: NSE"
+      # confidence: CONFIRMED by a contemporaneous report citing NSE's own
+      #   notice; UNCONFIRMED against the gazetted Act.
+    - from: "2023-04-01"
+      value: 0.000625         # 0.0625%
+      # Finance Act 2023, passed 24 March 2023.
+      # source (secondary): Upstox / Angel One / ICICI Direct, all describing
+      #   the options sell-side rate moving 0.05% -> 0.0625%.
+      # confidence: CONFIRMED by multiple independent contemporaneous reports.
+    - from: "2024-10-01"
+      value: 0.001            # 0.1%
+      # Finance (No. 2) Act 2024. Budget speech: "It is proposed to increase
+      # the rates of STT on the sale of an option in securities from 0.0625
+      # per cent to 0.1 per cent of the option premium."
+      # source (secondary): https://zerodha.com/z-connect/business-updates/revision-in-exchange-transaction-charges-and-securities-transaction-tax-from-october-1-2024
+      # source (secondary): ICICI Direct, "New STT Rules in F&O Trading"
+      # confidence: CONFIRMED by two independent sources quoting the Budget.
+    - from: "2026-04-01"
+      value: 0.0015           # 0.15%
+      # Budget 2026. "The rate of STT on sale of an option in securities
+      # increased from 0.1 per cent to 0.15 per cent of the option premium."
+      # source (secondary): https://cleartax.in/s/securities-transaction-tax-stt
+      # source (secondary): https://zerodha.com/charges/ (live card shows
+      #   "0.15% on sell side (on premium)" as of 2026-09-20)
+      # confidence: CONFIRMED -- corroborated by a live broker card, which is
+      #   the strongest available check that a rate is CURRENTLY in force.
+
+  # Sale of an option WHERE THE OPTION IS EXERCISED -- on the INTRINSIC value
+  # (settlement price less strike), payable by the PURCHASER.
+  #
+  # LOAD-BEARING for this study. A short leg that expires in the money is
+  # assigned; the LONG wing, if also in the money, is exercised and the holder
+  # -- us -- pays this. It is charged on INTRINSIC VALUE, not premium, so on a
+  # deep-ITM wing it can dwarf every other charge on the trade. A backtest that
+  # omits it flatters exactly the disaster cases the left tail is made of.
+  exercise_intrinsic_rate:
+    - from: "2008-06-01"
+      value: 0.00125          # 0.125%
+      # source (secondary): Zerodha archived card; every broker checked.
+      # confidence: UNCONFIRMED against the gazette; stable for ~18 years.
+    - from: "2026-04-01"
+      value: 0.0015           # 0.15%
+      # Budget 2026, same amendment: "on sale of an option where the option is
+      # exercised from 0.125 per cent to 0.15 per cent of the intrinsic price".
+      # source (secondary): https://cleartax.in/s/securities-transaction-tax-stt
+      # confidence: CONFIRMED by two sources.
+
+# ---------------------------------------------------------------------------
+exchange_transaction_charge:
+  # Transaction charge + NSE IPFT contribution, as ONE total per side of
+  # premium value. Split between the two lines is immaterial: GST treats them
+  # identically, and NSE's own Feb-2026 circular re-split them while stating
+  # the total was unchanged.
+  index_options_total:
+    - from: "2016-01-01"
+      value: 0.000530         # Rs 53.00 per lakh + IPFT Rs 0.01/crore
+      # NSE circular NSE/FA/56129 (24 Mar 2023) records the pre-Apr-2023
+      # schedule verbatim: "More than Rs 3 Crores up to Rs 100 Crores --
+      # Existing Rs 53.00 / Revised Rs 50.00" per lakh of premium value, and
+      # IPFT "existing Rs.0.01 per crore".
+      # source (primary): https://archives.nseindia.com/content/circulars/FA56129.pdf
+      # confidence: CONFIRMED for the SLAB. But see the note below -- the slab
+      #   was on the MEMBER's monthly turnover, so what a retail client
+      #   actually paid before Oct 2024 is not knowable from here.
+    - from: "2023-04-01"
+      value: 0.000505         # Rs 50.00 per lakh + IPFT Rs 50/crore
+      # Same circular: revised rate Rs 50.00 per lakh for the Rs 3-100 crore
+      # slab, and IPFT "recalibrated ... to Rs 50 per crore traded value
+      # (premium value) in Equity Options", effective 1 April 2023.
+      # Rs 50.00/lakh = Rs 5,000/crore; + Rs 50/crore = Rs 5,050/crore.
+      # source (primary): https://archives.nseindia.com/content/circulars/FA56129.pdf
+      # confidence: CONFIRMED for the schedule.
+      #
+      # DIVERGENCE, RECORDED NOT TUNED: Zerodha published 0.0495% to clients
+      # for this period, against the schedule's 0.0505%. The gap is a
+      # member-slab artefact -- before SEBI's "True to Label" rule the amount a
+      # broker recovered from a client need not equal what the exchange charged
+      # the broker. The schedule figure is used because it is primary-sourced
+      # and the more conservative of the two. Worth 0.001% of premium.
+    - from: "2024-10-01"
+      value: 0.0003553        # Rs 3,503/crore + IPFT Rs 50/crore = Rs 3,553/crore
+      # NSE circular NSE/FA/64232 (27 Sep 2024), effective 1 Oct 2024, read
+      # verbatim: "Equity Options: Rs. 35.03 each side per lakh of premium
+      # value". NSE/FA/73061 confirms the total including IPFT as "Rs. 3,553
+      # each side" per crore.
+      # source (primary): https://nsearchives.nseindia.com/content/circulars/FA64232.pdf
+      # source (primary): https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+      # source (secondary): https://zerodha.com/charges/ ("0.03553% on premium")
+      # confidence: CONFIRMED. Post-"True to Label" the schedule and the
+      #   client's charge must match, and the live broker card agrees exactly.
+    - from: "2026-03-01"
+      value: 0.0003553        # Rs 3,552.99 + Rs 0.01 = Rs 3,553/crore, UNCHANGED
+      # NSE circular NSE/FA/73061 (27 Feb 2026) rolled the IPFT contribution
+      # back to its pre-April-2023 level and raised the transaction charge by
+      # the same amount, "thereby ensuring no impact in the overall outflow".
+      # Listed explicitly so a reader who finds the circular does not conclude
+      # the card missed a change.
+      # source (primary): https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+      # confidence: CONFIRMED
+
+# ---------------------------------------------------------------------------
+sebi_turnover_fee:
+  # Measured on PREMIUM for options.
+  rate:
+    - from: "2016-01-01"
+      value: 0.000002         # Rs 20 per crore
+      # confidence: UNCONFIRMED -- the pre-2019 rate. Worth Rs 20 per crore of
+      #   premium; at this study's sizes, under a rupee a trade.
+    - from: "2019-04-01"
+      value: 0.000001         # Rs 10 per crore
+      # source (primary): SEBI board memorandum, March 2019 --
+      #   https://www.sebi.gov.in/sebi_data/meetingfiles/mar-2019/1553244864312_1.pdf
+      # source (secondary): https://zerodha.com/charges/ ("Rs 10 / crore")
+      # confidence: CONFIRMED for the rate.
+
+  # SEBI's explanation also charges the fee on the NOTIONAL value of options
+  # exercised or assigned. Brokers omit it. Off by default to stay consistent
+  # with broker contract notes; the sweep in CHARGES.md turns it on.
+  charge_on_exercise_notional: false
+
+# ---------------------------------------------------------------------------
+stamp_duty:
+  # BUY SIDE ONLY, on premium turnover. A seller pays none at entry -- and
+  # pays it on the BUY-TO-CLOSE, and on the bought wing.
+  option_premium_rate:
+    - from: "2016-01-01"
+      value: 0.00003
+      # Pre-1 July 2020 stamp duty was state-wise. 0.003% is carried back for
+      # want of a sourced alternative; it is also the post-2020 national rate.
+      # confidence: UNCONFIRMED. Worth Rs 300 per crore of premium on one side.
+    - from: "2020-07-01"
+      value: 0.00003          # 0.003% = Rs 300 per crore, BUY side
+      # Indian Stamp (Collection of Stamp Duty through Stock Exchanges...)
+      # Rules 2019, implemented 1 July 2020.
+      # source (secondary): https://zerodha.com/charges/
+      #   ("0.003% or Rs 300 / crore on buy side")
+      # as-of: 2026-09-20   confidence: UNCONFIRMED against the gazette text
+
+# ---------------------------------------------------------------------------
+gst:
+  rate: 0.18
+  applies_to: ["brokerage", "exchange_transaction_charge", "sebi_turnover_fee"]
+  # source (secondary): https://zerodha.com/charges/ -- "18% on (brokerage +
+  #   SEBI charges + transaction charges)"
+  # as-of: 2026-09-20
+  # confidence: UNCONFIRMED against a primary CBIC notification. Consistent
+  #   across every broker checked.
+
+# ---------------------------------------------------------------------------
+rounding:
+  mode: "exact"
+  final_total_decimal_places: 2
+
+# ---------------------------------------------------------------------------
+# WHAT THIS CARD DOES NOT PRICE, stated here rather than only in the write-up:
+#
+#   * The BID-ASK SPREAD, which is not a charge and is not in the bhavcopy. It
+#     is modelled separately in hedgelib/slippage.py and swept, because on the
+#     far-OTM wing it is plausibly larger than every line item here combined.
+#   * Any charge on a position CLOSED BY EXPIRY rather than by trade. An
+#     option that expires worthless is not a transaction: no brokerage, no
+#     transaction charge, no GST, and -- because there is no sale and no
+#     exercise -- no STT. Letting a spread expire is genuinely cheaper than
+#     closing it, and the backtest must not charge for a trade that never
+#     happened.
+#   * Physical settlement. Index options are CASH settled; this card would be
+#     wrong for single-stock options, which are not in scope.
+# ===========================================================================

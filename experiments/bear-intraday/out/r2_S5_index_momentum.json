@@ -1,0 +1,168 @@
+{
+ "signals": 560,
+ "trades": 560,
+ "gross_bps": -1.5,
+ "cost_bps": 2.26,
+ "net_1bps": {
+  "mean_bps": -3.76,
+  "ci95_bps": [
+   -6.05,
+   -1.47
+  ],
+  "days": 560
+ },
+ "net_2bps": {
+  "mean_bps": -5.76,
+  "ci95_bps": [
+   -8.05,
+   -3.47
+  ],
+  "days": 560
+ },
+ "net_5bps": {
+  "mean_bps": -11.76,
+  "ci95_bps": [
+   -14.06,
+   -9.48
+  ],
+  "days": 560
+ },
+ "drop_best_10_days_bps": -5.31,
+ "regime_on": {
+  "trades": 170,
+  "net_bps": -3.79
+ },
+ "regime_off": {
+  "trades": 390,
+  "net_bps": -3.74
+ },
+ "by_year_net_bps": {
+  "2017": -4.06,
+  "2018": -2.22,
+  "2019": -6.16,
+  "2020": -5.11,
+  "2021": -2.67,
+  "2022": -2.59
+ },
+ "episodes": [
+  {
+   "start": "2018-02-05",
+   "end": "2018-04-05",
+   "trades": 14,
+   "net_bps": -3.88,
+   "positive": false
+  },
+  {
+   "start": "2018-05-21",
+   "end": "2018-07-24",
+   "trades": 19,
+   "net_bps": -0.24,
+   "positive": false
+  },
+  {
+   "start": "2018-09-24",
+   "end": "2018-11-15",
+   "trades": 18,
+   "net_bps": -0.93,
+   "positive": false
+  },
+  {
+   "start": "2019-01-25",
+   "end": "2019-02-28",
+   "trades": 13,
+   "net_bps": -9.2,
+   "positive": false
+  },
+  {
+   "start": "2019-07-09",
+   "end": "2019-09-20",
+   "trades": 27,
+   "net_bps": -6.46,
+   "positive": false
+  },
+  {
+   "start": "2020-02-26",
+   "end": "2020-05-20",
+   "trades": 30,
+   "net_bps": -2.22,
+   "positive": false
+  },
+  {
+   "start": "2021-11-23",
+   "end": "2022-03-24",
+   "trades": 39,
+   "net_bps": -2.45,
+   "positive": false
+  },
+  {
+   "start": "2022-05-06",
+   "end": "2022-07-07",
+   "trades": 25,
+   "net_bps": -9.11,
+   "positive": false
+  }
+ ],
+ "episodes_positive": "0/8",
+ "controls": {
+  "random_day_short": {
+   "net": {
+    "mean_bps": -4.64,
+    "ci95_bps": [
+     -6.02,
+     -3.29
+    ],
+    "days": 1297
+   },
+   "diff": {
+    "diff_bps": 0.88,
+    "ci95_bps": [
+     -0.88,
+     2.57
+    ]
+   }
+  },
+  "mirror_long_same_days": {
+   "net": {
+    "mean_bps": -4.75,
+    "ci95_bps": [
+     -7.03,
+     -2.46
+    ],
+    "days": 560
+   },
+   "diff": {
+    "diff_bps": 0.99,
+    "ci95_bps": [
+     -3.59,
+     5.56
+    ]
+   }
+  },
+  "short_every_day": {
+   "net": {
+    "mean_bps": -4.53,
+    "ci95_bps": [
+     -5.8,
+     -3.24
+    ],
+    "days": 1418
+   },
+   "diff": {
+    "diff_bps": 0.77,
+    "ci95_bps": [
+     -0.83,
+     2.35
+    ]
+   }
+  }
+ },
+ "diagnostic_long_side_first_half_up": {
+  "mean_bps": -3.56,
+  "ci95_bps": [
+   -5.16,
+   -2.14
+  ],
+  "days": 854
+ },
+ "beats_all_controls": false
+}

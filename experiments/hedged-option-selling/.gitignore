@@ -1,0 +1,7 @@
+# The data cache is ~2 GB and is rebuilt from public NSE archives.
+# Nothing in it is private; it is simply too large and entirely reproducible.
+data/cache/
+logs/
+.venv/
+__pycache__/
+*.pyc

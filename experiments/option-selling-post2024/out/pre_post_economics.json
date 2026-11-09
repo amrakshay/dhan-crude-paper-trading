@@ -1,0 +1,41 @@
+{
+ "pre": {
+  "trades": 260,
+  "win_rate": 0.946,
+  "avg_win": 1481,
+  "avg_loss": -17139,
+  "breakeven_win_rate": 0.92,
+  "median_credit_over_max_loss": 0.0707,
+  "median_short_iv": 0.1644,
+  "median_days_held": 9.0,
+  "median_charges": 100,
+  "median_lot_size": 75.0,
+  "exit_reasons": {
+   "expiry": 16,
+   "profit_take_50": 244
+  }
+ },
+ "post": {
+  "trades": 49,
+  "win_rate": 0.898,
+  "avg_win": 2409,
+  "avg_loss": -32152,
+  "breakeven_win_rate": 0.93,
+  "median_credit_over_max_loss": 0.0705,
+  "median_short_iv": 0.1394,
+  "median_days_held": 12,
+  "median_charges": 105,
+  "median_lot_size": 75,
+  "exit_reasons": {
+   "expiry": 6,
+   "profit_take_50": 42,
+   "still_open_at_sample_end": 1
+  }
+ },
+ "last_trade": {
+  "entry": "2026-08-25",
+  "exit": "2026-09-17",
+  "reason": "still_open_at_sample_end",
+  "net": -28507
+ }
+}

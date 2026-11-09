@@ -1,0 +1,142 @@
+====================================================================================
+IS THE BULL PUT SPREAD REAL, OR A CELL PICKED OUT OF A GRID?
+====================================================================================
+It is the only defined-risk structure in the sweep that made money.
+That is exactly what a selection artefact looks like, so it gets tested
+harder than the rest.
+
+'R/risk /yr' is the annualised return per rupee-year of MAXIMUM LOSS --
+the capital actually at risk. The comparator is the risk-free rate,
+5.64% a year over this sample.
+
+WHY IT MIGHT BE REAL, stated before the numbers so it is a prediction
+rather than a rationalisation: on an equity index the volatility smile
+is skewed, so the put sold sits on a steeper part of it than the put
+bought. Measured on this data (NIFTY 2025-08-01, 27 DTE) the 16-delta
+put carried 12.8% implied volatility against the 16-delta call's 10.6%.
+A put spread is therefore short the richer option and long the cheaper
+one in volatility terms, and a call spread is the reverse. If that is
+the mechanism, the BEAR CALL spread should be badly negative -- and it
+is, at -102% a year on capital at risk.
+
+------------------------------------------------------------------------------------
+1. THE SURFACE -- one parameter at a time
+------------------------------------------------------------------------------------
+  variant                       n   total P&L  R/risk /yr      worst    worst1%    win
+  BASE 0.16d / 0.05d / 30     308      98,180      26.00%    -48,812    -38,224  94.2%
+  -- short-strike delta --
+      short 0.08d             330      42,622      24.45%    -14,634    -12,111  95.2%
+      short 0.10d             321      47,686      20.03%    -31,211    -22,227  96.6%
+      short 0.20d             293     135,575      31.24%    -51,770    -45,342  91.8%
+      short 0.30d             273     121,390      22.27%    -69,853    -60,427  87.2%
+      short 0.40d             250     283,578      46.21%    -77,714    -64,135  84.8%
+  -- days to expiry --
+      DTE 7                   761      -5,931      -3.31%    -35,797    -24,438  92.4%
+      DTE 14                  482      48,075      19.21%    -45,652    -30,323  92.5%
+      DTE 21                  375      31,441       9.66%    -46,211    -32,843  93.1%
+      DTE 45                  219      48,918      10.18%    -70,992    -50,117  94.5%
+      DTE 60                  172      94,566      16.75%    -70,992    -54,593  94.2%
+  -- wing --
+      wing 0.02d              299     217,782      33.80%    -74,596    -49,683  94.6%
+      wing 0.03d              304     173,675      32.97%    -74,596    -43,777  94.7%
+      wing 0.08d              301      75,753      32.95%    -32,300    -28,896  94.7%
+      wing 0.10d              299      42,153      26.99%    -32,300    -24,410  94.3%
+  -- management --
+      hold to expiry          133      77,358      20.17%    -54,885    -44,425  89.5%
+      profit take 25%         448     200,394      54.14%    -31,762    -27,995  97.3%
+      profit take 75%         221     105,292      27.03%    -83,668    -52,964  92.8%
+      PT50 + stop 2x          389      88,462      23.68%    -15,545    -13,311  82.5%
+
+  18/19 variants positive; 18/19 beat the risk-free rate.
+  median across variants: 24.45% a year.
+
+  THE SURFACE IS NOT A PLATEAU. Several neighbouring cells are
+  negative with no pattern to which ones -- DTE 21 loses while
+  DTE 14 and DTE 60 gain. That is the signature of a thin sample,
+  not of a parameter that matters, and it is the main reason this
+  is reported as a signal rather than as a strategy.
+
+------------------------------------------------------------------------------------
+2. IS IT AN ARTEFACT OF ONE PERIOD?
+------------------------------------------------------------------------------------
+  variant                       n   total P&L  R/risk /yr      worst    worst1%    win
+  full sample                 308      98,180      26.00%    -48,812    -38,224  94.2%
+  before SEBI 2024-11-20      260     124,448      43.33%    -45,278    -32,201  94.6%
+  after SEBI 2024-11-20        48     -26,269     -29.08%    -48,812    -48,812  91.7%
+  excluding 2020 (COVID)      272      85,935      25.73%    -48,812    -35,873  94.1%
+  excluding the worst 3       305     224,569      60.91%    -26,507    -25,674  95.1%
+  first half (to 2021)        152      37,578      21.71%    -45,278    -35,772  94.1%
+  second half (from 2021)     156      60,602      29.64%    -48,812    -40,556  94.2%
+
+  BOTH HALVES ARE POSITIVE (21.7% and 29.6% a year).
+  That is what a structural premium should look like, and it is
+  the single strongest thing in favour of this result. It was NOT
+  true before the expiry-selection fix: the first half then read
+  -5.3%, because sessions were silently skipped whenever the
+  nearest-to-target expiry was an illiquid weekly. See
+  EXPIRY_MIX.md -- the objection was an artefact of the bug.
+
+  Note separately that removing the worst three trades moves the total
+  substantially -- a handful of observations still carry the result,
+  whichever way the halves fall.
+
+------------------------------------------------------------------------------------
+3. DOES IT SURVIVE A WORSE SPREAD ASSUMPTION?
+------------------------------------------------------------------------------------
+  Slippage is the assumption with no data behind it, and the bought
+  wing is the thinnest leg. 4% is deliberately punitive.
+  variant                       n   total P&L  R/risk /yr      worst    worst1%    win
+      slippage none (unreal)  318     139,592      37.50%    -48,669    -38,919  94.7%
+      slippage 1% / 1 tick (base)  308      98,180      26.00%    -48,812    -38,224  94.2%
+      slippage 2% / 2 ticks   294     114,488      30.68%    -48,955    -42,264  94.9%
+      slippage 4% / 4 ticks   284      60,054      16.11%    -49,240    -42,532  94.7%
+      slippage 8% / 8 ticks   256      11,052       2.87%    -45,734    -38,384  93.0%
+
+------------------------------------------------------------------------------------
+4. SIGNIFICANCE -- block bootstrap over whole months
+------------------------------------------------------------------------------------
+  months resampled         128
+  observed total      Rs       98,180
+  5th percentile      Rs     -112,795
+  median              Rs      106,306
+  95th percentile     Rs      285,822
+  P(total P&L < 0)               20.1%
+
+  A 20% chance that the true expectation is negative is not
+  significance. It is a signal worth naming and not a result worth
+  trading, and no amount of further parameter search will fix that
+  -- searching harder on the same 2,643 sessions only makes the
+  selection problem worse.
+
+====================================================================================
+VERDICT
+====================================================================================
+The put-side bias is REAL and theory-consistent: the same mechanism that
+makes the bull put spread the best structure makes the bear call spread
+the worst, and the sign of that difference was predicted before it was
+measured. It survives both halves of the sample, the removal of 2020,
+and eight times the assumed slippage.
+
+  BUT THE CURRENT REGIME IS NEGATIVE. Since SEBI's index-derivatives
+  framework took effect on 2024-11-20 the same rules return
+  -29.1% a year against +43.3% before it -- on only 48
+  trades, which is far too few to conclude from, but it is the
+  period that describes trading this today. Larger lots, one weekly
+  expiry per exchange, +2% expiry-day ELM and an STT rate that rose
+  again in April 2026 all land in that window. This is now the
+  strongest single objection, and it replaced an earlier one (the
+  half-split) that turned out to be a bug artefact.
+
+The MAGNITUDE is weaker evidence than the direction:
+
+  * 2 of 31 variants are at or below zero (    DTE 7, after SEBI 2024-11-20);
+  * 20% of bootstrap resamples lose money, and the 5th
+    percentile is Rs -112,795;
+  * the result still rests on a small number of trades -- removing the
+    worst three moves it materially;
+  * and the whole thing is one market, one underlying, 2,643 sessions
+    containing seven days worse than -5%.
+
+What this supports is 'index put skew is worth something after costs on
+this sample', not 'here is a strategy'. Establishing the magnitude needs
+data this sample does not contain -- more sessions, not more searching.

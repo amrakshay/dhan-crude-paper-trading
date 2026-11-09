@@ -1,0 +1,211 @@
+symbol,company,nifty_industry,sector
+360ONE,360 ONE WAM Ltd.,Financial Services,Capital Markets
+ABB,ABB India Ltd.,Capital Goods,Capital Goods
+ABCAPITAL,Aditya Birla Capital Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+ADANIENSOL,Adani Energy Solutions Ltd.,Power,Power
+ADANIENT,Adani Enterprises Ltd.,Metals & Mining,Metals & Mining
+ADANIGREEN,Adani Green Energy Ltd.,Power,Power
+ADANIPORTS,Adani Ports and Special Economic Zone Ltd.,Services,Services
+ADANIPOWER,Adani Power Ltd.,Power,Power
+ALKEM,Alkem Laboratories Ltd.,Healthcare,Healthcare
+AMBER,Amber Enterprises India Ltd.,Consumer Durables,Consumer Durables
+AMBUJACEM,Ambuja Cements Ltd.,Construction Materials,Construction Materials
+ANGELONE,Angel One Ltd.,Financial Services,Capital Markets
+APLAPOLLO,APL Apollo Tubes Ltd.,Capital Goods,Capital Goods
+APOLLOHOSP,Apollo Hospitals Enterprise Ltd.,Healthcare,Healthcare
+ASHOKLEY,Ashok Leyland Ltd.,Capital Goods,Capital Goods
+ASIANPAINT,Asian Paints Ltd.,Consumer Durables,Consumer Durables
+ASTRAL,Astral Ltd.,Capital Goods,Capital Goods
+ATHERENERG,Ather Energy Ltd.,Automobile and Auto Components,Automobile and Auto Components
+AUBANK,AU Small Finance Bank Ltd.,Financial Services,Banks
+AUROPHARMA,Aurobindo Pharma Ltd.,Healthcare,Healthcare
+AXISBANK,Axis Bank Ltd.,Financial Services,Banks
+BAJAJ-AUTO,Bajaj Auto Ltd.,Automobile and Auto Components,Automobile and Auto Components
+BAJAJFINSV,Bajaj Finserv Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+BAJAJHLDNG,Bajaj Holdings & Investment Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+BAJFINANCE,Bajaj Finance Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+BANDHANBNK,Bandhan Bank Ltd.,Financial Services,Banks
+BANKBARODA,Bank of Baroda,Financial Services,Banks
+BANKINDIA,Bank of India,Financial Services,Banks
+BDL,Bharat Dynamics Ltd.,Capital Goods,Capital Goods
+BEL,Bharat Electronics Ltd.,Capital Goods,Capital Goods
+BHARATFORG,Bharat Forge Ltd.,Automobile and Auto Components,Automobile and Auto Components
+BHARTIARTL,Bharti Airtel Ltd.,Telecommunication,Telecommunication
+BHEL,Bharat Heavy Electricals Ltd.,Capital Goods,Capital Goods
+BIOCON,Biocon Ltd.,Healthcare,Healthcare
+BLUESTARCO,Blue Star Ltd.,Consumer Durables,Consumer Durables
+BOSCHLTD,Bosch Ltd.,Automobile and Auto Components,Automobile and Auto Components
+BPCL,Bharat Petroleum Corporation Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+BRITANNIA,Britannia Industries Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+BSE,BSE Ltd.,Financial Services,Capital Markets
+CAMS,Computer Age Management Services Ltd.,Financial Services,Capital Markets
+CANBK,Canara Bank,Financial Services,Banks
+CDSL,Central Depository Services (India) Ltd.,Financial Services,Capital Markets
+CGPOWER,CG Power and Industrial Solutions Ltd.,Capital Goods,Capital Goods
+CHOLAFIN,Cholamandalam Investment and Finance Company Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+CIPLA,Cipla Ltd.,Healthcare,Healthcare
+COALINDIA,Coal India Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+COCHINSHIP,Cochin Shipyard Ltd.,Capital Goods,Capital Goods
+COFORGE,Coforge Ltd.,Information Technology,Information Technology
+COLPAL,Colgate Palmolive (India) Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+CONCOR,Container Corporation of India Ltd.,Services,Services
+CROMPTON,Crompton Greaves Consumer Electricals Ltd.,Consumer Durables,Consumer Durables
+CUMMINSIND,Cummins India Ltd.,Capital Goods,Capital Goods
+DABUR,Dabur India Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+DELHIVERY,Delhivery Ltd.,Services,Services
+DIVISLAB,Divi's Laboratories Ltd.,Healthcare,Healthcare
+DIXON,Dixon Technologies (India) Ltd.,Consumer Durables,Consumer Durables
+DLF,DLF Ltd.,Realty,Realty
+DMART,Avenue Supermarts Ltd.,Consumer Services,Consumer Services
+DRREDDY,Dr. Reddy's Laboratories Ltd.,Healthcare,Healthcare
+EICHERMOT,Eicher Motors Ltd.,Automobile and Auto Components,Automobile and Auto Components
+ETERNAL,Eternal Ltd.,Consumer Services,Consumer Services
+FEDERALBNK,Federal Bank Ltd.,Financial Services,Banks
+FORCEMOT,Force Motors Ltd.,Automobile and Auto Components,Automobile and Auto Components
+FORTIS,Fortis Healthcare Ltd.,Healthcare,Healthcare
+GAIL,GAIL (India) Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+GLENMARK,Glenmark Pharmaceuticals Ltd.,Healthcare,Healthcare
+GMRAIRPORT,GMR Airports Ltd.,Services,Services
+GODFRYPHLP,Godfrey Phillips India Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+GODREJCP,Godrej Consumer Products Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+GODREJPROP,Godrej Properties Ltd.,Realty,Realty
+GRASIM,Grasim Industries Ltd.,Construction Materials,Construction Materials
+GVT&D,GE Vernova T&D India Ltd.,Capital Goods,Capital Goods
+HAL,Hindustan Aeronautics Ltd.,Capital Goods,Capital Goods
+HAVELLS,Havells India Ltd.,Consumer Durables,Consumer Durables
+HCLTECH,HCL Technologies Ltd.,Information Technology,Information Technology
+HDFCAMC,HDFC Asset Management Company Ltd.,Financial Services,Capital Markets
+HDFCBANK,HDFC Bank Ltd.,Financial Services,Banks
+HDFCLIFE,HDFC Life Insurance Company Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+HEROMOTOCO,Hero MotoCorp Ltd.,Automobile and Auto Components,Automobile and Auto Components
+HINDALCO,Hindalco Industries Ltd.,Metals & Mining,Metals & Mining
+HINDPETRO,Hindustan Petroleum Corporation Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+HINDUNILVR,Hindustan Unilever Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+HINDZINC,Hindustan Zinc Ltd.,Metals & Mining,Metals & Mining
+HYUNDAI,Hyundai Motor India Ltd.,Automobile and Auto Components,Automobile and Auto Components
+ICICIBANK,ICICI Bank Ltd.,Financial Services,Banks
+ICICIGI,ICICI Lombard General Insurance Company Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+ICICIPRULI,ICICI Prudential Life Insurance Company Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+IDEA,Vodafone Idea Ltd.,Telecommunication,Telecommunication
+IDFCFIRSTB,IDFC First Bank Ltd.,Financial Services,Banks
+IEX,Indian Energy Exchange Ltd.,Financial Services,Capital Markets
+INDHOTEL,Indian Hotels Co. Ltd.,Consumer Services,Consumer Services
+INDIANB,Indian Bank,Financial Services,Banks
+INDIGO,InterGlobe Aviation Ltd.,Services,Services
+INDUSINDBK,IndusInd Bank Ltd.,Financial Services,Banks
+INDUSTOWER,Indus Towers Ltd.,Telecommunication,Telecommunication
+INFY,Infosys Ltd.,Information Technology,Information Technology
+INOXWIND,Inox Wind Ltd.,Capital Goods,Capital Goods
+IOC,Indian Oil Corporation Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+IREDA,Indian Renewable Energy Development Agency Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+IRFC,Indian Railway Finance Corporation Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+ITC,ITC Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+JINDALSTEL,Jindal Steel Ltd.,Metals & Mining,Metals & Mining
+JIOFIN,Jio Financial Services Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+JSWENERGY,JSW Energy Ltd.,Power,Power
+JSWSTEEL,JSW Steel Ltd.,Metals & Mining,Metals & Mining
+JUBLFOOD,Jubilant Foodworks Ltd.,Consumer Services,Consumer Services
+KALYANKJIL,Kalyan Jewellers India Ltd.,Consumer Durables,Consumer Durables
+KAYNES,Kaynes Technology India Ltd.,Capital Goods,Capital Goods
+KEI,KEI Industries Ltd.,Capital Goods,Capital Goods
+KFINTECH,Kfin Technologies Ltd.,Financial Services,Capital Markets
+KOTAKBANK,Kotak Mahindra Bank Ltd.,Financial Services,Banks
+KPITTECH,KPIT Technologies Ltd.,Information Technology,Information Technology
+LAURUSLABS,Laurus Labs Ltd.,Healthcare,Healthcare
+LICHSGFIN,LIC Housing Finance Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+LICI,Life Insurance Corporation of India,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+LODHA,Lodha Developers Ltd.,Realty,Realty
+LT,Larsen & Toubro Ltd.,Construction,Construction
+LTF,L&T Finance Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+LTM,LTM Ltd.,Information Technology,Information Technology
+LUPIN,Lupin Ltd.,Healthcare,Healthcare
+M&M,Mahindra & Mahindra Ltd.,Automobile and Auto Components,Automobile and Auto Components
+MAHABANK,Bank of Maharashtra,Financial Services,Banks
+MANAPPURAM,Manappuram Finance Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+MANKIND,Mankind Pharma Ltd.,Healthcare,Healthcare
+MARICO,Marico Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+MARUTI,Maruti Suzuki India Ltd.,Automobile and Auto Components,Automobile and Auto Components
+MAXHEALTH,Max Healthcare Institute Ltd.,Healthcare,Healthcare
+MAZDOCK,Mazagoan Dock Shipbuilders Ltd.,Capital Goods,Capital Goods
+MCX,Multi Commodity Exchange of India Ltd.,Financial Services,Capital Markets
+MFSL,Max Financial Services Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+MOTHERSON,Samvardhana Motherson International Ltd.,Automobile and Auto Components,Automobile and Auto Components
+MOTILALOFS,Motilal Oswal Financial Services Ltd.,Financial Services,Capital Markets
+MPHASIS,MphasiS Ltd.,Information Technology,Information Technology
+MUTHOOTFIN,Muthoot Finance Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+NAM-INDIA,Nippon Life India Asset Management Ltd.,Financial Services,Capital Markets
+NATIONALUM,National Aluminium Co. Ltd.,Metals & Mining,Metals & Mining
+NAUKRI,Info Edge (India) Ltd.,Consumer Services,Consumer Services
+NBCC,NBCC (India) Ltd.,Construction,Construction
+NESTLEIND,Nestle India Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+NHPC,NHPC Ltd.,Power,Power
+NMDC,NMDC Ltd.,Metals & Mining,Metals & Mining
+NTPC,NTPC Ltd.,Power,Power
+NYKAA,FSN E-Commerce Ventures Ltd.,Consumer Services,Consumer Services
+OBEROIRLTY,Oberoi Realty Ltd.,Realty,Realty
+OFSS,Oracle Financial Services Software Ltd.,Information Technology,Information Technology
+OIL,Oil India Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+ONGC,Oil & Natural Gas Corporation Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+PAGEIND,Page Industries Ltd.,Textiles,Textiles
+PATANJALI,Patanjali Foods Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+PAYTM,One 97 Communications Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+PERSISTENT,Persistent Systems Ltd.,Information Technology,Information Technology
+PETRONET,Petronet LNG Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+PFC,Power Finance Corporation Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+PGEL,PG Electroplast Ltd.,Consumer Durables,Consumer Durables
+PHOENIXLTD,Phoenix Mills Ltd.,Realty,Realty
+PIDILITIND,Pidilite Industries Ltd.,Chemicals,Chemicals
+PIIND,PI Industries Ltd.,Chemicals,Chemicals
+PNB,Punjab National Bank,Financial Services,Banks
+PNBHOUSING,PNB Housing Finance Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+POLICYBZR,PB Fintech Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+POLYCAB,Polycab India Ltd.,Capital Goods,Capital Goods
+POWERGRID,Power Grid Corporation of India Ltd.,Power,Power
+POWERINDIA,Hitachi Energy India Ltd.,Capital Goods,Capital Goods
+PREMIERENE,Premier Energies Ltd.,Capital Goods,Capital Goods
+PRESTIGE,Prestige Estates Projects Ltd.,Realty,Realty
+RADICO,Radico Khaitan Ltd,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+RBLBANK,RBL Bank Ltd.,Financial Services,Banks
+RECLTD,REC Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+RELIANCE,Reliance Industries Ltd.,Oil Gas & Consumable Fuels,Oil Gas & Consumable Fuels
+RVNL,Rail Vikas Nigam Ltd.,Construction,Construction
+SAGILITY,Sagility Ltd.,Information Technology,Information Technology
+SAIL,Steel Authority of India Ltd.,Metals & Mining,Metals & Mining
+SBICARD,SBI Cards and Payment Services Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+SBILIFE,SBI Life Insurance Company Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+SBIN,State Bank of India,Financial Services,Banks
+SHREECEM,Shree Cement Ltd.,Construction Materials,Construction Materials
+SHRIRAMFIN,Shriram Finance Ltd.,Financial Services,"Financials ex-Bank (NBFC, Insurance)"
+SIEMENS,Siemens Ltd.,Capital Goods,Capital Goods
+SOLARINDS,Solar Industries India Ltd.,Chemicals,Chemicals
+SONACOMS,Sona BLW Precision Forgings Ltd.,Automobile and Auto Components,Automobile and Auto Components
+SRF,SRF Ltd.,Chemicals,Chemicals
+SUNPHARMA,Sun Pharmaceutical Industries Ltd.,Healthcare,Healthcare
+SUPREMEIND,Supreme Industries Ltd.,Capital Goods,Capital Goods
+SUZLON,Suzlon Energy Ltd.,Capital Goods,Capital Goods
+SWIGGY,Swiggy Ltd.,Consumer Services,Consumer Services
+TATACONSUM,Tata Consumer Products Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+TATAELXSI,Tata Elxsi Ltd.,Information Technology,Information Technology
+TATAPOWER,Tata Power Co. Ltd.,Power,Power
+TATASTEEL,Tata Steel Ltd.,Metals & Mining,Metals & Mining
+TCS,Tata Consultancy Services Ltd.,Information Technology,Information Technology
+TECHM,Tech Mahindra Ltd.,Information Technology,Information Technology
+TIINDIA,Tube Investments of India Ltd.,Automobile and Auto Components,Automobile and Auto Components
+TITAN,Titan Company Ltd.,Consumer Durables,Consumer Durables
+TMPV,Tata Motors Passenger Vehicles Ltd.,Automobile and Auto Components,Automobile and Auto Components
+TORNTPHARM,Torrent Pharmaceuticals Ltd.,Healthcare,Healthcare
+TRENT,Trent Ltd.,Consumer Services,Consumer Services
+TVSMOTOR,TVS Motor Company Ltd.,Automobile and Auto Components,Automobile and Auto Components
+ULTRACEMCO,UltraTech Cement Ltd.,Construction Materials,Construction Materials
+UNIONBANK,Union Bank of India,Financial Services,Banks
+UNITDSPR,United Spirits Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+UNOMINDA,UNO Minda Ltd.,Automobile and Auto Components,Automobile and Auto Components
+UPL,UPL Ltd.,Chemicals,Chemicals
+VBL,Varun Beverages Ltd.,Fast Moving Consumer Goods,Fast Moving Consumer Goods
+VEDL,Vedanta Ltd.,Metals & Mining,Metals & Mining
+VMM,Vishal Mega Mart Ltd.,Consumer Services,Consumer Services
+VOLTAS,Voltas Ltd.,Consumer Durables,Consumer Durables
+WAAREEENER,Waaree Energies Ltd.,Capital Goods,Capital Goods
+WIPRO,Wipro Ltd.,Information Technology,Information Technology
+YESBANK,Yes Bank Ltd.,Financial Services,Banks
+ZYDUSLIFE,Zydus Lifesciences Ltd.,Healthcare,Healthcare

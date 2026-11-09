@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/cache/
+out/*.parquet
+out/*.log
+out/*.png
+# The audit trail that the holdout was run (once) is part of the result.
+!out/holdout_log.json

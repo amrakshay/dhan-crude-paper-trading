@@ -1,0 +1,9 @@
+[
+ {
+  "at": "2026-10-03T19:45:43",
+  "what": "ACCIDENTAL holdout exposure, not a candidate run",
+  "script": "scripts/decompose_day.py (first version)",
+  "seen": "NIFTY spot, regime-B-on holdout days (208): mean overnight +7.5 bps, open->09:30 -4.85, 09:30->15:10 -1.86 (share of up sessions 0.481), 15:10->close +0.95; regime-off (713): +6.35 / -2.59 / -0.99 / +0.60. No strategy rule, no costs, no stock data.",
+  "consequence": "The 'index short every regime-B day' baseline's holdout gross is no longer unseen (about +1.9 bps gross per day to a short, before ~2.3 bps of costs and slippage). No B1/B2/B6 or shortlist figure on holdout data was computed."
+ }
+]

@@ -1,0 +1,125 @@
+======================================================================================
+THE "+2% OR -2% OF CAPITAL, WEEKLY" TARGET
+======================================================================================
+
+0. THE ARITHMETIC, BEFORE ANY BACKTEST
+--------------------------------------------------------------------------------------
+  2.0% a week compounds to      180% a year
+  1.0% a week compounds to       68% a year
+  0.5% a week compounds to       30% a year
+
+  Risk-free over this sample:                      5.64% a year
+  Best structure measured here (bull put spread):  26.00% a year
+      -- which is about 0.45% a week.
+
+  So the target is roughly 4.4x the best thing in this study and 32x
+  the risk-free rate. That gap is not an exit-rule problem. An exit
+  rule decides WHEN you take what the market offered; it cannot
+  decide WHAT the market offers.
+
+1. DOES THE RULE ACTUALLY DELIVER +2% / -2%?
+--------------------------------------------------------------------------------------
+Weekly-ish holding: ~7 DTE entries, exit on +2% or -2% of capital.
+Both capital bases shown, because they are not the same question:
+margin is ~26% of max loss, so 2% of margin is a far smaller move.
+
+  --- bull_put_spread, capital = max_loss ---
+      trades 1438   mean held 2.1 days
+      exits: {'target': 995, 'stop': 428, 'expiry': 15}
+      total P&L Rs     -118,559   return on capital at risk  -67.75%/yr
+      realised return per trade: mean -0.51%  median +2.52%
+      STOP FIRED 428 times. Realised loss on those:
+        mean -9.79%   median -6.89%   WORST -48.63%
+        worse than -2.5%: 426 (100%)   worse than -5%: 279
+      TARGET HIT 995 times, mean realised +3.52%
+
+  --- bull_put_spread, capital = margin ---
+      trades 1649   mean held 1.8 days
+      exits: {'target': 1125, 'stop': 510, 'expiry': 14}
+      total P&L Rs     -145,991   return on capital at risk  -85.12%/yr
+      realised return per trade: mean -0.67%  median +2.90%
+      STOP FIRED 510 times. Realised loss on those:
+        mean -13.49%   median -8.34%   WORST -197.60%
+        worse than -2.5%: 510 (100%)   worse than -5%: 373
+      TARGET HIT 1125 times, mean realised +5.18%
+
+  --- iron_condor, capital = max_loss ---
+      trades 1384   mean held 2.2 days
+      exits: {'target': 896, 'stop': 474, 'expiry': 14}
+      total P&L Rs     -276,006   return on capital at risk -165.95%/yr
+      realised return per trade: mean -1.26%  median +1.84%
+      STOP FIRED 474 times. Realised loss on those:
+        mean -10.43%   median -7.83%   WORST -68.73%
+        worse than -2.5%: 474 (100%)   worse than -5%: 353
+      TARGET HIT 896 times, mean realised +3.50%
+
+  --- iron_condor, capital = margin ---
+      trades 1590   mean held 1.9 days
+      exits: {'target': 1035, 'stop': 541, 'expiry': 14}
+      total P&L Rs     -348,995   return on capital at risk -212.17%/yr
+      realised return per trade: mean -2.02%  median +1.88%
+      STOP FIRED 541 times. Realised loss on those:
+        mean -15.16%   median -10.07%   WORST -201.82%
+        worse than -2.5%: 541 (100%)   worse than -5%: 464
+      TARGET HIT 1035 times, mean realised +4.81%
+
+
+2. WHAT WEEKLY RETURN WAS ACTUALLY AVAILABLE?
+--------------------------------------------------------------------------------------
+Per-calendar-week return on capital employed, best structure, the
++/-2% rule applied. This is the distribution the target has to come
+from.
+
+  470 calendar weeks with a completed trade
+  mean weekly return on capital at risk : -1.56%
+  median                                 : +2.21%
+  weeks reaching +2% or better           : 240 (51%)
+  weeks at -2% or worse                  : 173 (37%)
+  worst week                             : -100.19%
+
+  For a 2%-a-week floor to be met, essentially EVERY week would
+  have to clear +2%. The observed share is above.
+
+3. DOES THE RULE BEAT THE PLAIN VERSION?
+--------------------------------------------------------------------------------------
+  variant                                     n   total P&L  R/risk /yr      worst
+  plain PT50, 7 DTE                         761      -5,931      -3.31%    -35,797
+  +2%/-2% of max loss                      1438    -118,559     -67.75%    -14,689
+  +2%/-2% of margin                        1649    -145,991     -85.12%    -14,689
+  +2% target only, no stop                  933     -78,996     -44.31%    -35,797
+  -2% stop only, hold winners               349       9,163       8.65%    -11,150
+  +5%/-5% of max loss                       434      -9,382      -8.38%    -23,137
+
+======================================================================================
+WHAT THIS SAYS
+======================================================================================
+
+1. THE -2% STOP NEVER DELIVERED -2%. It fired 428 times and
+   realised a loss worse than -2.5% on 426 of them (100%).
+   Mean realised loss when the stop fired: -9.79%.
+   Worst: -48.63%.
+
+   A stop is an instruction, not a guarantee. The position is
+   marked at the close, so by the time the mark crosses -2% the
+   next tradeable price is already far below it -- and at ~7 DTE
+   gamma makes that gap enormous. The rule as written asks for a
+   2% loss and delivers a 10% one.
+
+2. CUTTING WINNERS AT +2% WHILE LOSERS RUN TO -10% IS BACKWARDS.
+   The +/-2% rule turned a -3.31%/yr strategy into a -67.75%/yr one.
+   The target fires often and small; the stop fires less often and
+   large. That is the wrong way round for a premium seller, whose
+   payoff is already negatively skewed.
+
+3. THE STOP ALONE, HOLDING WINNERS, WAS THE BEST VARIANT TESTED
+   (+8.65%/yr, worst trade -11,150 -- the smallest of any variant).
+   Stopping losers is defensible; capping winners at 2% is not.
+
+4. THE TARGET WAS AVAILABLE ABOUT HALF THE TIME. 51% of weeks reached
+   +2%; 37% were at -2% or worse. A 2%-a-week FLOOR needs essentially
+   every week to clear it.
+
+5. NOTE THE MEAN AND THE MEDIAN. Median weekly return +2.21%, mean
+   -1.56%. The median week hits the target and the average week loses
+   money. That gap IS the strategy's shape, and it is why a rule
+   designed around the typical week misprices the book.

@@ -1,0 +1,80 @@
+charge card version 2026-09-20
+source: /Users/akshay/Workarea/local/dhan-crude-paper-trading/experiments/hedged-option-selling/conf/charges/nse-index-options.yaml
+
+case 1  short option round trip, current STT regime (2026-06-15)
+  sell 75 @ 100, buy back 75 @ 40; 2 executed orders
+  computed       62.9500
+  expected       62.9500   (tolerance 0.01)
+  gap             0.0000   OK
+
+
+case 2  the identical trade across all five STT regimes
+  only the DATE changes.  Shown at 1 lot and at 40 lots, because
+  which charge dominates depends entirely on size.
+
+  --- 1 lot (75 units, premium sold Rs 7,500) ---
+  date           STT rate     STT Rs  brokerage   total Rs  % of premium
+  2016-01-15      0.0170%       1.27      40.00      55.16        0.735%
+  2016-07-15      0.0500%       3.75      40.00      57.63        0.768%
+  2023-06-15      0.0625%       4.69      40.00      58.25        0.777%
+  2025-01-15      0.1000%       7.50      40.00      59.20        0.789%
+  2026-06-15      0.1500%      11.25      40.00      62.95        0.839%
+  STT multiple 2016-01 -> 2026-06: 8.82x     TOTAL cost multiple: 1.14x
+
+  --- 40 lots (3000 units, premium sold Rs 300,000) ---
+  date           STT rate     STT Rs  brokerage   total Rs  % of premium
+  2016-01-15      0.0170%      51.00      40.00     365.46        0.122%
+  2016-07-15      0.0500%     150.00      40.00     464.46        0.155%
+  2023-06-15      0.0625%     187.50      40.00     489.07        0.163%
+  2025-01-15      0.1000%     300.00      40.00     527.38        0.176%
+  2026-06-15      0.1500%     450.00      40.00     677.38        0.226%
+  STT multiple 2016-01 -> 2026-06: 8.82x     TOTAL cost multiple: 1.85x
+
+  The STT itself rose ~8.8x. The TOTAL barely moves at one lot,
+  because flat Rs 20 brokerage swamps it, and moves almost as much
+  as the STT at forty. The Oct-2024 and Apr-2026 breaks are therefore
+  structural for a sized book and nearly invisible for a toy one -- a
+  backtest at one lot would under-report the break it means to measure.
+
+
+case 3  leg count is a real cost
+  4-leg condor, one side (entry only): brokerage 80.00, total 131.79
+  2-leg vertical, entry only         : brokerage 40.00, total 66.34
+
+  condor entry brokerage is 4 orders
+  Rs 20 x 4 legs
+  computed       80.0000
+  expected       80.0000   (tolerance 0.001)
+  gap             0.0000   OK
+
+
+case 4a  spread expires worthless
+  no sale, no exercise -> no brokerage, no STT, no GST
+  computed        0.0000
+  expected        0.0000   (tolerance 0.001)
+  gap             0.0000   OK
+
+case 4b  long wing exercised deep ITM
+  intrinsic 1000 x 75 units @ 0.15% -- charged on INTRINSIC, not premium
+  computed      112.5000
+  expected      112.5000   (tolerance 0.01)
+  gap             0.0000   OK
+
+  Note the size of 4b. On a disaster trade the exercise STT on the
+  wing alone can exceed every other charge on the position combined,
+  which is exactly the case a backtest that omits it flatters.
+
+
+case 5  charges against the credit received, current regime
+   credit/unit  gross credit   charges  % of credit
+         10.00        750.00     50.42        6.72%
+         25.00       1875.00     55.25        2.95%
+         50.00       3750.00     63.29        1.69%
+        100.00       7500.00     79.38        1.06%
+        200.00      15000.00    111.57        0.74%
+
+  Entry charges alone. A spread sold for a small credit can lose a
+  double-digit percentage of it before the market moves at all --
+  which is why 'sell far OTM for a tiny premium' fails on costs.
+
+ALL CASES WITHIN TOLERANCE

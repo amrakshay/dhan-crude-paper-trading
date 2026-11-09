@@ -1,0 +1,838 @@
+{
+ "generated_from": {
+  "nifty": "daily_bars IDX_I NIFTY (read-only)",
+  "fno": "intraday-screener/data/clean/days.parquet, adjusted closes",
+  "nifty500": "daily_bars NSE_EQ, today's 500 constituents; 25 isolated one-day excursions >15% removed",
+  "window": [
+   "2017-04-03",
+   "2026-09-25"
+  ]
+ },
+ "current": {
+  "nifty": {
+   "as_of": "2026-09-30",
+   "close": 22620.45,
+   "high": 26328.55,
+   "high_date": "2026-01-02",
+   "drawdown": -0.1408,
+   "sma50": 23901.6,
+   "sma200": 24367.8,
+   "sma200_falling": true,
+   "monthly_2026_pct": {
+    "Jan": -3.1,
+    "Feb": -0.6,
+    "Mar": -11.3,
+    "Apr": 7.5,
+    "May": -1.9,
+    "Jun": 1.4,
+    "Jul": 2.2,
+    "Aug": -1.2,
+    "Sep": -6.1
+   }
+  },
+  "fno_210": {
+   "as_of": "2026-09-25",
+   "below_sma50": 0.7714,
+   "below_sma200": 0.5857,
+   "median_dd_from_52w_high": -0.1732,
+   "names": 210
+  },
+  "nifty500": {
+   "as_of": "2026-09-30",
+   "below_sma50": 0.7992,
+   "below_sma200": 0.5904,
+   "median_dd_from_52w_high": -0.1977,
+   "names": 498
+  },
+  "nifty500_ex_fno": {
+   "as_of": "2026-09-30",
+   "below_sma50": 0.75,
+   "below_sma200": 0.5312,
+   "median_dd_from_52w_high": -0.2046,
+   "names": 288
+  },
+  "nifty_midcap_select": {
+   "as_of": "2026-09-17",
+   "drawdown_from_252_high": -0.0435
+  }
+ },
+ "rules": {
+  "A_sma200": {
+   "whole_sample": {
+    "share_on": 0.118,
+    "switches": 17,
+    "switches_per_year": 1.8,
+    "on_runs": 9,
+    "median_on_run": 6.0,
+    "on_runs_le_5_sessions": 3
+   },
+   "episodes": [
+    {
+     "start": "2018-10-31",
+     "end": "2018-12-13",
+     "sessions": 30,
+     "on_days": 24
+    },
+    {
+     "start": "2020-03-13",
+     "end": "2020-07-17",
+     "sessions": 85,
+     "on_days": 85
+    },
+    {
+     "start": "2022-06-16",
+     "end": "2022-07-29",
+     "sessions": 32,
+     "on_days": 32
+    },
+    {
+     "start": "2026-03-19",
+     "end": "2026-09-25",
+     "sessions": 129,
+     "on_days": 129
+    }
+   ],
+   "episodes_dev": [
+    {
+     "start": "2018-10-31",
+     "end": "2018-12-13",
+     "sessions": 30,
+     "on_days": 24
+    },
+    {
+     "start": "2020-03-13",
+     "end": "2020-07-17",
+     "sessions": 85,
+     "on_days": 85
+    },
+    {
+     "start": "2022-06-16",
+     "end": "2022-07-29",
+     "sessions": 32,
+     "on_days": 32
+    }
+   ],
+   "episodes_holdout": [
+    {
+     "start": "2026-03-19",
+     "end": "2026-09-25",
+     "sessions": 129,
+     "on_days": 129
+    }
+   ],
+   "on_days_dev": 141,
+   "on_days_holdout": 137,
+   "lag_vs_nifty_10pct_declines": [
+    {
+     "peak": "2018-01-29",
+     "trough": "2018-03-23",
+     "decline": -0.1017,
+     "first_on": "2018-10-31",
+     "share_of_fall_missed_before_on": 1.0,
+     "off_after_trough": "2018-03-23",
+     "rally_from_trough_before_off": 0.0,
+     "on_sessions_after_trough": 0
+    },
+    {
+     "peak": "2018-08-28",
+     "trough": "2018-10-26",
+     "decline": -0.1455,
+     "first_on": "2018-10-31",
+     "share_of_fall_missed_before_on": 1.0,
+     "off_after_trough": "2018-12-14",
+     "rally_from_trough_before_off": 0.0759,
+     "on_sessions_after_trough": 24
+    },
+    {
+     "peak": "2019-06-03",
+     "trough": "2019-09-19",
+     "decline": -0.1145,
+     "first_on": "2020-03-13",
+     "share_of_fall_missed_before_on": 1.0,
+     "off_after_trough": "2019-09-19",
+     "rally_from_trough_before_off": 0.0,
+     "on_sessions_after_trough": 0
+    },
+    {
+     "peak": "2020-01-14",
+     "trough": "2020-03-23",
+     "decline": -0.3844,
+     "first_on": "2020-03-13",
+     "share_of_fall_missed_before_on": 0.5065,
+     "off_after_trough": "2020-07-20",
+     "rally_from_trough_before_off": 0.4325,
+     "on_sessions_after_trough": 79
+    },
+    {
+     "peak": "2021-10-18",
+     "trough": "2022-06-17",
+     "decline": -0.1723,
+     "first_on": "2022-06-16",
+     "share_of_fall_missed_before_on": 0.9789,
+     "off_after_trough": "2022-08-01",
+     "rally_from_trough_before_off": 0.1219,
+     "on_sessions_after_trough": 31
+    },
+    {
+     "peak": "2024-09-26",
+     "trough": "2025-03-04",
+     "decline": -0.1577,
+     "first_on": "2025-04-09",
+     "share_of_fall_missed_before_on": 1.0,
+     "off_after_trough": "2025-03-04",
+     "rally_from_trough_before_off": 0.0,
+     "on_sessions_after_trough": 8
+    },
+    {
+     "peak": "2026-01-02",
+     "trough": "2026-03-30",
+     "decline": -0.1518,
+     "first_on": "2026-03-19",
+     "share_of_fall_missed_before_on": 0.8322,
+     "off_after_trough": null,
+     "on_sessions_after_trough": 123
+    }
+   ],
+   "big_index_days": {
+    "close_to_close": {
+     "on_days": 278,
+     "up_2pct_on": 19,
+     "up_3pct_on": 12,
+     "up_2pct_all": 52,
+     "up_3pct_all": 19,
+     "down_2pct_on": 19,
+     "down_3pct_on": 9
+    },
+    "open_to_close": {
+     "on_days": 278,
+     "up_2pct_on": 10,
+     "up_3pct_on": 5,
+     "up_2pct_all": 20,
+     "up_3pct_all": 8,
+     "down_2pct_on": 14,
+     "down_3pct_on": 8
+    }
+   },
+   "on_at_last_close": true
+  },
+  "B_breadth": {
+   "whole_sample": {
+    "share_on": 0.243,
+    "switches": 121,
+    "switches_per_year": 12.8,
+    "on_runs": 61,
+    "median_on_run": 4.0,
+    "on_runs_le_5_sessions": 36
+   },
+   "episodes": [
+    {
+     "start": "2018-02-05",
+     "end": "2018-04-05",
+     "sessions": 40,
+     "on_days": 40
+    },
+    {
+     "start": "2018-05-21",
+     "end": "2018-07-24",
+     "sessions": 47,
+     "on_days": 37
+    },
+    {
+     "start": "2018-09-24",
+     "end": "2018-11-15",
+     "sessions": 36,
+     "on_days": 34
+    },
+    {
+     "start": "2019-01-25",
+     "end": "2019-02-28",
+     "sessions": 25,
+     "on_days": 24
+    },
+    {
+     "start": "2019-07-09",
+     "end": "2019-09-20",
+     "sessions": 50,
+     "on_days": 41
+    },
+    {
+     "start": "2020-02-26",
+     "end": "2020-05-20",
+     "sessions": 55,
+     "on_days": 53
+    },
+    {
+     "start": "2021-11-23",
+     "end": "2022-03-24",
+     "sessions": 85,
+     "on_days": 55
+    },
+    {
+     "start": "2022-05-06",
+     "end": "2022-07-07",
+     "sessions": 45,
+     "on_days": 45
+    },
+    {
+     "start": "2023-01-27",
+     "end": "2023-04-05",
+     "sessions": 46,
+     "on_days": 42
+    },
+    {
+     "start": "2024-10-08",
+     "end": "2025-04-08",
+     "sessions": 126,
+     "on_days": 89
+    },
+    {
+     "start": "2025-07-29",
+     "end": "2025-09-29",
+     "sessions": 43,
+     "on_days": 18
+    },
+    {
+     "start": "2026-01-21",
+     "end": "2026-04-08",
+     "sessions": 52,
+     "on_days": 32
+    },
+    {
+     "start": "2026-09-08",
+     "end": "2026-09-25",
+     "sessions": 13,
+     "on_days": 13
+    }
+   ],
+   "episodes_dev": [
+    {
+     "start": "2018-02-05",
+     "end": "2018-04-05",
+     "sessions": 40,
+     "on_days": 40
+    },
+    {
+     "start": "2018-05-21",
+     "end": "2018-07-24",
+     "sessions": 47,
+     "on_days": 37
+    },
+    {
+     "start": "2018-09-24",
+     "end": "2018-11-15",
+     "sessions": 36,
+     "on_days": 34
+    },
+    {
+     "start": "2019-01-25",
+     "end": "2019-02-28",
+     "sessions": 25,
+     "on_days": 24
+    },
+    {
+     "start": "2019-07-09",
+     "end": "2019-09-20",
+     "sessions": 50,
+     "on_days": 41
+    },
+    {
+     "start": "2020-02-26",
+     "end": "2020-05-20",
+     "sessions": 55,
+     "on_days": 53
+    },
+    {
+     "start": "2021-11-23",
+     "end": "2022-03-24",
+     "sessions": 85,
+     "on_days": 55
+    },
+    {
+     "start": "2022-05-06",
+     "end": "2022-07-07",
+     "sessions": 45,
+     "on_days": 45
+    }
+   ],
+   "episodes_holdout": [
+    {
+     "start": "2023-01-27",
+     "end": "2023-04-05",
+     "sessions": 46,
+     "on_days": 42
+    },
+    {
+     "start": "2024-10-08",
+     "end": "2025-04-08",
+     "sessions": 126,
+     "on_days": 89
+    },
+    {
+     "start": "2025-07-29",
+     "end": "2025-09-29",
+     "sessions": 43,
+     "on_days": 18
+    },
+    {
+     "start": "2026-01-21",
+     "end": "2026-04-08",
+     "sessions": 52,
+     "on_days": 32
+    },
+    {
+     "start": "2026-09-08",
+     "end": "2026-09-25",
+     "sessions": 13,
+     "on_days": 13
+    }
+   ],
+   "on_days_dev": 364,
+   "on_days_holdout": 208,
+   "lag_vs_nifty_10pct_declines": [
+    {
+     "peak": "2018-01-29",
+     "trough": "2018-03-23",
+     "decline": -0.1017,
+     "first_on": "2018-02-05",
+     "share_of_fall_missed_before_on": 0.4096,
+     "off_after_trough": "2018-04-06",
+     "rally_from_trough_before_off": 0.0327,
+     "on_sessions_after_trough": 45
+    },
+    {
+     "peak": "2018-08-28",
+     "trough": "2018-10-26",
+     "decline": -0.1455,
+     "first_on": "2018-09-24",
+     "share_of_fall_missed_before_on": 0.4513,
+     "off_after_trough": "2018-11-16",
+     "rally_from_trough_before_off": 0.0585,
+     "on_sessions_after_trough": 36
+    },
+    {
+     "peak": "2019-06-03",
+     "trough": "2019-09-19",
+     "decline": -0.1145,
+     "first_on": "2019-07-09",
+     "share_of_fall_missed_before_on": 0.3849,
+     "off_after_trough": "2019-09-23",
+     "rally_from_trough_before_off": 0.0532,
+     "on_sessions_after_trough": 1
+    },
+    {
+     "peak": "2020-01-14",
+     "trough": "2020-03-23",
+     "decline": -0.3844,
+     "first_on": "2020-02-26",
+     "share_of_fall_missed_before_on": 0.1439,
+     "off_after_trough": "2020-05-21",
+     "rally_from_trough_before_off": 0.1914,
+     "on_sessions_after_trough": 41
+    },
+    {
+     "peak": "2021-10-18",
+     "trough": "2022-06-17",
+     "decline": -0.1723,
+     "first_on": "2021-11-23",
+     "share_of_fall_missed_before_on": 0.3059,
+     "off_after_trough": "2022-07-08",
+     "rally_from_trough_before_off": 0.0549,
+     "on_sessions_after_trough": 23
+    },
+    {
+     "peak": "2024-09-26",
+     "trough": "2025-03-04",
+     "decline": -0.1577,
+     "first_on": "2024-10-08",
+     "share_of_fall_missed_before_on": 0.291,
+     "off_after_trough": "2025-03-20",
+     "rally_from_trough_before_off": 0.0374,
+     "on_sessions_after_trough": 33
+    },
+    {
+     "peak": "2026-01-02",
+     "trough": "2026-03-30",
+     "decline": -0.1518,
+     "first_on": "2026-01-21",
+     "share_of_fall_missed_before_on": 0.293,
+     "off_after_trough": "2026-04-09",
+     "rally_from_trough_before_off": 0.0746,
+     "on_sessions_after_trough": 20
+    }
+   ],
+   "big_index_days": {
+    "close_to_close": {
+     "on_days": 572,
+     "up_2pct_on": 29,
+     "up_3pct_on": 14,
+     "up_2pct_all": 52,
+     "up_3pct_all": 19,
+     "down_2pct_on": 33,
+     "down_3pct_on": 14
+    },
+    "open_to_close": {
+     "on_days": 572,
+     "up_2pct_on": 11,
+     "up_3pct_on": 5,
+     "up_2pct_all": 20,
+     "up_3pct_all": 8,
+     "down_2pct_on": 19,
+     "down_3pct_on": 9
+    }
+   },
+   "on_at_last_close": true
+  },
+  "C_drawdown": {
+   "whole_sample": {
+    "share_on": 0.132,
+    "switches": 59,
+    "switches_per_year": 6.2,
+    "on_runs": 30,
+    "median_on_run": 4.5,
+    "on_runs_le_5_sessions": 17
+   },
+   "episodes": [
+    {
+     "start": "2018-10-08",
+     "end": "2018-12-12",
+     "sessions": 45,
+     "on_days": 25
+    },
+    {
+     "start": "2019-08-06",
+     "end": "2019-09-20",
+     "sessions": 30,
+     "on_days": 10
+    },
+    {
+     "start": "2020-03-09",
+     "end": "2020-08-06",
+     "sessions": 102,
+     "on_days": 95
+    },
+    {
+     "start": "2022-05-09",
+     "end": "2022-07-27",
+     "sessions": 58,
+     "on_days": 55
+    },
+    {
+     "start": "2024-11-14",
+     "end": "2025-04-17",
+     "sessions": 104,
+     "on_days": 67
+    },
+    {
+     "start": "2026-03-13",
+     "end": "2026-04-08",
+     "sessions": 16,
+     "on_days": 15
+    },
+    {
+     "start": "2026-05-13",
+     "end": "2026-06-15",
+     "sessions": 23,
+     "on_days": 19
+    },
+    {
+     "start": "2026-09-09",
+     "end": "2026-09-25",
+     "sessions": 12,
+     "on_days": 12
+    }
+   ],
+   "episodes_dev": [
+    {
+     "start": "2018-10-08",
+     "end": "2018-12-12",
+     "sessions": 45,
+     "on_days": 25
+    },
+    {
+     "start": "2019-08-06",
+     "end": "2019-09-20",
+     "sessions": 30,
+     "on_days": 10
+    },
+    {
+     "start": "2020-03-09",
+     "end": "2020-08-06",
+     "sessions": 102,
+     "on_days": 95
+    },
+    {
+     "start": "2022-05-09",
+     "end": "2022-07-27",
+     "sessions": 58,
+     "on_days": 55
+    }
+   ],
+   "episodes_holdout": [
+    {
+     "start": "2024-11-14",
+     "end": "2025-04-17",
+     "sessions": 104,
+     "on_days": 67
+    },
+    {
+     "start": "2026-03-13",
+     "end": "2026-04-08",
+     "sessions": 16,
+     "on_days": 15
+    },
+    {
+     "start": "2026-05-13",
+     "end": "2026-06-15",
+     "sessions": 23,
+     "on_days": 19
+    },
+    {
+     "start": "2026-09-09",
+     "end": "2026-09-25",
+     "sessions": 12,
+     "on_days": 12
+    }
+   ],
+   "on_days_dev": 197,
+   "on_days_holdout": 113,
+   "lag_vs_nifty_10pct_declines": [
+    {
+     "peak": "2018-01-29",
+     "trough": "2018-03-23",
+     "decline": -0.1017,
+     "first_on": "2018-03-26",
+     "share_of_fall_missed_before_on": 1.0,
+     "off_after_trough": "2018-03-27",
+     "rally_from_trough_before_off": 0.0133,
+     "on_sessions_after_trough": 1
+    },
+    {
+     "peak": "2018-08-28",
+     "trough": "2018-10-26",
+     "decline": -0.1455,
+     "first_on": "2018-10-08",
+     "share_of_fall_missed_before_on": 0.8138,
+     "off_after_trough": "2018-11-27",
+     "rally_from_trough_before_off": 0.0597,
+     "on_sessions_after_trough": 13
+    },
+    {
+     "peak": "2019-06-03",
+     "trough": "2019-09-19",
+     "decline": -0.1145,
+     "first_on": "2019-08-06",
+     "share_of_fall_missed_before_on": 0.8241,
+     "off_after_trough": "2019-09-23",
+     "rally_from_trough_before_off": 0.0532,
+     "on_sessions_after_trough": 2
+    },
+    {
+     "peak": "2020-01-14",
+     "trough": "2020-03-23",
+     "decline": -0.3844,
+     "first_on": "2020-03-09",
+     "share_of_fall_missed_before_on": 0.4021,
+     "off_after_trough": "2020-08-07",
+     "rally_from_trough_before_off": 0.4717,
+     "on_sessions_after_trough": 88
+    },
+    {
+     "peak": "2021-10-18",
+     "trough": "2022-06-17",
+     "decline": -0.1723,
+     "first_on": "2021-12-21",
+     "share_of_fall_missed_before_on": 0.5359,
+     "off_after_trough": "2022-07-28",
+     "rally_from_trough_before_off": 0.0882,
+     "on_sessions_after_trough": 27
+    },
+    {
+     "peak": "2024-09-26",
+     "trough": "2025-03-04",
+     "decline": -0.1577,
+     "first_on": "2024-11-14",
+     "share_of_fall_missed_before_on": 0.6492,
+     "off_after_trough": "2025-04-21",
+     "rally_from_trough_before_off": 0.0801,
+     "on_sessions_after_trough": 27
+    },
+    {
+     "peak": "2026-01-02",
+     "trough": "2026-03-30",
+     "decline": -0.1518,
+     "first_on": "2026-03-13",
+     "share_of_fall_missed_before_on": 0.7949,
+     "off_after_trough": "2026-04-09",
+     "rally_from_trough_before_off": 0.0746,
+     "on_sessions_after_trough": 37
+    }
+   ],
+   "big_index_days": {
+    "close_to_close": {
+     "on_days": 310,
+     "up_2pct_on": 28,
+     "up_3pct_on": 12,
+     "up_2pct_all": 52,
+     "up_3pct_all": 19,
+     "down_2pct_on": 26,
+     "down_3pct_on": 11
+    },
+    "open_to_close": {
+     "on_days": 310,
+     "up_2pct_on": 12,
+     "up_3pct_on": 6,
+     "up_2pct_all": 20,
+     "up_3pct_all": 8,
+     "down_2pct_on": 16,
+     "down_3pct_on": 9
+    }
+   },
+   "on_at_last_close": true
+  }
+ },
+ "jaccard_overlap": {
+  "A_sma200~B_breadth": 0.1229,
+  "A_sma200~C_drawdown": 0.4067,
+  "B_breadth~C_drawdown": 0.3105
+ },
+ "nifty_declines_10pct_ex_post": [
+  {
+   "peak": "2015-07-22",
+   "trough": "2016-02-25",
+   "recovered": "2016-07-25",
+   "decline": -0.1926
+  },
+  {
+   "peak": "2016-09-08",
+   "trough": "2016-12-26",
+   "recovered": "2017-03-06",
+   "decline": -0.1166
+  },
+  {
+   "peak": "2018-01-29",
+   "trough": "2018-03-23",
+   "recovered": "2018-07-24",
+   "decline": -0.1017
+  },
+  {
+   "peak": "2018-08-28",
+   "trough": "2018-10-26",
+   "recovered": "2019-04-16",
+   "decline": -0.1455
+  },
+  {
+   "peak": "2019-06-03",
+   "trough": "2019-09-19",
+   "recovered": "2019-11-27",
+   "decline": -0.1145
+  },
+  {
+   "peak": "2020-01-14",
+   "trough": "2020-03-23",
+   "recovered": "2020-11-09",
+   "decline": -0.3844
+  },
+  {
+   "peak": "2021-10-18",
+   "trough": "2022-06-17",
+   "recovered": "2022-11-24",
+   "decline": -0.1723
+  },
+  {
+   "peak": "2024-09-26",
+   "trough": "2025-03-04",
+   "recovered": "2026-01-02",
+   "decline": -0.1577
+  },
+  {
+   "peak": "2026-01-02",
+   "trough": "2026-03-30",
+   "recovered": null,
+   "decline": -0.1518
+  }
+ ],
+ "stock_bear_episodes_median_dd_le_20pct": {
+  "fno_210": [
+   {
+    "start": "2018-06-21",
+    "end": "2018-07-25",
+    "sessions": 25,
+    "on_days": 20
+   },
+   {
+    "start": "2018-09-24",
+    "end": "2019-03-01",
+    "sessions": 109,
+    "on_days": 102
+   },
+   {
+    "start": "2019-08-02",
+    "end": "2019-09-06",
+    "sessions": 23,
+    "on_days": 17
+   },
+   {
+    "start": "2020-02-28",
+    "end": "2020-08-11",
+    "sessions": 111,
+    "on_days": 108
+   },
+   {
+    "start": "2020-09-21",
+    "end": "2020-11-02",
+    "sessions": 30,
+    "on_days": 17
+   },
+   {
+    "start": "2022-05-06",
+    "end": "2022-07-27",
+    "sessions": 59,
+    "on_days": 59
+   },
+   {
+    "start": "2025-01-10",
+    "end": "2025-05-09",
+    "sessions": 80,
+    "on_days": 79
+   }
+  ],
+  "nifty500": [
+   {
+    "start": "2018-05-21",
+    "end": "2019-10-14",
+    "sessions": 344,
+    "on_days": 276
+   },
+   {
+    "start": "2020-02-28",
+    "end": "2020-11-04",
+    "sessions": 171,
+    "on_days": 136
+   },
+   {
+    "start": "2022-02-21",
+    "end": "2022-03-29",
+    "sessions": 25,
+    "on_days": 22
+   },
+   {
+    "start": "2022-05-04",
+    "end": "2022-07-29",
+    "sessions": 63,
+    "on_days": 63
+   },
+   {
+    "start": "2025-01-10",
+    "end": "2025-06-19",
+    "sessions": 109,
+    "on_days": 90
+   },
+   {
+    "start": "2026-01-21",
+    "end": "2026-04-13",
+    "sessions": 55,
+    "on_days": 33
+   }
+  ]
+ }
+}

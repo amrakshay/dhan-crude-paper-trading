@@ -1,0 +1,53 @@
+{
+  "rows_in_file": 136,
+  "duplicates_dropped": 0,
+  "duplicate_gross": 0.0,
+  "leader": "6003",
+  "venue": "Shark Exchange",
+  "trades": 136,
+  "first_entry": "2026-05-07 13:29:56",
+  "last_exit": "2026-09-22 14:30:16",
+  "start_capital": 500.0,
+  "gross": 875.6281,
+  "fees_taker": 33.28350914240001,
+  "net_taker": 842.3445908576,
+  "fees_maker": 13.313403656960002,
+  "net_maker": 862.31469634304,
+  "end_equity": 1342.3445908576,
+  "min_equity": 487.15852206704,
+  "min_equity_at": "2026-05-15 01:09:04",
+  "max_drawdown": -16.70229729280004,
+  "max_drawdown_at": "2026-06-03 14:24:36",
+  "win_rate_gross": 0.8970588235294118,
+  "win_rate_net": 0.8897058823529411,
+  "flipped_to_loss": 1,
+  "best_trade": 48.8594333696,
+  "worst_trade": -16.7022972928,
+  "options": 0,
+  "options_cap_bound": 0,
+  "options_settled": 0,
+  "empty_months": 0,
+  "by_kind": [
+    {
+      "kind": "Commodity perp",
+      "trades": 37,
+      "gross": 89.8683,
+      "fees": 7.0073276704,
+      "net": 82.8609723296
+    },
+    {
+      "kind": "Stock perp",
+      "trades": 99,
+      "gross": 785.7598,
+      "fees": 26.276181472,
+      "net": 759.483618528
+    }
+  ],
+  "median_trade_notional": 199.27800000000002,
+  "max_trade_notional": 1119.404,
+  "stop_on_losing_side": 136,
+  "median_stop_distance_pct": 7.921917185444398,
+  "median_risk_at_stop": 15.760449999999997,
+  "median_win": 6.081049999999999,
+  "qty_mismatch_rows": 5
+}

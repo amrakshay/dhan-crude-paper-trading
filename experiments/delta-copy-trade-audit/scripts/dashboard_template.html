@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delta Leader Audit</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f5f5f3; --surface: #fcfcfb; --border: #e3e2de;
+  --text: #0b0b0b; --text-2: #52514e; --muted: #85847f;
+  --pos: #2a78d6; --neg: #e34948; --gross: #eb6834; --net: #2a78d6;
+  --grid: #ecebe7; --warn-bg: #fff6e0; --warn-border: #eda100;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2e2e2b;
+    --text: #ffffff; --text-2: #c3c2b7; --muted: #8e8d86;
+    --pos: #3987e5; --neg: #e66767; --gross: #d95926; --net: #3987e5;
+    --grid: #262624; --warn-bg: #2a2310; --warn-border: #c98500;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110; --surface: #1a1a19; --border: #2e2e2b;
+  --text: #ffffff; --text-2: #c3c2b7; --muted: #8e8d86;
+  --pos: #3987e5; --neg: #e66767; --gross: #d95926; --net: #3987e5;
+  --grid: #262624; --warn-bg: #2a2310; --warn-border: #c98500;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+.sub { color: var(--text-2); margin: 0 0 20px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px; margin-bottom: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.tile .label { color: var(--text-2); font-size: 12px; }
+.tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.warn { background: var(--warn-bg); border-color: var(--warn-border); }
+.warn ul, .assume ul { margin: 6px 0 0; padding-left: 20px; }
+.assume { color: var(--text-2); font-size: 13px; }
+.chart-box { position: relative; height: 300px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { color: var(--text-2); font-weight: 600; cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--surface); }
+.pos { color: var(--text); } .neg { color: var(--text); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.dot.pos { background: var(--pos); } .dot.neg { background: var(--neg); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.filters select, .filters input { background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font: inherit; }
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; color: var(--text-2); }
+.pager button { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.legend { display: flex; gap: 16px; color: var(--text-2); font-size: 12px; margin-bottom: 8px; }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.tag { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title"></h1>
+  <p class="sub" id="sub"></p>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card warn" id="exposure"></div>
+
+  <div class="card">
+    <h2 id="eqTitle"></h2>
+    <div class="legend"><span><i style="background:var(--gross)"></i>Gross (the export's P&amp;L)</span><span><i style="background:var(--net)"></i>Net of taker fees + GST</span></div>
+    <div class="chart-box"><canvas id="equity"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly net P&amp;L (taker fees + GST)</h2>
+    <div class="legend"><span><span class="dot pos"></span>Profit</span><span><span class="dot neg"></span>Loss</span></div>
+    <div class="chart-box"><canvas id="monthlyChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly P&amp;L table</h2>
+    <div class="table-wrap"><table id="monthly"></table></div>
+  </div>
+
+  <div class="card">
+    <h2>By instrument type</h2>
+    <div class="table-wrap"><table id="kinds"></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Every trade</h2>
+    <div class="filters">
+      <input id="q" placeholder="Search symbol">
+      <select id="fk"><option value="">All types</option></select>
+      <select id="fm"><option value="">All months</option></select>
+      <select id="fr"><option value="">Win &amp; loss</option><option value="w">Net winners</option><option value="l">Net losers</option><option value="f">Gross win → net loss</option></select>
+    </div>
+    <div class="table-wrap"><table id="trades"></table></div>
+    <div class="pager"><button id="prev">‹ Prev</button><span id="pinfo"></span><button id="next">Next ›</button></div>
+  </div>
+
+  <div class="card assume" id="assume"></div>
+</main>
+<script>
+const D = /*__DATA__*/null;
+const S = D.summary;
+document.title = D.meta.title;
+document.getElementById("title").textContent = D.meta.title;
+document.getElementById("eqTitle").textContent = "Equity from $500, " + D.meta.time_label;
+const usd = (v, d = 2) => (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});
+const sgn = v => (v > 0 ? "+" : "") + usd(v);
+const pct = v => (v * 100).toFixed(1) + "%";
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const dot = v => `<span class="dot ${v >= 0 ? "pos" : "neg"}"></span>`;
+
+document.getElementById("sub").textContent =
+  `${S.trades.toLocaleString()} closed trades · ${S.first_entry.slice(0,10)} → ${S.last_exit.slice(0,10)} · starting capital ${usd(S.start_capital, 0)} · leader's quantities used as-is`;
+
+const tiles = [
+  ["Gross P&L (export)", sgn(S.gross), "before any fee"],
+  ["Fees paid (taker + GST)", usd(S.fees_taker), `${pct(S.fees_taker / S.gross)} of gross profit`],
+  ["Net P&L", sgn(S.net_taker), `maker-only best case ${sgn(S.net_maker)}`],
+  ["Ending equity", usd(S.end_equity), `${pct(S.net_taker / S.start_capital)} on $500`],
+  ["Lowest equity", usd(S.min_equity), S.min_equity_at.slice(0,10)],
+  ["Max drawdown", usd(S.max_drawdown), S.max_drawdown_at.slice(0,10)],
+  ["Win rate", `${pct(S.win_rate_net)}`, `gross ${pct(S.win_rate_gross)} · ${S.flipped_to_loss} flipped to loss by fees`],
+];
+document.getElementById("tiles").innerHTML = tiles.map(([l, v, n]) =>
+  `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
+
+document.getElementById("exposure").innerHTML = D.meta.exposure_html;
+
+// Equity chart
+const grid = css("--grid"), tick = css("--text-2");
+Chart.defaults.color = tick; Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+new Chart(document.getElementById("equity"), {
+  type: "line",
+  data: { datasets: [
+    { label: "Gross", data: D.equity.t.map((t, i) => ({x: Date.parse(t.replace(" ", "T")), y: D.equity.gross[i]})), borderColor: css("--gross"), borderWidth: 2, pointRadius: 0, tension: 0 },
+    { label: "Net", data: D.equity.t.map((t, i) => ({x: Date.parse(t.replace(" ", "T")), y: D.equity.net[i]})), borderColor: css("--net"), borderWidth: 2, pointRadius: 0, tension: 0 },
+  ]},
+  options: { maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+    plugins: { legend: { display: false }, tooltip: { callbacks: {
+      title: items => D.equity.t[items[0].dataIndex] + " IST",
+      label: c => `${c.dataset.label}: ${usd(c.parsed.y)}` } } },
+    scales: { x: { type: "linear", min: Date.parse(D.equity.t[0].replace(" ", "T")), max: Date.parse(D.equity.t.at(-1).replace(" ", "T")), ticks: { maxTicksLimit: 9, callback: v => new Date(v).toISOString().slice(0, 7) }, grid: { display: false } },
+              y: { grid: { color: grid }, ticks: { callback: v => usd(v, 0) } } } }
+});
+
+// Monthly chart
+const M = D.monthly;
+new Chart(document.getElementById("monthlyChart"), {
+  type: "bar",
+  data: { labels: M.map(r => r.month), datasets: [{ data: M.map(r => r.net),
+    backgroundColor: M.map(r => r.net >= 0 ? css("--pos") : css("--neg")), borderRadius: 4, borderSkipped: "start", maxBarThickness: 28 }] },
+  options: { maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false }, tooltip: { callbacks: {
+      label: c => { const r = M[c.dataIndex]; return [`Net ${sgn(r.net)}`, `Gross ${sgn(r.gross)} · fees ${usd(r.fees)}`, `${r.trades} trades`]; } } } },
+    scales: { x: { grid: { display: false } }, y: { grid: { color: grid }, ticks: { callback: v => usd(v, 0) } } } }
+});
+
+// Monthly table
+document.getElementById("monthly").innerHTML =
+  `<thead><tr><th>Month</th><th>Trades</th><th>Gross</th><th>Fees</th><th>Net</th><th>Net (maker case)</th><th>Start equity</th><th>End equity</th><th>Return</th></tr></thead><tbody>` +
+  M.map(r => `<tr><td>${r.month}${r.trades ? "" : ' <span class="tag">no trades</span>'}</td><td>${r.trades}</td><td>${sgn(r.gross)}</td><td>${usd(r.fees)}</td>
+    <td>${dot(r.net)}${sgn(r.net)}</td><td>${sgn(r.net_maker)}</td><td>${usd(r.start_equity)}</td><td>${usd(r.end_equity)}</td>
+    <td>${r.return_pct == null ? "—" : (r.return_pct > 0 ? "+" : "") + r.return_pct.toFixed(1) + "%"}</td></tr>`).join("") +
+  `<tr style="font-weight:600"><td>Total</td><td>${S.trades}</td><td>${sgn(S.gross)}</td><td>${usd(S.fees_taker)}</td><td>${dot(S.net_taker)}${sgn(S.net_taker)}</td><td>${sgn(S.net_maker)}</td><td>${usd(S.start_capital)}</td><td>${usd(S.end_equity)}</td><td>${(S.net_taker / S.start_capital * 100).toFixed(1)}%</td></tr></tbody>`;
+
+document.getElementById("kinds").innerHTML =
+  `<thead><tr><th>Type</th><th>Trades</th><th>Gross</th><th>Fees</th><th>Net</th><th>Fees / gross</th></tr></thead><tbody>` +
+  S.by_kind.map(k => `<tr><td>${k.kind}</td><td>${k.trades}</td><td>${sgn(k.gross)}</td><td>${usd(k.fees)}</td><td>${dot(k.net)}${sgn(k.net)}</td>
+    <td>${k.gross > 0 ? pct(k.fees / k.gross) : "—"}</td></tr>`).join("") + `</tbody>`;
+
+// Trades table
+const COLS = ["Symbol","Type","Side","Qty","Entry",D.meta.exit_header,"Entry time","Exit time","Gross","Fees","Net"];
+const T = D.trades; // [sym, kind, side, qty, entry, exit, et, xt, gross, fees, net, settled]
+let sortCol = 7, sortDir = -1, page = 0; const PER = 50;
+const kinds = [...new Set(T.map(r => r[1]))].sort(), months = [...new Set(T.map(r => r[7].slice(0,7)))].sort().reverse();
+kinds.forEach(k => fk.insertAdjacentHTML("beforeend", `<option>${k}</option>`));
+months.forEach(m => fm.insertAdjacentHTML("beforeend", `<option>${m}</option>`));
+function rows() {
+  const qv = q.value.trim().toUpperCase();
+  return T.filter(r => (!qv || r[0].includes(qv)) && (!fk.value || r[1] === fk.value) && (!fm.value || r[7].startsWith(fm.value))
+    && (fr.value !== "w" || r[10] > 0) && (fr.value !== "l" || r[10] <= 0) && (fr.value !== "f" || (r[8] > 0 && r[10] <= 0)))
+    .sort((a, b) => (a[sortCol] > b[sortCol] ? 1 : a[sortCol] < b[sortCol] ? -1 : 0) * sortDir);
+}
+function render() {
+  const all = rows(), pages = Math.max(1, Math.ceil(all.length / PER)); page = Math.min(page, pages - 1);
+  const sum = all.reduce((a, r) => [a[0] + r[8], a[1] + r[9], a[2] + r[10]], [0, 0, 0]);
+  trades.innerHTML = `<thead><tr>${COLS.map((c, i) => `<th class="${i < 3 ? "l" : ""}" data-i="${i}">${c}${i === sortCol ? (sortDir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead><tbody>` +
+    all.slice(page * PER, page * PER + PER).map(r => `<tr><td>${r[0]}</td><td class="l">${r[1]}</td><td class="l">${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td>
+      <td>${r[5]}${r[11] ? ' <span class="tag">settled</span>' : ""}</td><td>${r[6]}</td><td>${r[7]}</td><td>${sgn(r[8])}</td><td>${usd(r[9], 4)}</td><td>${dot(r[10])}${sgn(r[10])}</td></tr>`).join("") +
+    `<tr style="font-weight:600"><td colspan="8">${all.length} trades shown</td><td>${sgn(sum[0])}</td><td>${usd(sum[1])}</td><td>${sgn(sum[2])}</td></tr></tbody>`;
+  pinfo.textContent = `Page ${page + 1} of ${pages}`;
+  trades.querySelectorAll("th").forEach(th => th.onclick = () => { const i = +th.dataset.i; sortDir = i === sortCol ? -sortDir : -1; sortCol = i; render(); });
+}
+[q, fk, fm, fr].forEach(el => el.oninput = () => { page = 0; render(); });
+prev.onclick = () => { page = Math.max(0, page - 1); render(); };
+next.onclick = () => { page++; render(); };
+render();
+
+document.getElementById("assume").innerHTML = "<h2>How this was computed</h2><ul>" + D.meta.notes.map(n => `<li>${n}</li>`).join("") + "</ul>";
+</script>
+</body>
+</html>

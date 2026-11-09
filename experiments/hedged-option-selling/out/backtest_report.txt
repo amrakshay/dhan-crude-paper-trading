@@ -1,0 +1,121 @@
+==============================================================================
+HEDGED OPTION SELLING -- NIFTY index options
+==============================================================================
+  sample      2016-01-01 .. 2026-09-17   (2643 sessions)
+  structure   iron_condor  short 0.16d  wing 0.05d  DTE~30  PT 50%
+  India VIX   min 9.2  median 15.1  max 83.6
+
+==============================================================================
+WHAT THE SAMPLE CONTAINS  -- read this before any performance number
+==============================================================================
+  sessions                       2,642
+  single-day falls over 3%       20
+  single-day falls over 5%       7
+  worst single session           -12.98%  (2020-03-23)
+  worst 20-session stretch       -37.01%  (to 2020-03-23)
+
+------------------------------------------------------------------------------
+HEDGED -- iron_condor 0.16d wing@0.05d DTE30+-10 [PT50%]
+  data faults 0, entries refused for margin 0
+------------------------------------------------------------------------------
+  trades 205   (still open at sample end: 1)
+  mean days held 18.4
+
+  net P&L total          Rs        -95,632
+    of which gross       Rs        -58,172
+    of which charges     Rs        -37,461   (64.4% of gross)
+  mean per trade         Rs           -466
+  median per trade       Rs          2,271
+
+  >>> THE LEFT TAIL <<<
+  worst single trade     Rs        -43,086
+  mean of worst 1%       Rs        -39,530
+  mean of worst 5%       Rs        -32,005
+  worst month            Rs        -62,801   (2020-03)
+  max loss / margin                -666.9%
+  mean loss / mean win               6.18x
+  skew of trade P&L                 -2.75
+
+  mean margin blocked    Rs         10,303
+  return on margin, mean            -6.94%  per trade
+  return on margin, total           -4.53%  (sum P&L / sum margin)
+  return on margin, /yr            -93.01%  per rupee-YEAR of margin -- LEVERAGED, see below
+  return on CAPITAL AT RISK        -25.91%  per rupee-YEAR of MAX LOSS <- compare this with the risk-free rate
+
+  win rate                           83.9%   <- MEANINGLESS on its own.
+                            Selling OTM options produces this by construction.
+  exits: {'profit_take_50': 163, 'expiry': 42}
+
+------------------------------------------------------------------------------
+UNHEDGED -- naked_strangle, identical in every other respect
+  The wing must justify its own cost. If this line is better on return AND survivable on the tail, the hedge does not pay.
+------------------------------------------------------------------------------
+  trades 220   (still open at sample end: 1)
+  mean days held 17.0
+
+  net P&L total          Rs        134,865
+    of which gross       Rs        156,234
+    of which charges     Rs        -21,368   (13.7% of gross)
+  mean per trade         Rs            613
+  median per trade       Rs          3,319
+
+  >>> THE LEFT TAIL <<<
+  worst single trade     Rs       -135,030
+  mean of worst 1%       Rs        -75,361
+  mean of worst 5%       Rs        -43,250
+  worst month            Rs       -170,167   (2020-03)
+  max loss / margin                -286.1%
+  mean loss / mean win               4.75x
+  skew of trade P&L                 -5.88
+
+  mean margin blocked    Rs         60,719
+  return on margin, mean             0.12%  per trade
+  return on margin, total            1.01%  (sum P&L / sum margin)
+  return on margin, /yr             22.13%  per rupee-YEAR of margin -- LEVERAGED, see below
+  return on CAPITAL AT RISK     (unbounded)   this structure has no bounded maximum loss
+
+  win rate                           85.0%   <- MEANINGLESS on its own.
+                            Selling OTM options produces this by construction.
+  exits: {'profit_take_50': 182, 'expiry': 38}
+
+==============================================================================
+SPLIT AT THE SEBI BREAK (2024-11-20) -- these are two different markets
+==============================================================================
+  BEFORE  trades  164  mean Rs      -968  total Rs     -158,678  worst Rs    -43,086  RoM -11.62%  win 82%
+  AFTER   trades   41  mean Rs     1,538  total Rs       63,045  worst Rs    -36,947  RoM   8.44%  win 93%
+
+==============================================================================
+AGAINST THE BASELINES
+==============================================================================
+                              CAGR     maxDD      MAR   Sharpe
+  hedged seller (raw)       -0.45%   -10.47%    -0.04    -0.21
+    + idle cash at repo      5.52%    -3.50%     1.58     3.64
+  risk-free (repo)           5.64%     0.00%        -        -
+  buy and hold NIFTY        10.53%   -38.44%     0.27     0.71
+
+  peak margin utilisation  3.3%    mean 0.7%
+  capital Rs 2,000,000; the strategy is constrained by MARGIN,
+  not by cash -- a credit structure receives money at entry.
+
+  EXCESS OVER RISK-FREE: -0.12% a year
+  (measured on the idle-cash-credited curve, which is the fair
+   comparison: the raw curve earns nothing on ~97% of the book and
+   would charge the strategy for capital it never deployed.)
+  The strategy did not beat leaving the money in bills.
+
+  The scale-free figure is RETURN ON CAPITAL AT RISK above, which
+  does not depend on how much idle cash happens to sit beside the
+  position. CAGR here is a property of the book, not the strategy.
+
+==============================================================================
+BLOCK BOOTSTRAP -- whole months resampled, 10,000 draws
+==============================================================================
+Months, not trades: losses arrive CLUSTERED here, because one adverse
+move hits every open position and the next is sold into the same regime.
+  months resampled           129
+  observed total        Rs        -95,632
+  bootstrap 5th pct     Rs       -327,339
+  bootstrap median      Rs        -89,387
+  bootstrap 95th pct    Rs        119,964
+  P(total P&L < 0)                   75.0%
+  median worst trade    Rs        -43,086

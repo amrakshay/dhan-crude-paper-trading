@@ -1,0 +1,39 @@
+# NSE EQUITY INTRADAY (MIS) -- cost and leverage assumptions for the backtest.
+#
+# Not the application's rate card: backend/conf/charges/ has no intraday card,
+# and this experiment does not add one to the app. Intraday differs from the
+# delivery card in three ways that matter: STT is 0.025% on the SELL side only
+# (delivery: 0.1% both sides), stamp duty is 0.003% (delivery: 0.015%), and
+# there is no DP charge.
+#
+# Researched 2026-09-27 for experiments/intraday-screener; copied here
+# unchanged on 2026-10-07. If a rate changes, change it in both.
+#   CONFIRMED   - read from Dhan's published pricing page, https://dhan.co/pricing/
+#   UNCONFIRMED - broker/secondary sources only, no primary circular read
+
+version: "2026-09-27"
+source: "https://dhan.co/pricing/"
+
+brokerage:
+  # "Rs 20 or 0.03% of trade value per executed order, whichever is lower"
+  per_order_flat: 20.0          # CONFIRMED
+  per_order_pct: 0.0003         # CONFIRMED
+stt_sell_pct: 0.00025           # CONFIRMED, sell side only
+exchange_txn_pct: 0.000030699   # CONFIRMED, NSE, both sides (matches NSE/FA/73061 on the delivery card)
+sebi_fee_pct: 0.000001          # CONFIRMED, Rs 10/crore, both sides
+ipft_pct: 0.000000001           # CONFIRMED, both sides
+stamp_buy_pct: 0.00003          # CONFIRMED, buy side only
+gst_pct: 0.18                   # CONFIRMED, on brokerage + exchange + SEBI + IPFT
+
+# Slippage is NOT a charge and nobody publishes it. Modelled per side as a
+# fraction of price; the backtest reports results at every level so the edge
+# is never quoted at a single optimistic slippage.
+slippage_pct_per_side: [0.0002, 0.0005, 0.0010]   # 2, 5, 10 bps
+
+leverage:
+  # Intraday margin = max(20%, VaR + ELM) of traded value, so AT MOST 5x and
+  # less for volatile names. UNCONFIRMED against a SEBI circular; corroborated
+  # by Dhan's MIS page and brokers' explainers. The backtest caps gross
+  # exposure at `max_multiple` x equity and does NOT model per-stock VaR.
+  max_multiple: 5.0             # UNCONFIRMED
+  per_stock_margin: "VaR+ELM, min 20% -- not modelled"

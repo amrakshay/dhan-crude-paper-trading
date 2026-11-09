@@ -1,0 +1,232 @@
+[
+ {
+  "run": "index_short",
+  "regime": "B",
+  "period": "dev",
+  "at": "2026-10-03T19:51:34",
+  "net_5bps": {
+   "mean_bps": -16.5,
+   "ci95_bps": [
+    -31.32,
+    -2.11
+   ],
+   "days": 364
+  }
+ },
+ {
+  "run": "B1_breakdown",
+  "regime": "B",
+  "period": "dev",
+  "at": "2026-10-03T19:51:38",
+  "net_5bps": {
+   "mean_bps": 0.42,
+   "ci95_bps": [
+    -15.85,
+    17.05
+   ],
+   "days": 314
+  }
+ },
+ {
+  "run": "B2_failed_rally",
+  "regime": "B",
+  "period": "dev",
+  "at": "2026-10-03T19:51:40",
+  "net_5bps": {
+   "mean_bps": 7.98,
+   "ci95_bps": [
+    -12.27,
+    29.61
+   ],
+   "days": 307
+  }
+ },
+ {
+  "run": "B6_gap_up_fade",
+  "regime": "B",
+  "period": "dev",
+  "at": "2026-10-03T19:51:45",
+  "net_5bps": {
+   "mean_bps": 5.31,
+   "ci95_bps": [
+    -19.02,
+    31.54
+   ],
+   "days": 286
+  }
+ },
+ {
+  "run": "index_short",
+  "regime": "A",
+  "period": "dev",
+  "at": "2026-10-03T19:51:50",
+  "net_5bps": {
+   "mean_bps": -30.73,
+   "ci95_bps": [
+    -66.24,
+    1.66
+   ],
+   "days": 140
+  }
+ },
+ {
+  "run": "B1_breakdown",
+  "regime": "A",
+  "period": "dev",
+  "at": "2026-10-03T19:52:06",
+  "net_5bps": {
+   "mean_bps": -7.31,
+   "ci95_bps": [
+    -36.86,
+    20.92
+   ],
+   "days": 126
+  }
+ },
+ {
+  "run": "B2_failed_rally",
+  "regime": "A",
+  "period": "dev",
+  "at": "2026-10-03T19:52:14",
+  "net_5bps": {
+   "mean_bps": 7.14,
+   "ci95_bps": [
+    -29.35,
+    48.03
+   ],
+   "days": 113
+  }
+ },
+ {
+  "run": "index_short",
+  "regime": "C",
+  "period": "dev",
+  "at": "2026-10-03T19:52:19",
+  "net_5bps": {
+   "mean_bps": -31.35,
+   "ci95_bps": [
+    -59.13,
+    -6.86
+   ],
+   "days": 195
+  }
+ },
+ {
+  "run": "B1_breakdown",
+  "regime": "C",
+  "period": "dev",
+  "at": "2026-10-03T19:52:34",
+  "net_5bps": {
+   "mean_bps": -11.39,
+   "ci95_bps": [
+    -34.09,
+    12.27
+   ],
+   "days": 175
+  }
+ },
+ {
+  "run": "B2_failed_rally",
+  "regime": "C",
+  "period": "dev",
+  "at": "2026-10-03T19:52:42",
+  "net_5bps": {
+   "mean_bps": 0.04,
+   "ci95_bps": [
+    -29.22,
+    30.03
+   ],
+   "days": 163
+  }
+ },
+ {
+  "run": "S1_vwap_rejection",
+  "regime": "B",
+  "period": "dev",
+  "round": 2,
+  "at": "2026-10-03T20:38:49",
+  "net": {
+   "mean_bps": -0.73,
+   "ci95_bps": [
+    -18.35,
+    18.01
+   ],
+   "days": 330
+  }
+ },
+ {
+  "run": "S2_pdl_breakdown",
+  "regime": "B",
+  "period": "dev",
+  "round": 2,
+  "at": "2026-10-03T20:38:51",
+  "net": {
+   "mean_bps": -1.2,
+   "ci95_bps": [
+    -34.77,
+    34.14
+   ],
+   "days": 118
+  }
+ },
+ {
+  "run": "S3_failed_breakout",
+  "regime": "B",
+  "period": "dev",
+  "round": 2,
+  "at": "2026-10-03T20:38:52",
+  "net": {
+   "mean_bps": -4.78,
+   "ci95_bps": [
+    -41.15,
+    31.33
+   ],
+   "days": 130
+  }
+ },
+ {
+  "run": "S4_afternoon_weakness",
+  "regime": "B",
+  "period": "dev",
+  "round": 2,
+  "at": "2026-10-03T20:38:53",
+  "net": {
+   "mean_bps": 5.94,
+   "ci95_bps": [
+    -19.4,
+    32.72
+   ],
+   "days": 160
+  }
+ },
+ {
+  "run": "S6_opening_drive",
+  "regime": "B",
+  "period": "dev",
+  "round": 2,
+  "at": "2026-10-03T20:38:54",
+  "net": {
+   "mean_bps": 19.38,
+   "ci95_bps": [
+    -20.49,
+    59.67
+   ],
+   "days": 103
+  }
+ },
+ {
+  "run": "S5_index_momentum",
+  "regime": "B",
+  "period": "dev",
+  "round": 2,
+  "at": "2026-10-03T20:38:54",
+  "net": {
+   "mean_bps": -11.76,
+   "ci95_bps": [
+    -14.06,
+    -9.48
+   ],
+   "days": 560
+  }
+ }
+]

@@ -1,0 +1,11 @@
+{
+ "sessions": 2642,
+ "down_moves_over_3pct": 20,
+ "down_moves_over_5pct": 7,
+ "up_moves_over_3pct": 18,
+ "worst_session": -0.12980464127060243,
+ "worst_session_date": "2020-03-23",
+ "best_session": 0.087632054231922,
+ "worst_20_session_move": -0.370056742696085,
+ "worst_20_session_end": "2020-03-23"
+}

@@ -1,0 +1,492 @@
+[
+ {
+  "entry_date": "2024-11-25",
+  "exit_date": "2024-12-05",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 867.3274999999996,
+  "max_loss": 27056.9,
+  "lot_size": 25,
+  "expiry": "2024-12-26",
+  "charges": 99.06
+ },
+ {
+  "entry_date": "2024-12-05",
+  "exit_date": "2024-12-13",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 845.485,
+  "max_loss": 21022.575,
+  "lot_size": 25,
+  "expiry": "2024-12-26",
+  "charges": 98.24
+ },
+ {
+  "entry_date": "2024-12-13",
+  "exit_date": "2025-01-09",
+  "exit_reason": "expiry",
+  "net_pnl": -32299.56,
+  "max_loss": 34229.25,
+  "lot_size": 75,
+  "expiry": "2025-01-09",
+  "charges": 57.81
+ },
+ {
+  "entry_date": "2025-01-09",
+  "exit_date": "2025-01-30",
+  "exit_reason": "expiry",
+  "net_pnl": 1217.075,
+  "max_loss": 14982.975,
+  "lot_size": 25,
+  "expiry": "2025-01-30",
+  "charges": 49.95
+ },
+ {
+  "entry_date": "2025-01-30",
+  "exit_date": "2025-02-03",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3278.0575000000003,
+  "max_loss": 64934.925,
+  "lot_size": 75,
+  "expiry": "2025-02-27",
+  "charges": 110.03
+ },
+ {
+  "entry_date": "2025-02-03",
+  "exit_date": "2025-02-05",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2098.959999999999,
+  "max_loss": 48471.375,
+  "lot_size": 75,
+  "expiry": "2025-02-27",
+  "charges": 105.44
+ },
+ {
+  "entry_date": "2025-02-05",
+  "exit_date": "2025-02-27",
+  "exit_reason": "expiry",
+  "net_pnl": -26506.835000000057,
+  "max_loss": 48579.975,
+  "lot_size": 75,
+  "expiry": "2025-02-27",
+  "charges": 55.61
+ },
+ {
+  "entry_date": "2025-02-27",
+  "exit_date": "2025-03-17",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2395.1325,
+  "max_loss": 48546.975,
+  "lot_size": 75,
+  "expiry": "2025-03-27",
+  "charges": 104.28
+ },
+ {
+  "entry_date": "2025-03-17",
+  "exit_date": "2025-03-20",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 4202.372500000001,
+  "max_loss": 69445.95,
+  "lot_size": 75,
+  "expiry": "2025-04-09",
+  "charges": 106.19
+ },
+ {
+  "entry_date": "2025-03-20",
+  "exit_date": "2025-03-24",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2270.187500000001,
+  "max_loss": 70471.65,
+  "lot_size": 75,
+  "expiry": "2025-04-17",
+  "charges": 106.44999999999999
+ },
+ {
+  "entry_date": "2025-03-24",
+  "exit_date": "2025-04-17",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2949.4175000000005,
+  "max_loss": 70543.05,
+  "lot_size": 75,
+  "expiry": "2025-04-24",
+  "charges": 106.42
+ },
+ {
+  "entry_date": "2025-04-17",
+  "exit_date": "2025-04-23",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3342.099999999999,
+  "max_loss": 68674.125,
+  "lot_size": 75,
+  "expiry": "2025-05-15",
+  "charges": 114.65
+ },
+ {
+  "entry_date": "2025-04-23",
+  "exit_date": "2025-05-12",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 4030.4325000000013,
+  "max_loss": 98894.8125,
+  "lot_size": 75,
+  "expiry": "2025-05-29",
+  "charges": 111.93
+ },
+ {
+  "entry_date": "2025-05-12",
+  "exit_date": "2025-05-26",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2705.417499999999,
+  "max_loss": 100080.675,
+  "lot_size": 75,
+  "expiry": "2025-06-05",
+  "charges": 108.62
+ },
+ {
+  "entry_date": "2025-05-26",
+  "exit_date": "2025-06-06",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3793.9975000000004,
+  "max_loss": 83930.4375,
+  "lot_size": 75,
+  "expiry": "2025-06-26",
+  "charges": 110.24000000000001
+ },
+ {
+  "entry_date": "2025-06-06",
+  "exit_date": "2025-06-11",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2140.174999999999,
+  "max_loss": 70647.15,
+  "lot_size": 75,
+  "expiry": "2025-07-03",
+  "charges": 106.15
+ },
+ {
+  "entry_date": "2025-06-11",
+  "exit_date": "2025-06-25",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3299.8475000000008,
+  "max_loss": 62985.675,
+  "lot_size": 75,
+  "expiry": "2025-07-03",
+  "charges": 104.59
+ },
+ {
+  "entry_date": "2025-06-25",
+  "exit_date": "2025-07-04",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2311.5699999999997,
+  "max_loss": 48940.875,
+  "lot_size": 75,
+  "expiry": "2025-07-24",
+  "charges": 104.93
+ },
+ {
+  "entry_date": "2025-07-04",
+  "exit_date": "2025-07-23",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3088.4325000000013,
+  "max_loss": 55785.675,
+  "lot_size": 75,
+  "expiry": "2025-07-31",
+  "charges": 104.43
+ },
+ {
+  "entry_date": "2025-07-23",
+  "exit_date": "2025-08-19",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2253.8775,
+  "max_loss": 56024.85,
+  "lot_size": 75,
+  "expiry": "2025-08-28",
+  "charges": 104.61000000000001
+ },
+ {
+  "entry_date": "2025-08-19",
+  "exit_date": "2025-09-04",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1567.6924999999997,
+  "max_loss": 42374.475,
+  "lot_size": 75,
+  "expiry": "2025-09-09",
+  "charges": 101.47
+ },
+ {
+  "entry_date": "2025-09-04",
+  "exit_date": "2025-09-10",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1826.6474999999994,
+  "max_loss": 45678.6375,
+  "lot_size": 75,
+  "expiry": "2025-09-30",
+  "charges": 103.44
+ },
+ {
+  "entry_date": "2025-09-10",
+  "exit_date": "2025-09-16",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3000.68,
+  "max_loss": 107298.0,
+  "lot_size": 75,
+  "expiry": "2025-10-07",
+  "charges": 104.92
+ },
+ {
+  "entry_date": "2025-09-16",
+  "exit_date": "2025-10-03",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1194.6525,
+  "max_loss": 50001.6,
+  "lot_size": 75,
+  "expiry": "2025-10-07",
+  "charges": 101.01
+ },
+ {
+  "entry_date": "2025-10-03",
+  "exit_date": "2025-10-07",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1657.4375000000005,
+  "max_loss": 45653.2125,
+  "lot_size": 75,
+  "expiry": "2025-10-28",
+  "charges": 103.45
+ },
+ {
+  "entry_date": "2025-10-07",
+  "exit_date": "2025-10-15",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1160.4149999999997,
+  "max_loss": 35029.725,
+  "lot_size": 75,
+  "expiry": "2025-11-04",
+  "charges": 104.31
+ },
+ {
+  "entry_date": "2025-10-15",
+  "exit_date": "2025-10-20",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1679.0550000000003,
+  "max_loss": 49567.35,
+  "lot_size": 75,
+  "expiry": "2025-11-11",
+  "charges": 103.92
+ },
+ {
+  "entry_date": "2025-10-20",
+  "exit_date": "2025-10-29",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1228.3674999999994,
+  "max_loss": 19870.9125,
+  "lot_size": 75,
+  "expiry": "2025-11-18",
+  "charges": 110.57
+ },
+ {
+  "entry_date": "2025-10-29",
+  "exit_date": "2025-11-17",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2463.0325000000003,
+  "max_loss": 56283.675,
+  "lot_size": 75,
+  "expiry": "2025-11-25",
+  "charges": 104.18
+ },
+ {
+  "entry_date": "2025-11-17",
+  "exit_date": "2025-11-27",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2475.3574999999996,
+  "max_loss": 33370.575,
+  "lot_size": 75,
+  "expiry": "2025-12-16",
+  "charges": 108.58
+ },
+ {
+  "entry_date": "2025-11-27",
+  "exit_date": "2025-12-19",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2486.7824999999993,
+  "max_loss": 59801.2125,
+  "lot_size": 75,
+  "expiry": "2025-12-30",
+  "charges": 104.73
+ },
+ {
+  "entry_date": "2025-12-19",
+  "exit_date": "2025-12-23",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1089.5349999999999,
+  "max_loss": 30185.48,
+  "lot_size": 65,
+  "expiry": "2026-01-13",
+  "charges": 102.24
+ },
+ {
+  "entry_date": "2025-12-23",
+  "exit_date": "2026-01-27",
+  "exit_reason": "expiry",
+  "net_pnl": -24635.742499999906,
+  "max_loss": 48982.4725,
+  "lot_size": 65,
+  "expiry": "2026-01-27",
+  "charges": 54.27
+ },
+ {
+  "entry_date": "2026-01-27",
+  "exit_date": "2026-02-03",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3662.9000000000005,
+  "max_loss": 57010.979999999996,
+  "lot_size": 65,
+  "expiry": "2026-02-24",
+  "charges": 106.58000000000001
+ },
+ {
+  "entry_date": "2026-02-03",
+  "exit_date": "2026-02-10",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2089.4649999999992,
+  "max_loss": 61361.82,
+  "lot_size": 65,
+  "expiry": "2026-03-02",
+  "charges": 105.39
+ },
+ {
+  "entry_date": "2026-02-10",
+  "exit_date": "2026-03-10",
+  "exit_reason": "expiry",
+  "net_pnl": -48811.77999999999,
+  "max_loss": 48737.0,
+  "lot_size": 65,
+  "expiry": "2026-03-10",
+  "charges": 74.78
+ },
+ {
+  "entry_date": "2026-03-10",
+  "exit_date": "2026-04-07",
+  "exit_reason": "expiry",
+  "net_pnl": 698.4549999999987,
+  "max_loss": 12238.395,
+  "lot_size": 65,
+  "expiry": "2026-04-07",
+  "charges": 63.15
+ },
+ {
+  "entry_date": "2026-04-07",
+  "exit_date": "2026-04-08",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 5120.7625,
+  "max_loss": 84058.585,
+  "lot_size": 65,
+  "expiry": "2026-04-28",
+  "charges": 117.88
+ },
+ {
+  "entry_date": "2026-04-08",
+  "exit_date": "2026-04-16",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3356.492500000001,
+  "max_loss": 110183.70999999999,
+  "lot_size": 65,
+  "expiry": "2026-05-05",
+  "charges": 116.49000000000001
+ },
+ {
+  "entry_date": "2026-04-16",
+  "exit_date": "2026-05-06",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 4287.724999999999,
+  "max_loss": 81643.185,
+  "lot_size": 65,
+  "expiry": "2026-05-26",
+  "charges": 115.44
+ },
+ {
+  "entry_date": "2026-05-06",
+  "exit_date": "2026-05-25",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2666.6575,
+  "max_loss": 59750.08,
+  "lot_size": 65,
+  "expiry": "2026-06-02",
+  "charges": 111.67
+ },
+ {
+  "entry_date": "2026-05-25",
+  "exit_date": "2026-06-15",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 3243.175,
+  "max_loss": 60882.25,
+  "lot_size": 65,
+  "expiry": "2026-06-23",
+  "charges": 106.99000000000001
+ },
+ {
+  "entry_date": "2026-06-15",
+  "exit_date": "2026-06-18",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2278.870000000001,
+  "max_loss": 60939.905,
+  "lot_size": 65,
+  "expiry": "2026-07-14",
+  "charges": 107.93
+ },
+ {
+  "entry_date": "2026-06-18",
+  "exit_date": "2026-07-02",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2206.0075000000006,
+  "max_loss": 39272.935,
+  "lot_size": 65,
+  "expiry": "2026-07-14",
+  "charges": 104.71000000000001
+ },
+ {
+  "entry_date": "2026-07-02",
+  "exit_date": "2026-07-27",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2186.3374999999996,
+  "max_loss": 29073.005,
+  "lot_size": 65,
+  "expiry": "2026-08-04",
+  "charges": 109.94999999999999
+ },
+ {
+  "entry_date": "2026-07-27",
+  "exit_date": "2026-07-30",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1794.8099999999997,
+  "max_loss": 48344.4325,
+  "lot_size": 65,
+  "expiry": "2026-08-25",
+  "charges": 107.74000000000001
+ },
+ {
+  "entry_date": "2026-07-30",
+  "exit_date": "2026-08-13",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 2232.1424999999995,
+  "max_loss": 35904.05,
+  "lot_size": 65,
+  "expiry": "2026-09-01",
+  "charges": 106.85
+ },
+ {
+  "entry_date": "2026-08-13",
+  "exit_date": "2026-08-25",
+  "exit_reason": "profit_take_50",
+  "net_pnl": 1242.025,
+  "max_loss": 33664.67,
+  "lot_size": 65,
+  "expiry": "2026-09-08",
+  "charges": 102.5
+ },
+ {
+  "entry_date": "2026-08-25",
+  "exit_date": "2026-09-17",
+  "exit_reason": "still_open_at_sample_end",
+  "net_pnl": -28507.465,
+  "max_loss": 81278.145,
+  "lot_size": 65,
+  "expiry": "2026-09-22",
+  "charges": 54.82
+ }
+]

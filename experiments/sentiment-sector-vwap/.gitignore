@@ -1,0 +1,4 @@
+logs/
+.browser-profile/
+# Daily stockmojo scrapes and the run's own logs: third-party data, kept local only.
+data/

@@ -1,0 +1,109 @@
+==============================================================================
+LEVEL 1 -- the identity:  E[short straddle P&L] = BS(iv) - BS(realised)
+==============================================================================
+Zero drift, zero rates.  If this fails the pricer is wrong and nothing
+downstream means anything.
+
+   realised  sold at iv   MC mean P&L   closed form        gap  MC stderr
+       0.12        0.10       -108.77       -109.78       1.01       1.11  ok
+       0.12        0.12          1.00          0.00       1.00       1.11  ok
+       0.12        0.15        163.88        164.67      -0.79       1.12  ok
+       0.12        0.18        329.58        329.32       0.26       1.11  ok
+       0.12        0.24        658.35        658.56      -0.21       1.12  ok
+       0.18        0.10       -437.03       -439.10       2.07       1.67  ok
+       0.18        0.12       -329.85       -329.32      -0.53       1.67  ok
+       0.18        0.15       -165.37       -164.65      -0.72       1.68  ok
+       0.18        0.18          3.04          0.00       3.04       1.67  ok
+       0.18        0.24        328.29        329.24      -0.95       1.67  ok
+
+  LEVEL 1: PASS -- every cell within 4 standard errors.
+  Note the sign flips exactly at iv = realised. That is the variance
+  risk premium, and it is the only reason selling options pays.
+
+==============================================================================
+LEVEL 2 -- the ENGINE on a synthetic market, unmodified
+==============================================================================
+Frictionless (no slippage, gross P&L) so the accounting is isolated.
+An iron condor, delta-balanced, held to expiry.
+
+      vrp    iv/rv  trades   mean gross   total gross     stderr  expected sign
+    -0.30     0.70      60       -7,367      -442,035      2,095            < 0  ok
+    -0.15     0.85      60       -6,306      -378,334      2,429            < 0  ok
+     0.00     1.00      60       -2,448      -146,850      2,234              0  ok
+     0.15     1.15      60          752        45,130      2,091            > 0  ok
+     0.30     1.30      60        4,821       289,235      1,883            > 0  ok
+
+  monotone in the variance risk premium: yes
+
+  LEVEL 2: PASS
+  The zero row is the one that matters. An engine that books a profit
+  when it was sold a fair price has a lookahead or a sign error, and
+  would have shown an 'edge' on real data too.
+
+==============================================================================
+LEVEL 3 -- regimes where short premium SHOULD lose
+==============================================================================
+Same structure, same positive variance risk premium (vrp=+0.15) that
+made money under GBM. If a regime cannot hurt it, the model is wrong.
+
+  regime        trades  realised   mean gross        worst  win rate  near maxloss  faults
+  gbm               60     0.151          752      -48,572     71.7%          3.3%       0
+  student_t         60     0.149          504      -63,024     76.7%          8.3%       0
+  jump              60     0.176         -239      -36,777     70.0%          8.3%       0
+  vol_expand        60     0.318      -13,114      -59,738     53.3%         25.0%       0
+  crash             60     0.157          826      -34,767     70.0%          3.3%       0
+  trend             60     0.171      -16,072     -173,000     63.3%         23.3%       0
+
+  TAIL DOMINANCE -- what the two worst trades do to the total
+  regime         total gross    two worst  total without them  tail share
+  gbm                 45,130      -97,112             142,241       -215%
+  student_t           30,233     -111,615             141,848       -369%
+  jump               -14,331      -73,531              59,200        513%
+  vol_expand        -786,851     -110,456            -676,396         14%
+  crash               49,547      -60,435             109,982       -122%
+  trend             -964,297     -340,616            -623,682         35%
+
+  Two trades out of sixty. In several regimes they are the difference
+  between a profitable strategy and an unprofitable one, and in none of
+  them does the win rate move enough to notice. THAT is the shape of
+  this strategy family, and it is why ruin risk rather than expectancy
+  is the decision variable.
+
+  a crash drives at least one trade to its maximum loss: yes  (3.3% of trades)
+     note it is only ~2 trades in 60. A single crash in a five-year
+     sample barely moves any AGGREGATE statistic, which is exactly
+     why aggregates are the wrong way to judge this strategy.
+  a volatility expansion reduces the mean:              yes
+     the seller keeps quoting a stale implied volatility into a
+     regime that has already repriced -- the realistic failure.
+  fat tails produce a worse single trade:               yes
+  a strong gap-heavy trend reduces the mean:            yes
+     direction, not volatility, is what breaches a condor over and
+     over -- and each new position is sold into the same trend.
+
+  The 'faults' column counts sessions where a LIVE position could not be
+  marked because a leg was outside the synthetic strike grid. On real NSE
+  data it is structurally zero -- strikes are never delisted. Any non-zero
+  here is a limit of the synthetic harness, not of the engine, and it is
+  printed rather than hidden because it truncates the very tail the
+  crash regime exists to produce.
+
+  Read the win-rate column and then ignore it. It barely moves between
+  a regime that pays and one that does not, which is the whole reason
+  a high win rate is never evidence for this family of strategies.
+
+  LEVEL 3: PASS
+
+==============================================================================
+LEVEL 4 -- bounds that must hold on every single trade
+==============================================================================
+  60 trades on a jump-diffusion path
+  gross P&L above max profit : 0
+  gross P&L below max loss   : 0
+  five worst trades: -51,914, -39,011, -38,740, -35,955, -26,196
+
+  LEVEL 4: PASS
+
+==============================================================================
+NEGATIVE CONTROLS: ALL PASS
+==============================================================================

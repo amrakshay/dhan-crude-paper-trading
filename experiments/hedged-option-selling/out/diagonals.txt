@@ -1,0 +1,93 @@
+================================================================================================
+DIAGONALS -- sell the near expiry, buy further OTM at expiry+N
+================================================================================================
+  window 2024-07-01 .. 2026-09-17  (549 sessions)
+  Short window by necessity: the structure needs 4+ expiries listed and
+  liquid, which NIFTY did not have earlier. Everything below rests on
+  about two years, which is not many independent observations.
+
+  'cr/maxL' is the credit as a share of maximum loss -- the risk/reward
+  the structure is actually offering.
+  Capital at risk is the CONSERVATIVE bound (far leg assumed worthless
+  at the near expiry), so the diagonal is flattered by nothing here.
+
+------------------------------------------------------------------------------------------------
+1. HEAD TO HEAD -- diagonal against the same-expiry vertical
+------------------------------------------------------------------------------------------------
+Same near-leg delta, same DTE, same window, same charges and slippage.
+
+  variant                               n   total P&L  R/risk /yr      worst  cr/maxL    win
+  bull put spread (same expiry)       204     -23,886     -42.82%    -24,188     6.6%  88.7%
+  put diagonal (expiry+3)             225      38,300      25.37%    -29,797     1.0%  91.6%
+  iron condor (same expiry)           148     -24,302     -45.87%    -27,197    13.8%  78.4%
+  double diagonal (expiry+3)          189     -37,175     -23.68%    -45,604     2.1%  83.1%
+
+  far leg untradeable when the trade ended: 5
+  margin figures produced for a 2-expiry structure (not defensible, not reported): 685
+
+------------------------------------------------------------------------------------------------
+2. HOW FAR OUT SHOULD THE BOUGHT LEG SIT?
+------------------------------------------------------------------------------------------------
+  variant                               n   total P&L  R/risk /yr      worst  cr/maxL    win
+  expiry+1                            225       5,075       4.94%    -26,026     2.8%  89.8%
+  expiry+2                            242      14,143      10.44%    -27,060     1.7%  91.3%
+  expiry+3                            225      38,300      25.37%    -29,797     1.0%  91.6%
+  expiry+4                            210      46,724      32.41%    -30,014     0.6%  92.9%
+
+  Further out = more time value retained in a crash, and a thinner
+  contract to buy it in.
+
+  variant                               n   total P&L  R/risk /yr      worst  cr/maxL    win
+  far leg 0.02 delta                  224      52,510      24.63%    -30,411     1.2%  91.1%
+  far leg 0.05 delta                  225      38,300      25.37%    -29,797     1.0%  91.6%
+  far leg 0.10 delta                   47      29,835     125.28%    -17,745     1.1%  93.6%
+  far leg 0.20 delta                    2     -16,729    -874.20%    -17,745     1.2%  50.0%
+
+  A nearer-the-money far leg costs more but narrows the strike gap,
+  which is what the maximum loss actually is.
+
+------------------------------------------------------------------------------------------------
+3. THE ASSUMPTION THAT DECIDES IT -- slippage on the thin leg
+------------------------------------------------------------------------------------------------
+The far leg trades ~400x less than the near one (CALENDARS.md section 3).
+The bhavcopy has no quotes, so this is modelled. If the answer flips
+inside a plausible range, the backtest has not answered the question.
+
+  variant                               n   total P&L  R/risk /yr      worst  cr/maxL    win
+    none (unreal)                     239      46,584      30.19%    -29,603     1.1%  92.1%
+    1% / 1 tick, 2x illiquid (base)   224      36,479      24.17%    -29,797     1.0%  91.5%
+    2% / 2 ticks, 3x illiquid         210       2,195       1.47%    -27,346     1.0%  89.5%
+    4% / 4 ticks, 4x illiquid         174     -59,081     -42.03%    -28,220     0.8%  88.5%
+    8% / 8 ticks, 4x illiquid         115     -15,622     -12.84%    -21,260     0.6%  86.1%
+
+------------------------------------------------------------------------------------------------
+4. THE TAIL -- did the long-dated hedge actually help?
+------------------------------------------------------------------------------------------------
+  vertical   worst    -24,188   mean worst 1%    -21,799   skew  -3.47   worst as share of its own max loss 100.6%
+  diagonal   worst    -29,797   mean worst 1%    -22,734   skew  -4.42   worst as share of its own max loss  30.8%
+
+  The diagonal's claim is that the long-dated leg holds value in a
+  spike where a near-dated wing can expire worthless. If that is true
+  here, its worst trade should be a SMALLER fraction of its own
+  maximum loss.
+
+------------------------------------------------------------------------------------------------
+5. SIGNIFICANCE
+------------------------------------------------------------------------------------------------
+  vertical   observed    -23,886   5-95% [  -113,870,     64,561]   P(<0)  66.5%
+  diagonal   observed     38,300   5-95% [   -48,935,    127,294]   P(<0)  23.2%
+
+================================================================================================
+WHAT THIS SAYS
+================================================================================================
+
+  risk/reward offered: vertical 6.6% of max loss as credit, diagonal 1.0%.
+  The diagonal is paid LESS per unit of capital at risk, because a
+  5-delta strike three expiries out is far away, and the strike
+  gap IS the maximum loss. Buying further out in TIME does not
+  narrow the gap in PRICE -- and the gap is what you can lose.
+
+  return: diagonal beats the vertical (+25.37% vs -42.82% a year)
+  tail:   diagonal worse on the worst trade (-29,797 vs -24,188)
+
+  risk-free over this sample: 5.64% a year.

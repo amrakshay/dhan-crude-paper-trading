@@ -1,0 +1,199 @@
+# ===========================================================================
+# NSE INDEX OPTIONS -- MARGIN MODEL
+#
+# Marked APPROXIMATION throughout, in the repo's convention.  It is not SPAN.
+# It is a SPAN-SHAPED model driven by NSE's own published daily risk inputs,
+# which is the strongest thing available for a historical backtest, and the
+# reasons it cannot be exact are listed at the bottom rather than buried.
+#
+# WHY THIS MATTERS MORE THAN THE CHARGE CARD
+#
+# For a hedged premium seller, return on MARGIN is the metric -- the hedge
+# exists precisely to collapse the margin requirement, and a backtest that
+# reports return on notional has measured the wrong thing entirely.  A model
+# that is a flat percentage of notional would:
+#
+#   * give the wing no credit at all, so the whole point of the structure
+#     disappears; and
+#   * hold margin CONSTANT through a crisis, when the real requirement
+#     expands exactly as the strategy is losing -- which is the mechanism by
+#     which this kind of book actually fails.
+#
+# Driving the scan range off NSE's published daily volatility fixes both.
+#
+# WHY NOT REAL SPAN: NSE's par files (nsccl.<date>.s<n>.zip) are not archived.
+# Probed 2026-09-20, 404 at every path tried.  Only the current day's
+# parameters are practically obtainable, so NO historical backtest can use
+# true SPAN.  That is a hard limit of the public record, not a shortcut taken
+# here.
+# ===========================================================================
+
+version: "2026-09-20"
+currency: "INR"
+scope: "NSE equity derivatives, INDEX options -- NIFTY, BANKNIFTY"
+confidence: "APPROXIMATION"
+
+# ---------------------------------------------------------------------------
+# The daily sigma. NOT a parameter -- it is fetched, per underlying per
+# session, from NSE's own file.
+# ---------------------------------------------------------------------------
+volatility_source:
+  feed: "FOVOLT"
+  url: "https://nsearchives.nseindia.com/archives/nsccl/volt/FOVOLT_<DDMMYYYY>.csv"
+  column: "Applicable Daily Volatility (M) = Max (E or K)"
+  coverage_verified: "2016-01-04 .. 2026-09-17"
+  # confidence: CONFIRMED -- this is the exchange's own published number, and
+  #   is the quantity its price scan range is defined on.
+
+# ---------------------------------------------------------------------------
+price_scan_range:
+  # PSR = sigma_multiple * sigma_daily * sqrt(mpor), floored.
+  index:
+    sigma_multiple: 3.0
+    # "For index products, the price scan range is taken as three standard
+    #  deviations (3 sigma) as calculated for VaR purposes for the underlying
+    #  index."
+    # source: NSE Clearing, NSCCL SPAN --
+    #   https://www.nseclearing.in/risk-management/equity-derivatives/nsccl-span
+    # as-of: 2026-09-20   confidence: CONFIRMED for the multiple.
+    minimum_fraction_of_underlying: 0.05
+    # A floor is applied by the exchange; the exact index figure was not
+    # obtained from a primary source. 5% is used and SWEPT -- see MARGIN.md.
+    # confidence: APPROXIMATION.
+  mpor_days: 1.0
+    # Margin Period of Risk. The NCL FAQ names MPOR as a SPAN input but does
+    # not publish the equity-derivatives value. 1 day is used and swept.
+    # confidence: APPROXIMATION.
+
+volatility_scan_range:
+  # Relative shift applied to each leg's implied volatility in the scenarios.
+  # NSE does not publish a daily VSR. This is a MODEL PARAMETER, swept rather
+  # than asserted, and MARGIN.md reports how much the answer moves with it.
+  relative: 0.10
+  # confidence: APPROXIMATION.
+
+# ---------------------------------------------------------------------------
+extreme_loss_margin:
+  # Quoted verbatim from NSE Clearing's Risk Management FAQ, Q12:
+  #
+  #   "ELM shall be ... (ii) 2% on short index options contracts, other than
+  #    deep-out-of-the-money option contracts where it shall be 3% and for long
+  #    dated index option contracts where it shall be 5%"
+  #
+  #   "On the day of options contracts expiry, to increase the tail risk
+  #    coverage, an additional Extreme Loss Margin (ELM) of 2% shall be levied
+  #    on all short index options contracts at the start of the day as well on
+  #    short index options contracts initiated during the day that are due for
+  #    expiry on that day."
+  #
+  # source (primary): https://www.nseclearing.in/sites/default/files/2026-01/NCL%20-%20FAQ_RISK_MANAGEMENT.pdf
+  # as-of: 2026-09-20   confidence: CONFIRMED
+  short_index_option: 0.02
+  short_index_option_deep_otm: 0.03
+  short_index_option_long_dated: 0.05
+  expiry_day_addon:
+    - from: "2016-01-01"
+      value: 0.0
+    - from: "2024-11-20"
+      value: 0.02
+      # Introduced with SEBI's October-2024 index-derivatives measures.
+      # confidence: CONFIRMED for the rate; the 2024-11-20 start date is
+      #   CONFIRMED by contemporaneous broker notices, UNCONFIRMED against the
+      #   SEBI circular itself.
+
+  # What counts as "deep out of the money" and "long dated" is not defined in
+  # the FAQ. These thresholds are this model's reading, and are swept.
+  deep_otm_delta_below: 0.05        # |delta| under 5%
+  long_dated_days_above: 180
+  # confidence: APPROXIMATION for both thresholds.
+
+  # THE LOAD-BEARING CHOICE IN THIS FILE.
+  #
+  # The FAQ says "ELM shall be netted at client and prop levels" but does not
+  # say whether a long option at a DIFFERENT strike offsets a short one. Both
+  # readings are implemented in hedgelib/margin.py. This is CALIBRATED, not
+  # read off the rule:
+  #
+  #   NIFTY 500-wide bull put spread, 1 lot, F=24500, 30 DTE, sigma 0.0085,
+  #   credit Rs 6,387, max loss Rs 31,113, naked requirement Rs 88,314:
+  #
+  #     gross   scan 18,060 + ELM 36,750 = Rs 54,810 = 62.1% of naked, 1.76x max loss
+  #     netted  scan 18,060 + ELM      0 = Rs 18,060 = 20.5% of naked, 0.58x max loss
+  #
+  #   Brokers report hedged index spreads at Rs 15,000-30,000 per lot and at
+  #   "roughly a quarter to a third of the margin a naked short needs".
+  #
+  # NETTED is used: it is inside the rupee band and near the ratio band, while
+  # gross is outside both by roughly a factor of two.
+  #
+  # THE RESIDUAL GAP IS REPORTED, NOT TUNED. Netted gives 20.5% of naked
+  # against a reported 25-33%, so this model is somewhat MORE generous than
+  # reality even on the calibration case.
+  #
+  # AND IT IS MORE GENEROUS STILL ON WIDE STRUCTURES. Full netting zeroes the
+  # ELM for any balanced spread however far the wing sits, so margin collapses
+  # to the SPAN scan alone -- and the scan only reaches +/-3 sigma (floored at
+  # 5%), which on a condor whose wings are 8-12% out is far short of the true
+  # maximum loss. Measured over the real backtest, margin is a MEDIAN OF 26%
+  # OF MAX LOSS. That is a genuine property of scan-based margining, not a bug,
+  # but it means RETURN ON MARGIN FLATTERS A WIDE STRUCTURE: the denominator is
+  # small precisely because the exchange is not collateralising the whole tail.
+  # The counterweight is `max loss / margin`, which is on every summary for
+  # exactly this reason and reaches -667% in this sample.
+  #
+  # source (secondary, for the calibration target): 5paisa, "Hedged vs Naked
+  #   Option Selling: Margin, Risk Caps and SEBI Rules"; Sharekhan, "All You
+  #   Must Know About F&O Margin".
+  # confidence: APPROXIMATION, calibrated to reported figures. The gross
+  #   alternative is carried through the sweep in MARGIN.md so the choice is
+  #   never hidden, and it is the single assumption most likely to be wrong.
+  net_long_against_short: true
+
+  notional_basis: "forward"
+  # ELM is "calculated on the Notional Value of the open short option
+  # position". Notional is taken as forward x quantity. Using the STRIKE
+  # instead moves the figure by the moneyness, a few percent at the deltas
+  # this study trades. Swept.
+  # confidence: APPROXIMATION for the basis choice.
+
+# ---------------------------------------------------------------------------
+net_option_premium:
+  # SEBI/NSE began including net options premium payable in the upfront margin
+  # requirement on 2025-02-10 (NCL FAQ Q55). For a NET CREDIT structure the
+  # premium is receivable, not payable, so this adds nothing -- but it is
+  # modelled so that a debit structure is not silently under-margined.
+  include_from: "2025-02-10"
+  # source (primary): NCL Risk Management FAQ Q55
+  # confidence: CONFIRMED
+
+# ---------------------------------------------------------------------------
+scenarios:
+  # The 16-scenario SPAN risk array: the forward shifted by 0, +/-1/3, +/-2/3
+  # and +/-3/3 of the price scan range, each with volatility up and down, plus
+  # two "extreme" moves of twice the scan range taken at a reduced weight.
+  extreme_move_multiple: 2.0
+  extreme_move_weight: 0.35
+  # source: standard SPAN risk-array construction, as described by NSE
+  #   Clearing's NSCCL SPAN page.
+  # confidence: CONFIRMED for the shape of the array.
+
+# ---------------------------------------------------------------------------
+# WHAT THIS MODEL IS NOT, stated here and repeated on the dashboard:
+#
+#  1. It is not SPAN. Historical par files are unobtainable (404), so the
+#     exchange's actual number for any past day cannot be recovered by anyone.
+#  2. It was NOT calibrated against a live broker margin calculator. Zerodha's
+#     endpoint sits behind a Cloudflare bot challenge and working around bot
+#     detection is out of bounds. Every RATE here comes from a published rule;
+#     the one structural choice that could not be read off a rule -- whether
+#     ELM nets a long against a short at a different strike -- is calibrated
+#     against broker-REPORTED margin figures, and is swept.
+#  3. Inter-month and inter-commodity spread charges are not modelled. This
+#     study trades one expiry at a time, so they should not arise -- but a
+#     calendar or diagonal structure would need them, which is one reason
+#     those structures are researched and not backtested.
+#  4. Concentration margin, delivery margin and intraday crystallised losses
+#     are not modelled. None apply to a cash-settled index spread held EOD.
+#  5. Peak-margin / intraday-snapshot rules are not modelled. This is a
+#     daily-resolution study; margin is evaluated at the close.
+# ===========================================================================

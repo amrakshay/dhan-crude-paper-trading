@@ -1,0 +1,82 @@
+==============================================================================
+MARGIN MODEL -- a SPAN-shaped approximation on NSE's own daily sigma
+==============================================================================
+  model version 2026-09-20
+  source        /Users/akshay/Workarea/local/dhan-crude-paper-trading/experiments/hedged-option-selling/conf/margin/nse-index-options-margin.yaml
+
+  It is NOT real SPAN, and cannot be: NSE's historical par files are
+  not archived (404 at every path probed on 2026-09-20), so no
+  historical backtest by anyone can use the exchange's actual number.
+
+  What makes it defensible rather than invented is that the price scan
+  range is driven by NSE's OWN published daily volatility (the FOVOLT
+  file, available 2016-01-04 .. 2026-09-17), and that BOTH LEGS are
+  repriced under every scenario -- so the wing's margin relief is
+  measured, not assumed.
+
+==============================================================================
+1. THE CALIBRATION -- does ELM net a long against a short?
+==============================================================================
+The NCL FAQ says ELM 'shall be netted at client and prop levels' and
+does not say whether a long option at a DIFFERENT strike counts. Both
+readings are implemented. This is the single assumption in the study
+most likely to be wrong.
+
+  NIFTY 500-wide bull put spread, 1 lot, F=24,500, 30 DTE, sigma 0.0085
+
+  reading              scan risk         ELM      margin  vs naked  vs max loss
+  gross                   18,060      36,750      54,810     62.1%        1.76x
+  netted                  18,060           0      18,060     20.5%        0.58x
+
+  Brokers report hedged index spreads at Rs 15,000-30,000 per lot and at
+  'roughly a quarter to a third of the margin a naked short needs'.
+  The NETTED reading lands inside both bands; the gross reading is
+  roughly double the top of each. Netted is used, as a CALIBRATION to
+  reported figures rather than a reading of the rule.
+
+  For reference, the naked requirement: Rs 88,314 (scan 51,564 + ELM 36,750)
+  and the worst SPAN scenario for the hedged spread: F-1.00xPSR, vol-
+
+==============================================================================
+2. THE MODEL RESPONDS TO VOLATILITY -- which a flat model does not
+==============================================================================
+A percentage-of-notional margin holds constant through a crisis, when
+the real requirement expands exactly as the position is losing. That
+error flatters the strategy precisely where it is most dangerous.
+
+   daily sigma  annualised   scan range      margin   vs calm
+        0.0050        9.6%        1,225      18,060     1.00x
+        0.0085       16.2%        1,225      18,060     1.00x
+        0.0120       22.9%        1,225      18,060     1.00x
+        0.0200       38.2%        1,470      21,767     1.21x
+        0.0300       57.3%        2,205      28,829     1.60x
+        0.0500       95.5%        3,675      31,097     1.72x
+
+  NIFTY's typical daily sigma is around 0.0085 (16% annualised), which
+  sits BELOW the scan-range floor, so in calm markets the floor binds and
+  margin is flat. It only starts to expand above roughly 1.7% daily
+  (32% annualised) -- which is a real property of the rule, not a
+  modelling shortcut, and it means margin relief arrives late.
+
+==============================================================================
+3. SENSITIVITY -- how much does the backtest move with each assumption?
+==============================================================================
+  sample 2016-01-01 .. 2026-09-17
+
+  variant                         n  mean margin  RoM total  maxL/margin
+  BASE (netted ELM)             205       10,303     -4.53%      -666.9%
+  ELM gross, not netted         205       50,667     -0.92%      -107.1%
+  scan range 2 sigma            205       10,167     -4.59%      -729.7%
+  scan range 3 sigma            205       10,303     -4.53%      -666.9%
+  scan range 6 sigma            205       13,737     -3.40%      -358.8%
+  scan floor 3.0% of spot       205        5,567     -8.38%     -1003.0%
+  scan floor 5.0% of spot       205       10,303     -4.53%      -666.9%
+  scan floor 9.3% of spot       205       23,581     -1.98%      -309.3%
+  vol scan range 5%             205       10,175     -4.58%      -666.9%
+  vol scan range 10%            205       10,303     -4.53%      -666.9%
+  vol scan range 25%            205       10,835     -4.31%      -608.5%
+  ELM on strike, not forward    205       10,303     -4.53%      -666.9%
+
+  The ELM netting row is the one to look at. Everything else moves
+  the denominator by tens of percent; that assumption moves it by a
+  factor, and it is the one with no published rule behind it.

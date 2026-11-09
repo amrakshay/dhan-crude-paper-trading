@@ -1,0 +1,39 @@
+# NSE INDEX FUTURES (NIFTY) -- intraday round-trip charges, date-keyed.
+#
+# Used only for the `index_short` control and B3's futures comparison. Rates
+# are resolved at the TRADE's date, newest applicable first.
+#
+# Sources:
+#   STT / exchange charges: ../hedged-option-selling/FEASIBILITY.md section 3
+#     (researched 2026-09-20; Finance Acts 2023 and (No. 2) 2024, Budget 2026,
+#     SEBI/HO/MRD/TPD-1/P/CIR/2024/92)
+#   brokerage: https://dhan.co/pricing/ -- "Rs 20 or 0.03% per executed order,
+#     whichever is lower" (same limb as the MIS card)
+# Confidence markers as in the repo's other cards.
+
+version: "2026-10-03"
+
+brokerage:
+  per_order_flat: 20.0            # CONFIRMED (commercial)
+  per_order_pct: 0.0003           # CONFIRMED
+
+stt_sell:                         # on the SELL leg's turnover
+  - {from: "2004-10-01", value: 0.0001}    # 0.01%    UNCONFIRMED (long-standing pre-2023 rate)
+  - {from: "2023-04-01", value: 0.000125}  # 0.0125%  CONFIRMED (Finance Act 2023)
+  - {from: "2024-10-01", value: 0.0002}    # 0.02%    CONFIRMED (Finance (No. 2) Act 2024)
+  - {from: "2026-04-01", value: 0.0005}    # 0.05%    CONFIRMED (Budget 2026), per hedged-option-selling
+
+exchange_txn:                     # both legs, NSE futures
+  - {from: "2004-10-01", value: 0.0000188} # 0.00188% APPROXIMATION (pre-Oct-2024 slab; member-turnover dependent)
+  - {from: "2024-10-01", value: 0.0000173} # 0.00173% CONFIRMED (uniform charge, SEBI CIR/2024/92)
+  - {from: "2026-01-01", value: 0.0000183} # 0.00183% CONFIRMED as current on 2026-09-20; exact start date UNCONFIRMED
+
+sebi_fee: 0.000001                # Rs 10/crore, both legs, CONFIRMED
+ipft: 0.000001                    # Rs 10/crore, both legs, UNCONFIRMED (immaterial)
+stamp_buy: 0.00002                # 0.002% buy leg, CONFIRMED from 2020-07-01 (uniform stamp act); earlier state-wise, APPROXIMATION
+gst: 0.18                         # on brokerage + exchange + SEBI + IPFT, CONFIRMED
+
+# Slippage is not a charge. The control uses 1 bp per side (NIFTY futures
+# trade at a 0.05-point tick, ~0.2 bp); 2 and 5 bps are also reported. Lower
+# than the stocks' 5 bps on purpose: a cheaper control is harder to beat.
+slippage_per_side: [0.0001, 0.0002, 0.0005]

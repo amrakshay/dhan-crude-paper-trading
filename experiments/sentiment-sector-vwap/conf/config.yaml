@@ -1,0 +1,97 @@
+# sentiment-sector-vwap -- live paper experiment. Times are IST.
+# See README.md for what each rule means and why.
+
+schedule:
+  session_start: "09:15"        # first sentiment reading
+  session_end: "15:30"          # last sentiment / sector reading
+  tracking_start: "09:45"       # first intraday-booster read; setups arm from here
+  no_entries_before: "10:00"    # a bar CLOSING before this cannot open a trade
+  no_new_entries_from: "15:00"  # a bar CLOSING at or after this cannot open a trade
+  square_off_at: "15:00"        # every open trade is closed here
+  cycle_minutes: 5
+  # Seconds after each 5-minute boundary before the cycle runs. Dhan's
+  # intraday bars lag the live tape by up to a minute (root CLAUDE.md s5).
+  cycle_delay_seconds: 15
+  bar_wait_seconds: 90          # how long to wait for the just-closed bar to appear
+
+selection:
+  tracked_names: 3
+  # Broad-index buckets on the booster's sector chart. They are not sectors,
+  # and NIFTY/MIDCAP would otherwise be picked whenever the whole market moves.
+  exclude_sectors: ["NIFTY", "MIDCAP", "SENSEX", "BANKNIFTY", "FINNIFTY"]
+  # Where each decision comes from: "dhan" (live all day, no login -- the
+  # default since 2026-10-09) or "stockmojo" (frozen at ~10:00 when signed
+  # out). stockmojo is read and recorded either way, for comparison.
+  sentiment_source: dhan
+  sector_source: dhan
+  members_file: conf/sector_members.yaml   # each sector's F&O stocks (from stockmojo)
+  # stockmojo sector -> NSE sectoral index security id on Dhan (IDX_I), from
+  # backend/data/instrument_master. CHEMICALS has no index: members' average.
+  sector_indices:
+    AUTO: "14"
+    "PVT BANK": "15"
+    FMCG: "28"
+    IT: "29"
+    METAL: "31"
+    PHARMA: "32"
+    "PSU BANK": "33"
+    REALTY: "34"
+    COMMODITIES: "39"
+    CONSUMPTION: "40"
+    ENERGY: "42"
+    INFRA: "43"
+    SERVICES: "46"
+    HEALTHCARE: "447"
+    "CONSR DURBL": "466"
+    "OIL & GAS": "470"
+    DEFENCE: "493"
+    "CAPITAL MRKT": "803"
+    CHEMICALS: null
+  # Sectors with no index (CHEMICALS, and the broad buckets) are left out of a
+  # Dhan pick: a members' average is not the number stockmojo shows.
+  include_unindexed_sectors: false
+
+# Our own market-sentiment rule on Dhan's NIFTY option chain (nearest expiry).
+# A FIRST GUESS shaped like stockmojo's labels; to be tuned on the
+# side-by-side readings in dhan_sentiment.csv. score = pcr + flow + price.
+sentiment_rule:
+  window_points: 500       # strikes within +/-500 of spot (stockmojo's chart range)
+  pcr_strong_bull: 1.30    # PCR at/above: +2
+  pcr_bull: 1.05           #               +1
+  pcr_bear: 0.95           # PCR at/below: -1
+  pcr_strong_bear: 0.80    #               -2
+  flow_cut: 0.30           # net new OI towards puts >= +0.3: +1, <= -0.3: -1
+  nifty_move_pct: 0.30     # Nifty up >= 0.3%: +1, down <= -0.3%: -1
+  lean_at: 1               # |score| >= 1: Bullish/Bearish 70%
+  very_at: 3               # |score| >= 3: Very Bullish/Bearish 85%
+
+strategy:
+  ema_length: 9
+  history_days: 7               # calendar days of 5m bars fetched so the EMA is warm at 09:45
+  # What the stop trails to after each candle: "ema9" or "vwap". Changed from
+  # vwap to ema9 on 2026-10-09 (VWAP barely moves late in the day). Fixed per
+  # trade at entry; both are recomputed on every trade at 15:30 for comparison.
+  trail_with: ema9
+
+plan:
+  # The book that mirrors what can actually be traded: the first N eligible
+  # signals of the day. A second book ("all") takes EVERY eligible signal,
+  # one open trade per symbol, so the data shows which N were worth taking.
+  max_trades_per_day: 2
+
+sizing:
+  capital_per_trade: 100000     # notional rupees per trade; qty = floor(capital / price)
+
+costs:
+  rate_card: conf/intraday_costs.yaml
+  slippage_pct_per_side: 0.0005 # 5 bps against us on every fill
+
+scrape:
+  headless: true
+  page_timeout_seconds: 45
+
+feed:
+  # A SECOND Dhan feed connection (the app holds one; Dhan allows five).
+  # Ticker mode: LTP only, used for live stop checks and fill prices. With it
+  # off, stops are checked on closed bars only.
+  enabled: true

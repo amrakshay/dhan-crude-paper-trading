@@ -1,0 +1,12 @@
+[
+ {
+  "hypothesis": "H3c_gap_fade_top3",
+  "at": "2026-09-27T23:28:56",
+  "rerun_reason": null
+ },
+ {
+  "hypothesis": "H3c_gap_fade_top3",
+  "at": "2026-09-27T23:29:00",
+  "rerun_reason": "same holdout test, second cost assumption (Rs 5L notional); rule unchanged"
+ }
+]

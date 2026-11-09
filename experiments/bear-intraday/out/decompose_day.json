@@ -1,0 +1,18 @@
+{
+ "regime_on_dev": {
+  "days": 364,
+  "overnight": 5.16,
+  "open_to_0930": -8.78,
+  "session_0930_1510": 4.21,
+  "close_auction_tail": 1.93,
+  "session_share_up": 0.505
+ },
+ "regime_off_dev": {
+  "days": 1055,
+  "overnight": 16.19,
+  "open_to_0930": -3.54,
+  "session_0930_1510": -4.87,
+  "close_auction_tail": -0.3,
+  "session_share_up": 0.492
+ }
+}

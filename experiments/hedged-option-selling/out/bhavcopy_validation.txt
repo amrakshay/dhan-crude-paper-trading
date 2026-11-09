@@ -1,0 +1,41 @@
+==============================================================================
+BHAVCOPY VALIDATION -- legacy against UDiFF on the overlap window
+==============================================================================
+Both feeds serve 2024-01-01 .. 2024-07-05.  If the splice at 2024-07-05
+is safe, they must agree on the same sessions.
+
+  session         udiff   legacy   common   close  settle      OI
+  2024-01-02     57,054   57,054   57,054       0       0       0
+  2024-02-01     49,764   49,764   49,764       0       0       0
+  2024-03-01     41,741   41,741   41,741       0       0       0
+  2024-04-01     35,965   35,965   35,965       0       0       0
+  2024-05-02     33,367   33,367   33,367       0       0       0
+  2024-06-03     34,691   34,691   34,691       0       0       0
+  2024-07-01     32,106   32,106   32,106       0       0       0
+
+  contract sets and every price/OI identical: YES
+
+==============================================================================
+DERIVED LOT SIZE -- legacy derivation scored against UDiFF's own figure
+==============================================================================
+Legacy carries no board lot. It is derived from the exchange's own
+turnover, which for options is notional on STRIKE PLUS PREMIUM:
+    VAL_INLAKH x 100000 = contracts x lot x (strike + premium)
+
+  session        groups   wrong   index groups  index wrong
+  2024-01-02        343      24             29            0
+  2024-02-01        327      27             27            0
+  2024-03-01        318      24             27            0
+  2024-04-01        329      28             29            0
+  2024-05-02        361      26             30            0
+  2024-06-03        354      24             29            0
+  2024-07-01        360      25             32            0
+
+  ALL SYMBOLS   : 178/2392 wrong (7.44%)
+  INDEX SYMBOLS : 0/203 wrong (0.00%)   <- the only ones this study trades
+
+  Single-stock misses are within ~2% and come from board lots that are
+  not round at all (1375, 1925, 4462, 7100). Single-stock options are
+  out of scope here -- they are physically settled.
+
+  index lot size exact: YES

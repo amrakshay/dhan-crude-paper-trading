@@ -1,0 +1,70 @@
+======================================================================================
+WHY DOES A TRADE WITH A -2% STOP LOSE 40%?
+======================================================================================
+
+1. HOW LONG DID THE BIG LOSSES TAKE?
+--------------------------------------------------------------------------------------
+   DTE  trades  lost >10%   in ONE session  mean stop slip     worst
+     7    1438        146       100 ( 68%)          -9.79%    -86.4%
+    14    1190         66        41 ( 62%)          -6.79%    -32.1%
+    30     913         40        20 ( 50%)          -5.61%    -30.6%
+    45     658         12         8 ( 67%)          -5.07%    -73.0%
+
+  Half to two-thirds of them happen in a SINGLE trading session, and the
+  stop's slippage halves as the entry moves further from expiry. That
+  gradient is gamma, and it points at the cause.
+
+2. THE CAUSE -- the loss zone is narrower than a day's move
+--------------------------------------------------------------------------------------
+   DTE  short strike  long strike  loss zone  zone / 1-day sigma
+     7        -2.22%       -4.31%      2.09%               2.38x
+    14        -3.07%       -5.96%      2.89%               3.29x
+    30        -4.37%       -8.23%      3.86%               4.39x
+    45        -5.58%      -10.52%      4.95%               5.62x
+
+  NIFTY's median daily sigma over this sample is 0.88% -- NSE's own
+  published figure, the same one the margin model uses.
+
+  At 7 DTE the entire distance from full profit to MAXIMUM loss is about
+  2.4 standard deviations. The sample contains 20 sessions that fell
+  more than 3% and 7 that fell more than 5%. On any of those the spread
+  crosses the whole zone between one close and the next.
+
+  A -2% stop sits INSIDE that zone, near the top. There is almost no
+  room between the level at which the stop triggers and the level at
+  which the position is already at its maximum loss.
+
+3. THE WORST TRADE, TRACED END TO END
+--------------------------------------------------------------------------------------
+  entered 2026-01-16, expiry 2026-01-20, forward 25,717
+  SHORT 25450 PE  /  LONG 25200 PE   (gap 250 points = 0.97% of the index)
+  credit Rs 1,060   maximum loss Rs 15,190
+
+    2026-01-19  NIFTY  25,585.50   mark       -270  (  -1.8% of max loss)
+    2026-01-20  NIFTY  25,232.50   mark    -13,078  ( -86.1% of max loss)
+
+  settlement 25,232.50: short 25450 finished 217.50 in the money, long 25200 finished 0.00 in the money
+  net Rs -13,127 = -86.4% of maximum loss
+
+  THE STOP NEVER HAD A CHANCE TO FIRE. At the previous close the
+  position was 1.8% underwater -- comfortably inside the -2% stop --
+  because the index was still 135 points ABOVE the short strike with
+  a day to run. The next observation was settlement.
+
+  NIFTY fell 1.38% that session. The loss zone was 0.97% wide. The
+  day's move was 1.4x the entire distance from fine to ruined.
+
+4. AND NEAR EXPIRY THE MARK UNDERSTATES THE OUTCOME
+--------------------------------------------------------------------------------------
+  The mark-to-market a stop watches is an EXPECTATION over what could
+  still happen. Settlement is one draw from it. With a day to run and
+  the index just above the short strike, the expectation is mildly
+  negative -- the position might still expire worthless -- while the
+  realisation is either fine or nearly the whole loss.
+
+  So a stop placed on the mark is watching the wrong variable at exactly
+  the moment it matters most. This is not fixable by moving the stop:
+  a tighter one fires more often on noise, and a looser one gives up
+  more before it fires. It is fixable by not being there -- which is
+  what 'exit at 10 DTE' does, and why that was the best management rule
+  in SWEEP.md section 5.
