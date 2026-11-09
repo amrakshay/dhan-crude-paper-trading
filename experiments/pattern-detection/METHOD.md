@@ -176,6 +176,38 @@ happily reached back past the start of the pattern, picked up pivots from
 the move that preceded it, and reported a triangle beginning twenty bars
 early — scoring *well*, because the extra pivots were never asked to fit.
 
+### Known defect: the fitted lines are evaluated before their own pivots
+
+Found on 2026-09-21 while porting this to Pine, and it applies to the Python
+here too. `upS` and `loS` are computed at the pattern's overall start bar, but
+each line is fitted only to pivots of its own kind — so whichever kind starts
+later has its line extrapolated backwards past its first pivot.
+
+Measured over 58 detections on ten symbols: the fit is extrapolated back a
+median of 8 bars (up to 27), the starting width is inflated by about 19%, and
+the convergence ratio is therefore flattered from 0.40 to 0.32. **About 10% of
+detections would fail the 0.58 convergence gate once anchored.**
+
+**There is a matching defect at the RIGHT end, and it is the bigger of the
+two.** `upE` and `loE` are evaluated at the current bar, but the fits are
+supported only as far as the last pivot of each kind. The lines keep
+converging through that extrapolated tail, so the convergence ratio is
+measured somewhere the pattern does not reach. Re-measured at
+`min(last high pivot, last low pivot)`, the median convergence moves from
+**0.41 to 0.50 and 24% of detections fail the 0.58 gate.** This is why
+detections drawn from these fits read as channels rather than triangles:
+they only passed the convergence test on geometry that was not there.
+
+The fix is to evaluate both lines between `max(first high pivot, first low
+pivot)` and `min(last high pivot, last low pivot)`, which is what
+`tradingview/triangles.pine` now does. It is NOT yet fixed here,
+because re-running the triangle analysis would change the weakest pattern's
+numbers in the direction the conclusion already went. Taken together the two
+defects are worth more than "a few points" — 10% of detections fail once the
+left end is anchored and 24% once the right end is, so **the triangle
+precision figure of 56% is optimistic** and the pattern is weaker than this
+project reported. Fix both before any triangle number is quoted again.
+
 ### R² is not used as a gate
 
 An ascending triangle's upper line is horizontal by definition, so the

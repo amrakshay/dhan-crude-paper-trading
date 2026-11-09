@@ -1,0 +1,497 @@
+//@version=6
+// Triangles, wedges and pennants. Ported from experiments/pattern-detection/,
+// where the rules were measured against synthetic ground truth with negative
+// controls, then ten years of NSE data.
+//
+// Read the published odds in the panel before acting on any of it: the
+// symmetrical triangle ranks 36th of 39 patterns in Bulkowski's testing and
+// the rising wedge is last of 36. Our own measurement agreed - 96% recall but
+// only 56% precision, because two converging lines occur constantly in noise.
+indicator("Triangles & Wedges", "Triangles", overlay = true,
+     max_lines_count = 500, max_labels_count = 500, max_boxes_count = 100,
+     max_bars_back = 3000)
+
+GP = "Pivots"
+GG = "Geometry"
+GL = "Lifecycle"
+GC = "Confirmation"
+GS = "Display"
+
+zzK      = input.float(2.2, "Swing = this many ATR", minval = 0.2, step = 0.1, group = GP, tooltip = "A reversal confirms once price retraces this many ATRs from the running extreme. Scaling by ATR matters: a fixed 5% is a shrug for one instrument and a crash for another.")
+zzMinPct = input.float(2.5, "Floor, % of price", minval = 0.1, step = 0.1, group = GP)
+zzMaxPct = input.float(15.0, "Ceiling, % of price", minval = 1.0, step = 0.5, group = GP, tooltip = "LOAD-BEARING. When volatility spikes an ATR-scaled threshold can reach a quarter of price and the zigzag stops marking swings altogether.")
+atrLen   = input.int(14, "ATR length", minval = 2, group = GP)
+showPiv  = input.bool(false, "Plot swing pivots", group = GP)
+
+minPiv   = input.int(5, "Min pivots in the pattern", minval = 4, maxval = 9, group = GG)
+maxPiv   = input.int(9, "Max pivots in the pattern", minval = 5, maxval = 12, group = GG)
+minBars  = input.int(15, "Min length (bars)", minval = 8, group = GG)
+maxBars  = input.int(120, "Max length (bars)", minval = 20, group = GG)
+convPct  = input.float(58.0, "Converge to <= this % of starting width", minval = 20.0, maxval = 95.0, step = 1.0, group = GG)
+flatPct  = input.float(3.0, "A line is flat below this % total drift", minval = 0.5, step = 0.5, group = GG, tooltip = "Drift across the whole pattern, not a slope, so it means the same thing on a 12-bar pennant and a 90-bar triangle.")
+shrinkPct= input.float(55.0, "Last swing <= this % of the first", minval = 20.0, maxval = 100.0, step = 5.0, group = GG, tooltip = "THE gate that noise fails. Two fitted lines converge by chance constantly; what does not happen by chance is the swings themselves shrinking one after another. This did more for precision than every threshold combined.")
+touchTol = input.float(0.6, "A touch is within this many ATR of the line", minval = 0.1, step = 0.1, group = GG)
+touchFrac= input.float(0.8, "Fraction of pivots that must sit on a line", minval = 0.5, maxval = 1.0, step = 0.05, group = GG, tooltip = "Without this the search reaches back past the start of the pattern, picks up pivots from the move before it, and reports a triangle that begins twenty bars early - scoring well, because the extra pivots were never asked to fit.")
+minAmpAtr= input.float(2.0, "Starting width >= this many ATR", minval = 0.5, step = 0.5, group = GG)
+maxStagger= input.int(40, "Max bars between the two lines' first pivots", minval = 5, maxval = 200, group = GG, tooltip = "If the first high and the first low are 60 bars apart, the left half of the shape has only one boundary and it is not a triangle over that span. Bounding the stagger is what stops an open V being drawn as a closed triangle.")
+minFill  = input.float(0.50, "Price must fill this much of the channel", minval = 0.1, maxval = 1.5, step = 0.05, group = GG, tooltip = "Bulkowski: price must cross the pattern side to side, filling it rather than leaving white space. Measured as coverage per vertical slice. A real triangle scores 0.5-0.9; price drifting along one edge scores ~0.2 - and that is what a detection that does not LOOK like a triangle actually is.")
+maxDrift = input.float(1.5, "Max drift for triangles (x pattern height)", minval = 0.3, maxval = 6.0, step = 0.1, group = GG, tooltip = "A triangle is a CONSOLIDATION: if its midline travels several times its own height it is a narrowing channel. Measured across ~430 detections, triangles drift a median of 0.08-0.36x, so this rejects none of them and only catches the pathological case.")
+maxDriftW= input.float(2.5, "Max drift for WEDGES (x pattern height)", minval = 0.5, maxval = 8.0, step = 0.1, group = GG, tooltip = "Wedges need their own, looser limit. A wedge has both lines sloping the same way, so it MUST drift - median 0.86x against 0.08-0.36x for triangles. A single threshold punished wedges for their defining feature and silently rejected 15% of rising wedges and 8% of falling ones, including live, textbook examples.")
+wedgeConv= input.float(0.50, "Wedges must converge to <= this", minval = 0.2, maxval = 0.9, step = 0.05, group = GG, tooltip = "What actually separates a wedge from a narrowing channel is how hard it converges. High-drift wedges converge at ~0.46 against ~0.35 for the rest, so this is a soft backstop rather than a clean line.")
+
+expireBars = input.int(40, "Retire an unresolved pattern after N bars", minval = 5, maxval = 300, group = GL, tooltip = "A detection is a claim about what price is about to do. Once it has done it, or failed to for long enough, the drawing is history rather than a signal.")
+apexStop = input.bool(true, "Retire once price passes the apex", group = GL, tooltip = "Bulkowski: breakouts happen 61-75% of the way to the apex. Past it the pattern has run out of room.")
+scanBars = input.int(2000, "Only scan the last N bars", minval = 200, maxval = 5000, group = GL, tooltip = "Detection runs on every new swing pivot. Bounding it keeps Pine inside its execution budget on intraday charts.")
+rescanEvery = input.int(5, "Re-scan every N bars when nothing is held", minval = 1, maxval = 50, group = GL, tooltip = "Detection normally runs when a new swing pivot forms. In a steady grind no pivot forms, so a slowly-building wedge can expire and never be re-examined. This re-checks periodically while nothing is held.")
+keepHist = input.bool(true, "Keep resolved patterns on the chart", group = GL)
+maxKeep  = input.int(6, "How many to keep", minval = 1, maxval = 30, group = GL)
+
+useVol   = input.bool(true, "Require volume expansion on breakout", group = GC)
+volMult  = input.float(1.3, "Breakout volume >= this x 50-bar average", minval = 1.0, step = 0.1, group = GC)
+volDry   = input.bool(true, "Require volume to recede through the pattern", group = GC, tooltip = "Bulkowski measures receding volume in 78% (ascending, descending) to 86% (symmetrical) of real triangles. At those rates it is part of the definition, not a tendency.")
+
+lineW     = input.int(3, "Line thickness", minval = 1, maxval = 6, group = GS)
+showFill  = input.bool(true, "Shade the pattern", group = GS)
+showApex  = input.bool(true, "Extend lines to the apex", group = GS)
+showProj  = input.bool(true, "Project the measured move", group = GS)
+showLvls  = input.bool(true, "Breakout / invalidation lines", group = GS)
+showLabel = input.bool(true, "Name the pattern on the chart", group = GS)
+showTable = input.bool(true, "Info panel", group = GS)
+tblPos    = input.string("Top right", "Panel position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = GS)
+bullCol   = input.color(#1B8A5A, "Bullish", group = GS, inline = "c")
+bearCol   = input.color(#C4483E, "Bearish", group = GS, inline = "c")
+neutCol   = input.color(#4A7FD4, "Neutral", group = GS, inline = "c")
+fillTr    = input.int(90, "Shading transparency", minval = 50, maxval = 100, group = GS)
+
+type Pivot
+    int   b
+    float p
+    bool  hi
+
+// Always constructed with NAMED arguments. Positional construction is how an
+// earlier version broke: adding one field shifted every later argument by one.
+type Tri
+    bool   ok    = false
+    string kind  = ""
+    int    sBar  = 0
+    int    eBar  = 0
+    float  upS   = na
+    float  upE   = na
+    float  loS   = na
+    float  loE   = na
+    float  w0    = na
+    float  score = 0.0
+    int    bias  = 0
+    string stat  = ""
+    float  apexX = na
+    int    touch = 0
+    float  fill  = 0.0
+    int    upFrom = 0
+    int    loFrom = 0
+    int    eEnd  = 0
+    int    broke = 0
+    int    brBar = 0
+    float  brPx  = na
+    float  targ  = na
+
+atrV  = ta.atr(atrLen)
+vol50 = ta.sma(volume, 50)
+
+off(int b) => math.max(0, math.min(2999, bar_index - b))
+
+volTrendDown(int a, int b) =>
+    int n = math.min(math.max(b - a, 0), 300)
+    float f = 0.0
+    float l = 0.0
+    int h = math.max(1, n / 2)
+    for i = 0 to h - 1
+        f += nz(volume[off(a + i)])
+    for i = h to n
+        l += nz(volume[off(a + i)])
+    float fa = f / h
+    float la = l / math.max(n - h + 1, 1)
+    la <= fa
+
+// Bulkowski: "price must cross the pattern from side to side, filling the
+// triangle with price movement, not white space." The naive reading -- mean
+// bar height over channel width -- measures how tall candles are, which is a
+// property of the instrument, not the pattern. What the rule is about is
+// COVERAGE, so cut the span into slices and ask what fraction of the channel
+// each slice's range spans. A triangle price criss-crosses scores 0.5-0.9; a
+// drift along one edge scores ~0.2 and is what makes a detection "not look
+// like a triangle".
+chanFill(int a, int b, float mh, float bh, float ml, float bl) =>
+    int n = b - a
+    float tot = 0.0
+    int cnt = 0
+    if n >= 5
+        for k = 0 to 4
+            int s1 = a + k * n / 5
+            int s2 = a + (k + 1) * n / 5
+            if s2 > s1
+                float hh = -1000000000.0
+                float ll = 1000000000.0
+                float w = 0.0
+                for i = s1 to s2 - 1
+                    hh := math.max(hh, high[off(i)])
+                    ll := math.min(ll, low[off(i)])
+                    w += (mh * i + bh) - (ml * i + bl)
+                w := w / (s2 - s1)
+                if w > 0
+                    tot += (hh - ll) / w
+                    cnt += 1
+    cnt > 0 ? tot / cnt : 0.0
+
+fmtP(float v) => str.tostring(v, format.mintick)
+fmtPc(float v) => str.tostring(v, "#.#") + "%"
+
+// ── swing pivots ─────────────────────────────────────────────────────────────
+thr = math.max(zzMinPct / 100.0, math.min(zzMaxPct / 100.0, zzK * atrV / math.max(close, syminfo.mintick)))
+
+var array<Pivot> PV = array.new<Pivot>()
+var float rHi = high
+var int   rHiB = 0
+var float rHiT = 0.05
+var float rLo = low
+var int   rLoB = 0
+var float rLoT = 0.05
+var int   zdir = 0
+var bool  newPiv = false
+newPiv := false
+
+if bar_index > atrLen
+    if zdir == 0
+        if high >= rHi
+            rHi := high
+            rHiB := bar_index
+            rHiT := thr
+        if low <= rLo
+            rLo := low
+            rLoB := bar_index
+            rLoT := thr
+        if rHiB > rLoB and (rHi - low) / rHi >= rHiT
+            PV.push(Pivot.new(rHiB, rHi, true))
+            zdir := -1
+            rLo := low
+            rLoB := bar_index
+            rLoT := thr
+            newPiv := true
+        else if rLoB > rHiB and (high - rLo) / rLo >= rLoT
+            PV.push(Pivot.new(rLoB, rLo, false))
+            zdir := 1
+            rHi := high
+            rHiB := bar_index
+            rHiT := thr
+            newPiv := true
+    else if zdir > 0
+        if high >= rHi
+            rHi := high
+            rHiB := bar_index
+            rHiT := thr
+        else if (rHi - low) / rHi >= rHiT
+            PV.push(Pivot.new(rHiB, rHi, true))
+            zdir := -1
+            rLo := low
+            rLoB := bar_index
+            rLoT := thr
+            newPiv := true
+    else
+        if low <= rLo
+            rLo := low
+            rLoB := bar_index
+            rLoT := thr
+        else if (high - rLo) / rLo >= rLoT
+            PV.push(Pivot.new(rLoB, rLo, false))
+            zdir := 1
+            rHi := high
+            rHiB := bar_index
+            rHiT := thr
+            newPiv := true
+    if PV.size() > 24
+        PV.shift()
+
+plotshape(showPiv and newPiv and zdir < 0, "Swing high", shape.triangledown, location.abovebar, color.new(#C4483E, 40), size = size.tiny)
+plotshape(showPiv and newPiv and zdir > 0, "Swing low", shape.triangleup, location.belowbar, color.new(#1B8A5A, 40), size = size.tiny)
+
+// ── detection ────────────────────────────────────────────────────────────────
+detect() =>
+    Tri t = Tri.new()
+    int n = PV.size()
+    if n >= minPiv
+        for cnt = math.min(maxPiv, n) to minPiv
+            int st = n - cnt
+            int s0 = PV.get(st).b
+            int len = bar_index - s0
+            if len >= minBars and len <= maxBars
+                float a1 = math.abs(PV.get(st + 1).p - PV.get(st).p)
+                float aN = math.abs(PV.get(n - 1).p - PV.get(n - 2).p)
+                if a1 > 0 and aN <= a1 * shrinkPct / 100.0
+                    float sxh = 0.0
+                    float syh = 0.0
+                    float sxxh = 0.0
+                    float sxyh = 0.0
+                    int nh = 0
+                    float sxl = 0.0
+                    float syl = 0.0
+                    float sxxl = 0.0
+                    float sxyl = 0.0
+                    int nl = 0
+                    int hi0 = -1
+                    int lo0 = -1
+                    int hiN = -1
+                    int loN = -1
+                    for i = st to n - 1
+                        Pivot p = PV.get(i)
+                        float x = p.b
+                        if p.hi
+                            hi0 := hi0 < 0 ? p.b : hi0
+                            hiN := p.b
+                        else
+                            lo0 := lo0 < 0 ? p.b : lo0
+                            loN := p.b
+                        if p.hi
+                            sxh += x
+                            syh += p.p
+                            sxxh += x * x
+                            sxyh += x * p.p
+                            nh += 1
+                        else
+                            sxl += x
+                            syl += p.p
+                            sxxl += x * x
+                            sxyl += x * p.p
+                            nl += 1
+                    if nh >= 2 and nl >= 2 and math.max(nh, nl) >= 3
+                        float dH = nh * sxxh - sxh * sxh
+                        float dL = nl * sxxl - sxl * sxl
+                        if dH != 0 and dL != 0
+                            float mh = (nh * sxyh - sxh * syh) / dH
+                            float bh = (syh - mh * sxh) / nh
+                            float ml = (nl * sxyl - sxl * syl) / dL
+                            float bl = (syl - ml * sxl) / nl
+                            int pStart = math.max(hi0, lo0)
+                            int pEnd = math.min(hiN, loN)
+                            bool stagOk = math.abs(hi0 - lo0) <= maxStagger and pEnd > pStart
+                            float u0 = mh * pStart + bh
+                            float u1 = mh * pEnd + bh
+                            float l0 = ml * pStart + bl
+                            float l1 = ml * pEnd + bl
+                            float wid = u0 - l0
+                            float w1 = u1 - l1
+                            if stagOk and wid > 0 and w1 > 0 and w1 <= wid * convPct / 100.0 and wid >= minAmpAtr * atrV
+                                float midS = (u0 + l0) / 2.0
+                                float midE = (u1 + l1) / 2.0
+                                float drift = math.abs(midE - midS) / math.max(wid, 0.0000001)
+                                float mid = (u0 + l0 + u1 + l1) / 4.0
+                                int    span = pEnd - pStart
+                                float drH = mid > 0 ? mh * span / mid * 100.0 : 0.0
+                                float drL = mid > 0 ? ml * span / mid * 100.0 : 0.0
+                                bool fH = math.abs(drH) <= flatPct
+                                bool fL = math.abs(drL) <= flatPct
+                                string knd = ""
+                                int bs = 0
+                                string stt = ""
+                                if fH and drL > 0 and not fL
+                                    knd := "Ascending Triangle"
+                                    bs := 1
+                                    stt := "breaks up 63% · avg rise 43% · fails 17%"
+                                else if fL and drH < 0 and not fH
+                                    knd := "Descending Triangle"
+                                    bs := -1
+                                    stt := "breaks up 53% · avg decline 15% · fails 23%"
+                                else if drH < 0 and drL > 0
+                                    knd := span <= 20 ? "Pennant" : "Symmetrical Triangle"
+                                    bs := 0
+                                    stt := span <= 20 ? "continuation of the move before it" : "breaks up 60% · avg rise 34% · ranks 36 of 39"
+                                else if drH > 0 and drL > 0 and drH < drL
+                                    knd := "Rising Wedge"
+                                    bs := -1
+                                    stt := "bearish · 51% break-even failure — last of 36"
+                                else if drH < 0 and drL < 0 and math.abs(drH) > math.abs(drL)
+                                    knd := "Falling Wedge"
+                                    bs := 1
+                                    stt := "bullish · avg rise 38% · fails 26%"
+                                bool isWedge = knd == "Rising Wedge" or knd == "Falling Wedge"
+                                bool notChannel = isWedge ? (drift <= maxDriftW and w1 / wid <= wedgeConv) : (drift <= maxDrift)
+                                if knd != "" and notChannel
+                                    int th = 0
+                                    int tl = 0
+                                    for i = st to n - 1
+                                        Pivot p = PV.get(i)
+                                        if p.hi
+                                            if math.abs(p.p - (mh * p.b + bh)) <= touchTol * atrV
+                                                th += 1
+                                        else
+                                            if math.abs(p.p - (ml * p.b + bl)) <= touchTol * atrV
+                                                tl += 1
+                                    bool tOk = math.max(th, tl) >= 3 and math.min(th, tl) >= 2 and th + tl >= 5 and th + tl >= cnt * touchFrac
+                                    bool vOk = not volDry or volTrendDown(s0, bar_index)
+                                    float fil = tOk and vOk ? chanFill(pStart, pEnd, mh, bh, ml, bl) : 0.0
+                                    if tOk and vOk and fil >= minFill
+                                        float apx = math.abs(mh - ml) > 0.0000000001 ? (bl - bh) / (mh - ml) : na
+                                        float sc = 1.0 + (th + tl >= 6 ? 1.5 : 1.0) + (w1 <= wid * 0.45 ? 1.0 : 0.5) + (fil >= 0.65 ? 1.5 : 0.7) + (aN <= a1 * 0.40 ? 1.0 : 0.5)
+                                        t := Tri.new(ok = true, kind = knd, sBar = pStart, eBar = bar_index, upFrom = hi0, loFrom = lo0, upS = u0, upE = u1, loS = l0, loE = l1, w0 = wid, score = sc / 6.0, bias = bs, stat = stt, apexX = apx, touch = th + tl, fill = fil, eEnd = pEnd)
+                                        break
+    t
+
+var Tri T = Tri.new()
+
+// Re-detect on every new pivot, AND periodically whenever nothing is held.
+// Pivot-only was a real gap: a wedge that takes 70 bars to form gets detected
+// early, expires at `expireBars` unresolved, and - if price is grinding one
+// way without a swing big enough to mark a pivot - is never looked at again.
+// IRFC sat in exactly that state, with a textbook live wedge the indicator
+// could not see.
+recheck = newPiv or (not T.ok and bar_index % rescanEvery == 0)
+if recheck and barstate.isconfirmed and bar_index > last_bar_index - scanBars
+    Tri c = detect()
+    if c.ok
+        T := c
+
+// ── lines at the current bar, breakout, lifecycle ────────────────────────────
+slopeU = T.ok and T.eEnd > T.sBar ? (T.upE - T.upS) / (T.eEnd - T.sBar) : 0.0
+slopeL = T.ok and T.eEnd > T.sBar ? (T.loE - T.loS) / (T.eEnd - T.sBar) : 0.0
+upNow = T.ok ? T.upS + slopeU * (bar_index - T.sBar) : na
+loNow = T.ok ? T.loS + slopeL * (bar_index - T.sBar) : na
+
+// A triangle can resolve either way, so the direction is taken from price, not
+// from the shape's bias. The bias only tells you which way the odds lean.
+if T.ok and T.broke == 0 and barstate.isconfirmed
+    if close > upNow
+        T.broke := 1
+        T.brBar := bar_index
+        T.brPx := close
+        T.targ := close + T.w0
+    else if close < loNow
+        T.broke := -1
+        T.brBar := bar_index
+        T.brPx := close
+        T.targ := close - T.w0
+
+if T.ok
+    bool dead = false
+    if T.broke == 0
+        if bar_index - T.eBar > expireBars
+            dead := true
+        if apexStop and not na(T.apexX) and bar_index > T.apexX
+            dead := true
+    else
+        if T.broke > 0 and (close >= T.targ or close < loNow)
+            dead := true
+        if T.broke < 0 and (close <= T.targ or close > upNow)
+            dead := true
+        if bar_index - T.brBar > expireBars
+            dead := true
+    if dead
+        T := Tri.new()
+
+apexProg = T.ok and not na(T.apexX) and T.apexX > T.sBar ? (bar_index - T.sBar) / (T.apexX - T.sBar) * 100.0 : na
+volOk = not useVol or (not na(vol50) and vol50 > 0 and volume >= vol50 * volMult)
+status = not T.ok ? "—" : T.broke == 0 ? "forming" : (T.broke > 0 ? "BROKE UP" : "BROKE DOWN") + (volOk ? ", volume confirms" : ", volume thin")
+col = T.ok ? (T.broke != 0 ? (T.broke > 0 ? bullCol : bearCol) : T.bias > 0 ? bullCol : T.bias < 0 ? bearCol : neutCol) : neutCol
+
+// ── drawing ──────────────────────────────────────────────────────────────────
+var array<line> HL = array.new<line>()
+var array<label> HB = array.new<label>()
+
+var line  lU = na
+var line  lL = na
+var line  lE = na
+var line  lS = na
+var line  lT = na
+var line  lAU = na
+var line  lAL = na
+var line  lCU = na
+var line  lCL = na
+var label lK = na
+var label lTg = na
+var box   bx = na
+
+// Enumerating pivot counts finds the same wedge several times over; without
+// this the chart gets two labels and two sets of lines on one pattern.
+var int lastS = -1
+var int lastE = -1
+overlapsPrev(int a, int b) =>
+    int inter = math.max(0, math.min(b, lastE) - math.max(a, lastS))
+    int uni = math.max(b, lastE) - math.min(a, lastS)
+    uni <= 0 ? true : inter / float(uni) >= 0.4
+
+if keepHist and barstate.isconfirmed and T.ok and T.broke != 0 and not overlapsPrev(T.sBar, T.brBar)
+    lastS := T.sBar
+    lastE := T.brBar
+    HL.push(line.new(T.sBar, T.upS, T.eEnd, T.upE, color = color.new(col, 35), width = lineW))
+    HL.push(line.new(T.sBar, T.loS, T.eEnd, T.loE, color = color.new(col, 35), width = lineW))
+    if T.brBar > T.eEnd
+        HL.push(line.new(T.eEnd, T.upE, T.brBar, T.upS + slopeU * (T.brBar - T.sBar), color = color.new(col, 45), width = math.max(1, lineW - 1), style = line.style_dashed))
+        HL.push(line.new(T.eEnd, T.loE, T.brBar, T.loS + slopeL * (T.brBar - T.sBar), color = color.new(col, 45), width = math.max(1, lineW - 1), style = line.style_dashed))
+    if showLabel
+        HB.push(label.new(T.brBar, T.brPx, T.kind + (T.broke > 0 ? "  ▲ broke up" : "  ▼ broke down"), style = T.broke > 0 ? label.style_label_down : label.style_label_up, color = color.new(col, 25), textcolor = color.white, size = size.tiny))
+    while HL.size() > maxKeep * 4
+        line.delete(HL.shift())
+    while HB.size() > maxKeep
+        label.delete(HB.shift())
+
+if barstate.islast
+    line.delete(lU)
+    line.delete(lL)
+    line.delete(lE)
+    line.delete(lS)
+    line.delete(lT)
+    line.delete(lAU)
+    line.delete(lAL)
+    line.delete(lCU)
+    line.delete(lCL)
+    label.delete(lK)
+    label.delete(lTg)
+    box.delete(bx)
+    if T.ok
+        // solid across the pattern itself; the run to the apex is a faint
+        // dotted continuation so it cannot be mistaken for the pattern
+        lU := line.new(T.sBar, T.upS, T.eEnd, T.upE, color = col, width = lineW)
+        lL := line.new(T.sBar, T.loS, T.eEnd, T.loE, color = col, width = lineW)
+        // carry the lines forward to the break (or to now) at reduced weight,
+        // so you can see price cross them
+        int carry = T.broke != 0 ? T.brBar : bar_index
+        if carry > T.eEnd
+            lCU := line.new(T.eEnd, T.upE, carry, T.upS + slopeU * (carry - T.sBar), color = color.new(col, 35), width = math.max(1, lineW - 1), style = line.style_dashed)
+            lCL := line.new(T.eEnd, T.loE, carry, T.loS + slopeL * (carry - T.sBar), color = color.new(col, 35), width = math.max(1, lineW - 1), style = line.style_dashed)
+        int aFrom = T.broke != 0 ? T.brBar : bar_index
+        int ext = showApex and not na(T.apexX) and T.apexX > aFrom ? math.min(int(T.apexX), aFrom + 60) : aFrom
+        if ext > aFrom
+            lAU := line.new(aFrom, T.upS + slopeU * (aFrom - T.sBar), ext, T.upS + slopeU * (ext - T.sBar), color = color.new(col, 65), width = 1, style = line.style_dotted)
+            lAL := line.new(aFrom, T.loS + slopeL * (aFrom - T.sBar), ext, T.loS + slopeL * (ext - T.sBar), color = color.new(col, 65), width = 1, style = line.style_dotted)
+        if showFill
+            bx := box.new(T.sBar, math.max(T.upS, upNow), bar_index, math.min(T.loS, loNow), border_color = color.new(col, 80), bgcolor = color.new(col, fillTr))
+        if showLabel
+            lK := label.new(math.round((T.sBar + bar_index) / 2), math.max(T.upS, upNow), T.kind + (na(apexProg) ? "" : "   " + fmtPc(apexProg) + " to apex"), style = label.style_label_down, color = color.new(col, 10), textcolor = color.white, size = size.small)
+        if showLvls
+            lE := line.new(T.sBar, upNow, bar_index + 15, upNow + slopeU * 15, color = color.new(bullCol, 30), width = 1, style = line.style_dashed)
+            lS := line.new(T.sBar, loNow, bar_index + 15, loNow + slopeL * 15, color = color.new(bearCol, 30), width = 1, style = line.style_dashed)
+        if showProj and T.broke != 0 and not na(T.targ)
+            lT := line.new(T.brBar, T.brPx, T.brBar + 30, T.targ, color = color.new(col, 10), width = 2, style = line.style_dashed)
+            float mv = T.brPx > 0 ? (T.targ / T.brPx - 1) * 100.0 : 0.0
+            lTg := label.new(T.brBar + 30, T.targ, (T.broke > 0 ? "▲ " : "▼ ") + "measured move " + fmtP(T.targ) + "   " + fmtPc(mv), style = label.style_label_left, color = color.new(col, 15), textcolor = color.white, size = size.small)
+
+// ── info panel ───────────────────────────────────────────────────────────────
+pos = tblPos == "Top right" ? position.top_right : tblPos == "Top left" ? position.top_left : tblPos == "Bottom right" ? position.bottom_right : position.bottom_left
+var table TB = table.new(pos, 2, 9, border_width = 1, frame_width = 1, frame_color = color.new(color.gray, 60), border_color = color.new(color.gray, 75))
+
+cell(int r, string k, string v, color vc) =>
+    table.cell(TB, 0, r, k, text_size = size.small, text_halign = text.align_left, text_color = color.new(color.gray, 10), bgcolor = color.new(color.gray, 90))
+    table.cell(TB, 1, r, v, text_size = size.small, text_halign = text.align_right, text_color = vc, bgcolor = color.new(color.gray, 90))
+
+if showTable and barstate.islast
+    cell(0, "Pattern", T.ok ? T.kind : "none live", T.ok ? col : color.gray)
+    cell(1, "Status", status, T.ok and T.broke != 0 ? col : color.new(color.gray, 10))
+    cell(2, "Bias", not T.ok ? "—" : T.bias > 0 ? "bullish" : T.bias < 0 ? "bearish" : "neutral", col)
+    cell(3, "Quality", T.ok ? str.tostring(math.round(T.score * 100)) + " / 100   (" + str.tostring(T.touch) + " touches, fill " + str.tostring(T.fill, "#.##") + ")" : "—", color.new(color.gray, 10))
+    cell(4, "Upper / lower", T.ok ? fmtP(upNow) + "  /  " + fmtP(loNow) : "—", color.new(color.gray, 10))
+    cell(5, "Progress to apex", na(apexProg) ? "—" : fmtPc(apexProg) + (apexProg > 85 ? "  out of room" : ""), apexProg > 85 ? bearCol : color.new(color.gray, 10))
+    cell(6, "Measured target", T.ok and not na(T.targ) ? fmtP(T.targ) : "—", color.new(color.gray, 10))
+    float rr = T.ok and T.broke != 0 and not na(T.targ) ? math.abs(T.targ - T.brPx) / math.max(math.abs(T.brPx - (T.broke > 0 ? loNow : upNow)), syminfo.mintick) : na
+    cell(7, "Reward : risk", na(rr) ? "—" : str.tostring(rr, "#.##") + " : 1", color.new(color.gray, 10))
+    cell(8, "Published odds", T.ok ? T.stat : "—", color.new(color.gray, 25))
+
+alertcondition(T.ok and T.broke == 0, "Triangle forming", "Triangle or wedge forming on {{ticker}}")
+alertcondition(T.ok and T.broke > 0, "Upside breakout", "{{ticker}} broke out above the triangle")
+alertcondition(T.ok and T.broke < 0, "Downside breakdown", "{{ticker}} broke down through the triangle")
