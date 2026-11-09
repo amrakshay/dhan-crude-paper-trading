@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
-      "port": 5173
+      "name": "app",
+      "runtimeExecutable": "./run-single-port.sh",
+      "runtimeArgs": [],
+      "port": 24601
     }
   ]
 }
