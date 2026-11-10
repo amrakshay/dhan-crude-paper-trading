@@ -18,6 +18,7 @@ import ConnectionsPage from './pages/ConnectionsPage';
 import StrategiesPage from './pages/StrategiesPage';
 import SwingMomentumPage from './pages/SwingMomentumPage';
 import BtstOvernightPage from './pages/BtstOvernightPage';
+import VcpSwingPage from './pages/VcpSwingPage';
 import SystemHealthPage from './pages/SystemHealthPage';
 
 /**
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="/strategies" element={<RoleRoute path="/strategies"><StrategiesPage /></RoleRoute>} />
         <Route path="/swing" element={<RoleRoute path="/swing"><SwingMomentumPage /></RoleRoute>} />
         <Route path="/btst" element={<RoleRoute path="/btst"><BtstOvernightPage /></RoleRoute>} />
+        <Route path="/vcp" element={<RoleRoute path="/vcp"><VcpSwingPage /></RoleRoute>} />
         <Route path="/connections" element={<RoleRoute path="/connections"><ConnectionsPage /></RoleRoute>} />
         <Route path="/settings" element={<RoleRoute path="/settings"><SettingsPage /></RoleRoute>} />
         <Route path="/health" element={<RoleRoute path="/health"><SystemHealthPage /></RoleRoute>} />

@@ -54,6 +54,7 @@ class ModuleRuleRefused(Exception):
 MODULE_HOOKS: Dict[str, str] = {
     "nse-swing-momentum": "src.swing.services.module_hooks",
     "nse-btst-overnight": "src.btst.services.module_hooks",
+    "nse-vcp-swing": "src.vcp.services.module_hooks",
 }
 
 # What a hook module must provide. Named here so a module that half-implements

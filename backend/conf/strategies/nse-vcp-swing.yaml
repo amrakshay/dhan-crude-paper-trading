@@ -1,0 +1,166 @@
+# ---------------------------------------------------------------------------
+# STRATEGY MODULE: NSE VCP Swing (Minervini's volatility contraction pattern).
+#
+# Buy a Nifty 500 name the morning after a VCP base is first visible as
+# FORMING -- three or more contractions, each shallower than the last, inside
+# a stock passing the Trend Template -- and hold it on two stops in sequence:
+# the final contraction's low until it breaks out, then the first daily close
+# under its 50 EMA.
+#
+# The rules, the parameters and the measured results live in the research,
+# not here:
+#   experiments/pattern-detection/FINAL_LOGIC.md   the rule set, section 1-3
+#   experiments/pattern-detection/FINAL_LOGIC.md   "Live fills", the numbers
+#                                                  this module should reproduce
+#   VCP_INTEGRATION_PLAN.md                        how it was fitted in here
+# This file carries only what THIS application needs to know to run it.
+#
+# WHAT A LIVE RUN DOES DIFFERENTLY FROM THE BACKTEST, and was measured to cost
+# about 1.3 points of CAGR (20.2% -> 18.9%, drawdown -14.5% -> -16.6%): it
+# buys at the NEXT open rather than the signal bar's close, and sells the EMA
+# trail at the next open rather than the close that broke it. Both follow
+# from deciding on finished daily bars.
+#
+# IT SHIPS OFF, AND NOT ARMED. Unlike the rotation and BTST, which shipped
+# enabled, this one is new to an installation that is already trading two
+# strategies, and switching it on is the operator's decision on the
+# Strategies page.
+# ---------------------------------------------------------------------------
+
+key: "nse-vcp-swing"
+label: "NSE VCP Swing"
+description: >-
+  Buys Nifty 500 names the morning after a volatility contraction pattern is
+  first seen forming -- three or more pullbacks, each shallower than the last,
+  in a stock already in a strong uptrend. Exits at the base's final low if it
+  fails, otherwise on the first daily close below the 50-day EMA after it has
+  broken out. Fixed Rs 1,50,000 a position; the number of positions floats
+  with the cash.
+enabled_by_default: false
+
+underlying:
+  symbol: "NIFTY500"
+  exchange_segment: "NSE_EQ"
+  exchange_segment_code: 1
+  exchange_id: "NSE"
+
+universe:
+  # The same file the rotation and BTST use. The backtest ran on 474 of its
+  # names -- today's Nifty 500 held back to 2016, which is survivorship bias
+  # the paper record is free of.
+  name: "nifty500"
+  file: "universes/nifty500.csv"
+
+instrument_sets:
+  # IDENTICAL to the other two modules' -- the instrument master refuses two
+  # strategies that would ingest the same symbol differently.
+  - instrument_type: "EQUITY"
+    exchange_segment: "NSE_EQ"
+    exchange_segment_code: 1
+    symbols: "universe"
+    lot_size_source: "master"
+    series: ["EQ", "BE"]
+    trading_symbol_source: "underlying_symbol"
+
+reference_instruments:
+  calendar_index:
+    # The TRADING CALENDAR only: a date NIFTY 50 has a bar for is a date NSE
+    # traded. This module has NO regime gate -- an index 200-day filter was
+    # tested and made every variant worse (experiments/pattern-detection/
+    # VCP_REGIME.md), because the Trend Template is already a per-stock regime
+    # test.
+    symbol: "NIFTY"
+    label: "NIFTY 50"
+    security_id: "13"
+    exchange_segment: "IDX_I"
+    exchange_segment_code: 0
+    instrument: "INDEX"
+
+contract_specs:
+  tick_size_divisor: 100
+
+market_hours:
+  timezone: "Asia/Kolkata"
+  open: "09:15"
+  close: "15:30"
+  trading_days: [0, 1, 2, 3, 4]
+  closing_auction:
+    applies_to: "fno_eligible"
+    continuous_close: "15:15"
+    auction_close: "15:35"
+
+subscription:
+  # Decisions come from daily bars; the feed is needed only for what is held
+  # (the live stop) and what the morning run is about to buy (pinned a few
+  # minutes ahead, as the rotation does).
+  kind: "positions"
+
+charges:
+  rate_card: "nse-equity-delivery"
+
+margin:
+  model: "percent_of_notional"
+  short_option_percent_of_notional: 1.00
+
+capabilities:
+  - "price-chart"
+  - "trade-notes"
+  - "pnl-reports"
+
+parameters:
+  # --- the signal (FINAL_LOGIC.md section 1) --------------------------------
+  # The detector's own thresholds (contraction depths, dry-up, squeeze, Trend
+  # Template >= 6/7, score >= 0.65) are the experiment's VCPParams defaults
+  # and live in code that is pinned to the experiment by a golden test. These
+  # are the two gates the rule set adds on top.
+  min_contractions: 3            # 2T bases are detected and deliberately skipped
+  min_stop_atr: 0.5              # skip when (close - stop) < 0.5 x ATR14
+  atr_sessions: 14
+  # Two detections of the same base: the later one is the same trade. The
+  # backtest de-duplicated on a 50% overlap of bar spans; so does this.
+  overlap_threshold: 0.5
+  # How much history a symbol needs before it is scanned at all (the backtest
+  # started each symbol at bar 260).
+  minimum_sessions: 260
+  # And how much history a SYMBOL needs before it is scanned at all: the
+  # backtest's universe was every name with 400+ stored bars
+  # (`list_sqlite_symbols(min_bars=400)`). Without this a recent listing such
+  # as BELRISE (345 bars) is scanned here and never was in the backtest.
+  minimum_listed_sessions: 400
+  # On the first run, and after any gap, the bars not yet scanned are replayed
+  # so a base already accepted is not mistaken for a new one. Longer than the
+  # detector's longest base (150 sessions).
+  replay_sessions: 160
+  # How many of each symbol's most recent bars are read per night. The
+  # detector's indicators are seeded from the first bar it is given, so this
+  # was measured rather than assumed: 600, 800 and 1,000 bars all reproduce the
+  # full-history detections exactly on 1,600 of 1,600 test days. 800 is the
+  # margin; reading all ten years of 474 names every night is the cost avoided.
+  history_sessions: 800
+
+  # --- the exits (FINAL_LOGIC.md section 2) ----------------------------------
+  trail_ema_sessions: 50
+  # The backtest looked for the breakout within 25 sessions of the signal; a
+  # base that had not broken out by then never armed the EMA trail and was
+  # held on its contraction-low stop alone. Kept, because that is what was
+  # measured.
+  breakout_window_sessions: 25
+  max_hold_sessions: 250
+
+  # --- sizing (FINAL_LOGIC.md section 3, "Rs 1,50,000 is the pick") ----------
+  position_rupees: 150000
+
+schedule:
+  # Shared names with the rotation's two settings, and the same constraints:
+  # the analysis must run OUTSIDE the session (it stores finished daily bars),
+  # orders INSIDE it. 08:40 sits after the rotation's 08:35 nightly, which
+  # refreshes the same universe -- by the time this one asks, the bars are
+  # current and the refresh is a fast no-op.
+  nightly_at: "08:40"
+  rebalance_at: "09:16"
+
+automation:
+  armed_by_default: false
+  # NSE delivery: one "lot" is one share. Rs 1,50,000 of a Rs 50 stock is
+  # 3,000 shares; 50,000 is the same headroom BTST declares.
+  max_lots_per_order: 50000

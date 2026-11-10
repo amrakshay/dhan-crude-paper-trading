@@ -13,6 +13,7 @@ import AutoModeIcon from '@mui/icons-material/AutoMode';
 import NightsStayIcon from '@mui/icons-material/NightsStay';
 import HubIcon from '@mui/icons-material/Hub';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
+import CompressIcon from '@mui/icons-material/Compress';
 
 /**
  * Every page the app has. Which of them a given role actually sees is decided
@@ -43,6 +44,7 @@ export const navigationItems = [
   { path: '/ipo', label: 'IPO Dashboard', icon: EventAvailableIcon },
   { path: '/swing', label: 'Swing Momentum', icon: AutoModeIcon },
   { path: '/btst', label: 'BTST Overnight', icon: NightsStayIcon },
+  { path: '/vcp', label: 'VCP Swing', icon: CompressIcon },
   { path: '/users', label: 'Users', icon: GroupIcon },
   { path: '/strategies', label: 'Strategies & Features', icon: TuneIcon },
   // Anything this application authenticates to and calls over the network.

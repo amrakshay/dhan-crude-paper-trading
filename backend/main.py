@@ -541,6 +541,7 @@ async def health_check() -> JSONResponse:
 # --- routes ---------------------------------------------------------------
 from src.auth import auth_main_router  # noqa: E402
 from src.btst import btst_main_router  # noqa: E402
+from src.vcp import vcp_main_router  # noqa: E402
 from src.instruments import instruments_main_router  # noqa: E402
 from src.ipo import ipo_main_router  # noqa: E402
 from src.charges import charges_main_router  # noqa: E402
@@ -575,6 +576,7 @@ app.include_router(ipo_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")
 app.include_router(swing_main_router, prefix="/api")
 app.include_router(btst_main_router, prefix="/api")
+app.include_router(vcp_main_router, prefix="/api")
 app.include_router(users_main_router, prefix="/api")
 app.include_router(market_ws_router)   # /ws/market -- not under /api
 

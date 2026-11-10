@@ -11,7 +11,7 @@
     "",
     "Paths must match frontend/src/layout/navigation.js.",
     "",
-    "/swing and /btst are NOT gated by the strategy toggle. Each is the",
+    "/swing, /btst and /vcp are NOT gated by the strategy toggle. Each is the",
     "decision journal of an automated strategy, and a journal is history:",
     "switching the strategy off must not hide the record of what it did (root",
     "CLAUDE.md section 3a).",
@@ -55,6 +55,7 @@
     "/strategies",
     "/swing",
     "/btst",
+    "/vcp",
     "/users",
     "/profile",
     "/settings",
@@ -77,6 +78,7 @@
         "/strategies",
         "/swing",
         "/btst",
+        "/vcp",
         "/users",
         "/profile",
         "/settings",
@@ -98,6 +100,7 @@
         "/ipo",
         "/swing",
         "/btst",
+        "/vcp",
         "/users",
         "/profile"
       ]

@@ -1,0 +1,436 @@
+{
+"APARINDS": [
+{
+"pivot": 633.9,
+"seen_date": "2016-09-07",
+"stop": 544.0,
+"variant": "4W 16/8 2T"
+},
+{
+"pivot": 609.0,
+"seen_date": "2016-11-24",
+"stop": 551.0,
+"variant": "8W 18/5 3T"
+},
+{
+"pivot": 782.6,
+"seen_date": "2017-03-06",
+"stop": 731.0,
+"variant": "3W 9/3 2T"
+},
+{
+"pivot": 883.3,
+"seen_date": "2017-04-28",
+"stop": 756.55,
+"variant": "5W 22/5 3T"
+},
+{
+"pivot": 840.0,
+"seen_date": "2017-11-01",
+"stop": 735.0,
+"variant": "11W 20/9 2T"
+},
+{
+"pivot": 401.25,
+"seen_date": "2021-01-11",
+"stop": 342.0,
+"variant": "3W 20/6 2T"
+},
+{
+"pivot": 488.0,
+"seen_date": "2021-03-05",
+"stop": 440.0,
+"variant": "7W 16/10 2T"
+},
+{
+"pivot": 560.0,
+"seen_date": "2021-05-20",
+"stop": 486.55,
+"variant": "2W 13/7 2T"
+},
+{
+"pivot": 696.7,
+"seen_date": "2021-10-01",
+"stop": 637.0,
+"variant": "5W 9/5 2T"
+},
+{
+"pivot": 1048.85,
+"seen_date": "2022-07-11",
+"stop": 906.15,
+"variant": "2W 15/10 2T"
+},
+{
+"pivot": 1865.3,
+"seen_date": "2023-01-12",
+"stop": 1775.0,
+"variant": "8W 13/5 3T"
+},
+{
+"pivot": 2433.6,
+"seen_date": "2023-02-22",
+"stop": 2246.05,
+"variant": "5W 21/8 2T"
+},
+{
+"pivot": 2433.6,
+"seen_date": "2023-03-28",
+"stop": 2256.1,
+"variant": "9W 17/5 4T"
+},
+{
+"pivot": 3610.0,
+"seen_date": "2023-07-10",
+"stop": 3370.0,
+"variant": "24W 27/7 4T"
+},
+{
+"pivot": 5349.95,
+"seen_date": "2023-09-01",
+"stop": 4900.0,
+"variant": "5W 15/4 3T"
+},
+{
+"pivot": 5994.7,
+"seen_date": "2023-11-24",
+"stop": 5480.0,
+"variant": "5W 15/9 2T"
+},
+{
+"pivot": 6133.0,
+"seen_date": "2024-01-05",
+"stop": 5752.05,
+"variant": "11W 18/6 3T"
+},
+{
+"pivot": 8168.5,
+"seen_date": "2024-05-28",
+"stop": 7735.0,
+"variant": "2W 9/5 2T"
+},
+{
+"pivot": 9659.9,
+"seen_date": "2024-08-23",
+"stop": 8203.3,
+"variant": "3W 16/5 2T"
+},
+{
+"pivot": 10624.8,
+"seen_date": "2024-09-19",
+"stop": 9562.0,
+"variant": "7W 16/10 2T"
+},
+{
+"pivot": 10500.0,
+"seen_date": "2024-12-19",
+"stop": 9785.0,
+"variant": "6W 16/5 3T"
+},
+{
+"pivot": 12327.5,
+"seen_date": "2026-04-24",
+"stop": 11379.5,
+"variant": "3W 14/8 2T"
+},
+{
+"pivot": 18465.0,
+"seen_date": "2026-09-04",
+"stop": 16500.0,
+"variant": "3W 12/9 2T"
+}
+],
+"BAJAJFINSV": [
+{
+"pivot": 295.0,
+"seen_date": "2016-08-24",
+"stop": 265.56,
+"variant": "3W 13/5 2T"
+},
+{
+"pivot": 342.48,
+"seen_date": "2016-10-18",
+"stop": 308.9,
+"variant": "2W 13/5 2T"
+},
+{
+"pivot": 421.7,
+"seen_date": "2017-03-31",
+"stop": 401.0,
+"variant": "14W 11/5 2T"
+},
+{
+"pivot": 461.49,
+"seen_date": "2017-06-13",
+"stop": 414.0,
+"variant": "4W 18/5 2T"
+},
+{
+"pivot": 558.7,
+"seen_date": "2017-09-04",
+"stop": 534.51,
+"variant": "4W 11/4 3T"
+},
+{
+"pivot": 544.88,
+"seen_date": "2017-11-16",
+"stop": 485.0,
+"variant": "5W 11/5 3T"
+},
+{
+"pivot": 720.0,
+"seen_date": "2018-08-21",
+"stop": 701.22,
+"variant": "8W 8/3 2T"
+},
+{
+"pivot": 659.12,
+"seen_date": "2019-01-04",
+"stop": 633.16,
+"variant": "11W 16/4 3T"
+},
+{
+"pivot": 836.0,
+"seen_date": "2019-06-17",
+"stop": 809.47,
+"variant": "19W 9/3 3T"
+},
+{
+"pivot": 866.88,
+"seen_date": "2019-10-04",
+"stop": 825.07,
+"variant": "10W 16/5 3T"
+},
+{
+"pivot": 953.09,
+"seen_date": "2020-01-08",
+"stop": 896.16,
+"variant": "25W 23/6 4T"
+},
+{
+"pivot": 945.0,
+"seen_date": "2021-01-07",
+"stop": 863.6,
+"variant": "3W 9/6 2T"
+},
+{
+"pivot": 1154.9,
+"seen_date": "2021-05-14",
+"stop": 1086.8,
+"variant": "8W 10/6 2T"
+},
+{
+"pivot": 1820.0,
+"seen_date": "2022-10-13",
+"stop": 1621.0,
+"variant": "1W 9/6 2T"
+},
+{
+"pivot": 2094.8,
+"seen_date": "2025-05-26",
+"stop": 1992.0,
+"variant": "3W 8/4 2T"
+},
+{
+"pivot": 2135.0,
+"seen_date": "2025-06-23",
+"stop": 1950.7,
+"variant": "8W 10/5 3T"
+},
+{
+"pivot": 2135.0,
+"seen_date": "2025-09-08",
+"stop": 1910.0,
+"variant": "18W 11/5 2T"
+}
+],
+"SRF": [
+{
+"pivot": 293.76,
+"seen_date": "2016-07-20",
+"stop": 239.33,
+"variant": "6W 21/9 2T"
+},
+{
+"pivot": 356.8,
+"seen_date": "2017-01-11",
+"stop": 288.8,
+"variant": "6W 24/11 2T"
+},
+{
+"pivot": 356.72,
+"seen_date": "2017-04-03",
+"stop": 316.0,
+"variant": "7W 13/4 3T"
+},
+{
+"pivot": 364.99,
+"seen_date": "2017-05-10",
+"stop": 342.78,
+"variant": "24W 24/6 3T"
+},
+{
+"pivot": 393.33,
+"seen_date": "2018-03-01",
+"stop": 376.34,
+"variant": "5W 14/4 2T"
+},
+{
+"pivot": 409.69,
+"seen_date": "2018-04-03",
+"stop": 355.0,
+"variant": "7W 20/9 2T"
+},
+{
+"pivot": 455.39,
+"seen_date": "2019-02-06",
+"stop": 389.52,
+"variant": "6W 16/9 2T"
+},
+{
+"pivot": 495.6,
+"seen_date": "2019-03-29",
+"stop": 470.22,
+"variant": "14W 16/5 3T"
+},
+{
+"pivot": 523.59,
+"seen_date": "2019-05-07",
+"stop": 499.92,
+"variant": "5W 12/5 2T"
+},
+{
+"pivot": 668.59,
+"seen_date": "2019-12-18",
+"stop": 640.8,
+"variant": "12W 14/4 2T"
+},
+{
+"pivot": 792.4,
+"seen_date": "2020-07-15",
+"stop": 752.4,
+"variant": "9W 11/5 3T"
+},
+{
+"pivot": 792.4,
+"seen_date": "2020-08-06",
+"stop": 752.31,
+"variant": "6W 8/5 2T"
+},
+{
+"pivot": 910.23,
+"seen_date": "2020-10-26",
+"stop": 859.64,
+"variant": "5W 11/6 2T"
+},
+{
+"pivot": 1214.1,
+"seen_date": "2021-03-04",
+"stop": 1057.08,
+"variant": "5W 14/10 2T"
+},
+{
+"pivot": 1441.6,
+"seen_date": "2021-06-21",
+"stop": 1381.2,
+"variant": "6W 12/4 2T"
+},
+{
+"pivot": 2680.0,
+"seen_date": "2022-01-19",
+"stop": 2525.1,
+"variant": "8W 12/6 2T"
+},
+{
+"pivot": 2865.0,
+"seen_date": "2022-10-19",
+"stop": 2464.2,
+"variant": "4W 14/5 2T"
+},
+{
+"pivot": 3169.9,
+"seen_date": "2025-06-19",
+"stop": 2998.5,
+"variant": "11W 14/5 3T"
+},
+{
+"pivot": 3260.4,
+"seen_date": "2025-10-10",
+"stop": 2779.5,
+"variant": "9W 14/8 2T"
+}
+],
+"TITAN": [
+{
+"pivot": 569.2,
+"seen_date": "2017-07-27",
+"stop": 524.4,
+"variant": "7W 12/4 2T"
+},
+{
+"pivot": 654.2,
+"seen_date": "2017-10-19",
+"stop": 601.0,
+"variant": "4W 14/5 2T"
+},
+{
+"pivot": 872.0,
+"seen_date": "2017-12-27",
+"stop": 842.0,
+"variant": "4W 8/3 2T"
+},
+{
+"pivot": 1076.85,
+"seen_date": "2019-02-27",
+"stop": 1013.95,
+"variant": "26W 23/6 3T"
+},
+{
+"pivot": 1340.9,
+"seen_date": "2019-07-04",
+"stop": 1286.0,
+"variant": "9W 8/4 3T"
+},
+{
+"pivot": 1347.0,
+"seen_date": "2019-11-04",
+"stop": 1282.1,
+"variant": "5W 12/5 2T"
+},
+{
+"pivot": 1256.55,
+"seen_date": "2020-10-26",
+"stop": 1210.5,
+"variant": "6W 12/4 2T"
+},
+{
+"pivot": 1792.95,
+"seen_date": "2021-07-07",
+"stop": 1718.0,
+"variant": "12W 13/4 2T"
+},
+{
+"pivot": 2677.9,
+"seen_date": "2021-11-18",
+"stop": 2456.5,
+"variant": "4W 11/5 2T"
+},
+{
+"pivot": 2802.1,
+"seen_date": "2023-05-22",
+"stop": 2683.05,
+"variant": "18W 13/4 3T"
+},
+{
+"pivot": 3740.0,
+"seen_date": "2025-09-09",
+"stop": 3619.2,
+"variant": "10W 10/3 3T"
+},
+{
+"pivot": 4554.0,
+"seen_date": "2026-06-25",
+"stop": 4225.0,
+"variant": "10W 12/5 3T"
+}
+]
+}

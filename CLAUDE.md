@@ -256,6 +256,18 @@ Rules that are not negotiable:
   sale as its own status, leaves a position that could not be sold OPEN, and
   raises an alert. Do not "harmonise" the two jobs; the asymmetry is the point.
 
+- **THE VCP MODULE'S DETECTOR IS THE EXPERIMENT'S, NOT A REWRITE.** Added
+  2026-11-09. `src/vcp/services/detector/` is copied from
+  `experiments/pattern-detection/patlib` with only import paths changed, and
+  `tests/test_vcp_detector_port.py` asserts it reproduces the experiment's own
+  detections float for float. A change to the rule goes into the experiment
+  first, is re-measured, then copied and the fixture regenerated
+  (`scripts/make_vcp_golden_fixture.py`). Its scan is pinned the same way to
+  the backtest's daily-step signals (`test_vcp_scan_parity.py`); replayed night
+  by night over Aug-Oct 2026 it took 61 of 61 bases and 8 of 8 candidates. It
+  ships OFF, and its nightly refuses to run until `scripts/vcp_bootstrap_scan.py`
+  has given it memory -- otherwise every base already forming looks new.
+
 - **NOT EVERYTHING WITH A PAGE IS A STRATEGY OR A CAPABILITY.** Added
   2026-09-19 with the IPO dashboard (`/ipo`), which places no orders, touches
   no portfolio and reads no feed -- it fetches a public page, stores it, shows
@@ -596,6 +608,11 @@ backend/src/swing/services/schedule_settings.py   WHEN it wakes up, and the two
 backend/src/swing/services/swing_health_service.py  is THIS strategy healthy
 frontend/src/components/SwingHealth.jsx           its Health tab, admin-only
 backend/src/swing/services/scheduler.py            every STRATEGY's clock
+backend/src/vcp/                   NSE VCP Swing: the detector (a verbatim copy of
+                                   experiments/pattern-detection/patlib, pinned by a
+                                   golden test), nightly scan, morning orders, stop
+backend/scripts/vcp_bootstrap_scan.py   one-off memory replay; run before enabling VCP
+frontend/src/pages/VcpSwingPage.jsx            its six tabs
 backend/src/ipo/                   the IPO dashboard: the GMP source, the
                                    three tabs, the actions and its own clock
 backend/src/ipo/services/ipo_source_client.py   the ONLY module naming

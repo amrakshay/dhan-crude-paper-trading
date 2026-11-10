@@ -1,6 +1,6 @@
 # VCP integration plan — `nse-vcp-swing`
 
-**Status:** draft for review, 2026-11-09. Nothing built yet.
+**Status:** phases 0-4 built 2026-11-09 (uncommitted); phase 5 (portfolio, enable, arm) waits for the operator and for Dhan data.
 **Goal:** run the VCP rule set from `experiments/pattern-detection/FINAL_LOGIC.md`
 as a third automated strategy, paper only, in its own ₹10,00,000 portfolio.
 **Blocked on:** the Dhan Data APIs plan (DH-902). The build can proceed; live

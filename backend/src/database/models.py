@@ -47,6 +47,13 @@ from src.swing.database.db_models.swing_session_model import (  # noqa: F401
 )
 from src.swing.database.db_models.swing_stop_model import SwingStop  # noqa: F401
 from src.users.database.db_models.user_model import User  # noqa: F401
+from src.vcp.database.db_models.vcp_models import (  # noqa: F401
+    VcpDecision,
+    VcpPosition,
+    VcpScanState,
+    VcpSession,
+    VcpSignal,
+)
 
 __all__ = [
     "Alert",
@@ -77,4 +84,9 @@ __all__ = [
     "SwingDecision",
     "SwingStop",
     "User",
+    "VcpDecision",
+    "VcpPosition",
+    "VcpScanState",
+    "VcpSession",
+    "VcpSignal",
 ]

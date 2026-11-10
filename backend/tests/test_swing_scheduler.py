@@ -299,8 +299,10 @@ async def test_the_book_is_warmed_before_the_rebalance_not_after(db_session):
     scheduler = SwingScheduler()
     ran = await scheduler.tick(now=JUST_BEFORE_REBALANCE)
     # Warming is not a JOB -- nothing is decided and nothing is traded --
-    # but it has happened by the time the rebalance is due.
-    assert ran == []
+    # but it has happened by the time the rebalance is due. Narrowed to the
+    # rotation's own runs: since 2026-11-09 NSE VCP Swing's nightly window
+    # (08:40 to the open) is legitimately due at 09:14 on the same clock.
+    assert [run for run in ran if run.strategy_key == STRATEGY] == []
     assert scheduler._warmed.get((STRATEGY, JUST_BEFORE_REBALANCE.date()))  # noqa: SLF001
 
 

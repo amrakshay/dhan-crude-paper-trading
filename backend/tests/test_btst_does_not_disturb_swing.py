@@ -251,11 +251,12 @@ def test_for_instrument_returns_None_rather_than_a_guess_when_two_claim_it():
     registry = get_strategy_registry()
     # An MCX contract is claimed by one strategy, so it still resolves.
     assert registry.for_instrument("MCX_COMM", "CRUDEOIL").key == "mcx-crude-options"
-    # A Nifty 500 name is claimed by two.
+    # A Nifty 500 name is claimed by three since NSE VCP Swing arrived
+    # (2026-11-09) -- the rule is the same for two or for three.
     assert registry.for_instrument(SEGMENT, SYMBOL) is None
     assert {
         one.key for one in registry.strategies_for_instrument(SEGMENT, SYMBOL)
-    } == {SWING, BTST}
+    } == {SWING, BTST, "nse-vcp-swing"}
 
 
 # --- 3. the scheduler -------------------------------------------------------
