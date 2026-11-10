@@ -227,10 +227,14 @@ def main():
         for r in rows:
             tok = str(r.get("variant", "")).split()
             if tok and tok[-1].endswith("T") and tok[-1][:-1].isdigit():
-                tc[(r["symbol"], r["seen_idx"])] = int(tok[-1][:-1])
+                # Keyed on the base's stop too: two bases can be first seen on
+                # the same bar, and a (symbol, bar) key let the second
+                # overwrite the first's count (fixed 2026-11-09).
+                tc[(r["symbol"], r["seen_idx"], round(float(r["stop"]), 4))] = int(tok[-1][:-1])
         before = len(trades)
         trades = [t for t in trades
-                  if tc.get((t["symbol"], t["entry_idx"]), 0) >= a.min_contractions]
+                  if tc.get((t["symbol"], t["entry_idx"], round(float(t["stop"]), 4)), 0)
+                  >= a.min_contractions]
         print(f"contraction filter (>= {a.min_contractions}T): "
               f"{len(trades)} of {before} signals kept")
     if a.min_stop_atr > 0:

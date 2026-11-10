@@ -1,0 +1,23 @@
+4070 distinct VCP bases, each offered to four entry policies
+(hold 40 bars or stop out; waiting policies give up after 25 bars)
+
+stop = final contraction low exactly
+   policy        traded  % of bases  med wait  med risk  stopped   mean R  mean ret   R/base
+   immediate       4070        100%         0     1.97%      78%     1.03     1.95%     1.03
+   within3         2396         59%         3     5.63%      60%     0.70     3.44%     0.41
+   within1          992         24%         6     6.70%      53%     0.60     4.10%     0.15
+   breakout        2220         55%         8     9.58%      44%     0.42     4.40%     0.23
+
+stop = final contraction low minus 1 ATR
+   policy        traded  % of bases  med wait  med risk  stopped   mean R  mean ret   R/base
+   immediate       4070        100%         0     5.43%      59%     0.51     3.08%     0.51
+   within3         2396         59%         3     8.79%      44%     0.45     4.22%     0.26
+   within1          992         24%         6     9.80%      38%     0.46     4.77%     0.11
+   breakout        2220         55%         8    12.70%      30%     0.38     5.17%     0.21
+
+mean R   = expectancy per trade taken, in units of the risk taken
+mean ret = the same in percent of position, which is what a fixed-
+           capital trader feels; the two rank differently and both
+           are reported for that reason
+R/base   = total R earned divided by ALL bases seen, so a policy
+           that trades rarely is charged for the ones it skipped

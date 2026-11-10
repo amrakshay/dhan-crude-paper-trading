@@ -1,0 +1,10 @@
+VCP adopted book: Rs 1,000,000, Rs 150,000 a position, 3T + 0.5 ATR, early entry + EMA50 trail
+
+variant                                         CAGR    maxDD     win trades skipped
+A close fills, 0.3% flat (reference)           19.8%   -19.1%   31.5%    460     133  
+B next-open fills, 0.3% flat                   19.1%   -21.9%   29.9%    455     136  2 gapped below stop, not bought
+C next-open, rate card, 0 bps slip/leg         19.2%   -21.3%   29.8%    456     135  fees Rs 163,595
+C next-open, rate card, 5 bps slip/leg         18.7%   -22.1%   30.0%    453     138  fees Rs 162,246
+C next-open, rate card, 10 bps slip/leg        19.0%   -22.8%   29.8%    453     138  fees Rs 162,474
+
+exit reasons (live fills, all signals): cap 18, stop 386, trail 187

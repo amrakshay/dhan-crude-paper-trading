@@ -181,6 +181,48 @@ two-negative-year profile with less of the 2023 dependence.
 
 ---
 
+### Live fills (checked 2026-11-09, `scripts/vcp_live_fills.py`)
+
+A live run decides on bars that arrive after the close, so it buys at the
+NEXT OPEN and sells the EMA trail at the next open too. Replayed that way,
+with the app's own NSE delivery rate card (0.232% a round trip on Rs 1.5L,
+matching the backend engine to the paisa) and 5 bps slippage per leg:
+
+| ₹10L, ₹1.5L a position, 3T + 0.5 ATR | CAGR | Max DD | Win | Trades |
+|---|---|---|---|---|
+| close fills, 0.3% flat (reference) | 20.2% | −14.5% | 31.1% | 437 |
+| next-open fills, rate card, 5 bps/leg | **19.0%** | **−16.6%** | 29.7% | 445 |
+| next-open fills, rate card, 10 bps/leg | 18.9% | −16.8% | 29.5% | 444 |
+
+About 1.3 points of CAGR and 2 points of drawdown: the case survives the
+fills it can actually get. No signal in the history gapped below its stop
+before it could be bought.
+
+**And the scan cadence matters more than the fills.** Every number above
+comes from signals sampled every THIRD bar (`vcp_entry_policies.py --step 3`).
+A live run scans every bar, which finds bases up to two sessions earlier and
+593 gated signals instead of 559 (`--step 1 --tag vcp_step1`):
+
+| daily scan, ₹10L, ₹1.5L a position | CAGR | Max DD | Win | Trades |
+|---|---|---|---|---|
+| close fills, 0.3% flat | 19.8% | −19.1% | 31.5% | 460 |
+| next-open fills, rate card, 5 bps/leg | **18.7%** | **−22.1%** | 30.0% | 453 |
+
+Return is unchanged; the drawdown is five points worse. The −14.5% headline
+was partly a property of which bars happened to be sampled -- with a fixed
+book of ~7 positions, which signals get the capital is path-dependent, and the
+drawdown is the statistic that moves. Plan for **about −22%**, not −15%. The
+server (src/vcp/) scans daily, so −22% is the figure its paper record should
+be compared with.
+
+**A counting bug fixed on the way (2026-11-09).** `vcp_backtest.py` looked up
+each base's contraction count by (symbol, bar), so when two bases were first
+seen on the same bar -- 19 stock-days in the step-3 file -- the second
+overwrote the first, and a genuine 3T signal could be dropped. Found because
+the server, which judges each base on its own footprint, took HOMEFIRST on
+2026-08-27 and the backtest did not. Fixed in both scripts; every figure in
+this section is after the fix, and the effect was a few tenths of a point.
+
 ## 5. What is still unproven
 
 Ranked by how much it could change the answer.
