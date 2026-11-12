@@ -134,7 +134,10 @@ class SwingController:
     async def run_rebalance(
         self, strategy_key: str, portfolio_id: int, force: bool
     ) -> Dict[str, Any]:
-        from src.swing.services.execution_service import SwingExecutionError
+        from src.swing.services.execution_service import (
+            SwingExecutionError,
+            price_wait_seconds,
+        )
 
         _definition, service, _runner = await self._build(strategy_key)
         try:
@@ -142,8 +145,8 @@ class SwingController:
                 portfolio_id=portfolio_id,
                 force=force,
                 # A manual run has not had the scheduler's warm-up, so it waits
-                # briefly for the book it just subscribed to produce depth.
-                warm_seconds=2.0,
+                # (bounded) for the names it just subscribed to be priced.
+                price_wait_seconds=price_wait_seconds(),
             )
         except SwingExecutionError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error

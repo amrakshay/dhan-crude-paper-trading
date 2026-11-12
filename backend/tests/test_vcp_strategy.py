@@ -11,6 +11,7 @@ Three groups:
      morning buys it only on the next trading day, only when armed, never
      under its stop and never without the cash; the live stop sells.
 """
+import asyncio
 import csv
 import json
 from datetime import date, datetime, time, timedelta
@@ -306,6 +307,44 @@ async def test_armed_it_buys_a_fixed_rupee_position_with_its_stop(db_session, de
     assert pos.stop_price == Decimal("4225.0000") and pos.entry_date == NEXT_DAY
     decisions = await VcpDecisionRepository(db_session).list_recent(pid)
     assert decisions[0].action == ACTION_BOUGHT and decisions[0].order_id
+
+
+async def test_a_price_that_arrives_while_the_morning_waits_is_used(
+        db_session, definition, armed):
+    """A name with no price at 09:16 used to get a fixed two seconds. The morning
+    now waits, bounded, for its first tick -- the race that skipped every Swing
+    buy on 2026-11-11."""
+    pid = await _seed(db_session)
+    await _service(db_session, definition).run_nightly()
+    await db_session.commit()
+    get_feed_manager().book.forget([SECURITY_ID])
+
+    async def _first_tick_arrives():
+        await asyncio.sleep(0.3)
+        _book(4300.0)
+
+    ticker = asyncio.create_task(_first_tick_arrives())
+    out = await _service(db_session, definition, AT_OPEN).run_morning(
+        pid, price_wait_seconds=10)
+    await ticker
+    assert out.bought == 1
+
+
+async def test_the_morning_wait_is_bounded_and_an_unpriced_name_is_skipped(
+        db_session, definition, armed):
+    pid = await _seed(db_session)
+    await _service(db_session, definition).run_nightly()
+    await db_session.commit()
+    get_feed_manager().book.forget([SECURITY_ID])
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    out = await _service(db_session, definition, AT_OPEN).run_morning(
+        pid, price_wait_seconds=0.6)
+    assert loop.time() - started < 5
+    assert out.bought == 0
+    decisions = await VcpDecisionRepository(db_session).list_recent(pid)
+    assert "No live price" in decisions[0].reason
 
 
 async def test_a_stale_signal_is_not_bought_a_day_late(db_session, definition, armed):

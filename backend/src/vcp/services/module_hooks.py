@@ -30,6 +30,7 @@ from src.strategies.services.scheduling import JobRun, MissedRun
 from src.strategies.services.strategy_definition import StrategyDefinition
 from src.strategies.services.strategy_modules import ModuleRuleRefused
 from src.swing.services import schedule_settings as _swing_schedule
+from src.swing.services.execution_service import price_wait_seconds
 from src.vcp.database.db_models.vcp_models import RUN_MORNING, RUN_NIGHTLY
 from src.vcp.services.vcp_parameters import VcpParameters
 
@@ -222,7 +223,8 @@ async def _run_morning(scheduler, definition, now: datetime) -> JobRun:
         for portfolio_id in portfolios:
             async with session_scope() as session:
                 service = await _build(session, definition)
-                outcome = await service.run_morning(portfolio_id)
+                outcome = await service.run_morning(
+                    portfolio_id, price_wait_seconds=price_wait_seconds())
                 await session.commit()
             details.append(f"portfolio {portfolio_id}: {outcome.detail}")
             ok = ok and outcome.ok

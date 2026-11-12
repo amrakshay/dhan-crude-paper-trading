@@ -136,6 +136,16 @@ class SwingExecutionError(Exception):
     pass
 
 
+
+def price_wait_seconds() -> float:
+    """`swing.price_wait_seconds`: the most a rebalance waits for live prices."""
+    from src import config_utils
+
+    return max(
+        config_utils.get_property_value_float("swing.price_wait_seconds", 20.0), 0.0
+    )
+
+
 @dataclass
 class RebalanceOutcome:
     record: Optional[SessionRecord] = None
@@ -290,8 +300,49 @@ class SwingExecutionService:
         return {
             "pinned": sorted(security_ids),
             "pinnedCount": len(security_ids),
+            "securityIds": sorted(security_ids.values()),
             "effect": effect,
         }
+
+    async def _await_marks(
+        self, security_ids: List[str], timeout_seconds: float
+    ) -> Dict[str, Any]:
+        """Wait, bounded, until every one of these names has a live mark.
+
+        A subscription does not produce a price instantly, and the planner
+        sizes nothing it cannot price. When the book was warmed minutes ahead
+        this returns at once; it matters when it was not -- a nightly that ran
+        late into the open, a feed that reconnected the same second, a manual
+        run. On 2026-11-11 the 09:23 rebalance subscribed and planned in the
+        same second and skipped every buy for "no live price".
+
+        Never an error: names still unmarked at the timeout are skipped by the
+        planner with their recorded reason, exactly as before.
+        """
+        wanted = [str(security_id) for security_id in security_ids if security_id]
+        if not wanted or timeout_seconds <= 0:
+            return {"waitedSeconds": 0.0, "missing": []}
+        balance = self._balance_service()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        while True:
+            missing = [sid for sid in wanted if balance.mark_for(sid) is None]
+            waited = loop.time() - started
+            if not missing or waited >= timeout_seconds:
+                break
+            await asyncio.sleep(min(0.5, timeout_seconds - waited))
+        if missing:
+            logger.warning(
+                "Rebalance for %s: %s of %s name(s) still had no live price "
+                "after %.1f s; they will be skipped with a recorded reason.",
+                self.definition.key, len(missing), len(wanted), waited,
+            )
+        elif waited >= 0.5:
+            logger.info(
+                "Rebalance for %s waited %.1f s for live prices on %s name(s).",
+                self.definition.key, waited, len(wanted),
+            )
+        return {"waitedSeconds": round(waited, 1), "missing": missing}
 
     async def _unpin(self) -> None:
         """Give the connection back. What is held stays subscribed anyway."""
@@ -313,7 +364,7 @@ class SwingExecutionService:
         portfolio_id: int,
         as_of: Optional[date] = None,
         force: bool = False,
-        warm_seconds: float = 0.0,
+        price_wait_seconds: float = 0.0,
     ) -> RebalanceOutcome:
         """Sell, then buy, then record. Places nothing unless ARMED."""
         from src.strategies.services.strategy_registry import get_strategy_registry
@@ -439,11 +490,15 @@ class SwingExecutionService:
             ]
 
         try:
-            await self.warm_book(snapshot=snapshot)
-            if warm_seconds > 0:
-                # A subscription does not produce a depth book instantly. The
-                # scheduler warms minutes ahead; a manual run can wait here.
-                await asyncio.sleep(warm_seconds)
+            warmed = await self.warm_book(snapshot=snapshot)
+            # A subscription does not produce a price instantly. Wait -- bounded
+            # -- for the names just pinned AND the names still held, since an
+            # unmarked holding withholds equity and blocks every buy.
+            await self._await_marks(
+                list(warmed.get("securityIds") or [])
+                + [holding.security_id for holding in remaining],
+                price_wait_seconds,
+            )
         except Exception:  # noqa: BLE001 - a feed problem must not lose the record
             logger.exception(
                 "Could not warm the book before the rebalance; names with no "

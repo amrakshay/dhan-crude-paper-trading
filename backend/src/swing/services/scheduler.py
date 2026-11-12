@@ -40,6 +40,7 @@ from src.logging_config import get_logger
 from src.strategies.services import market_clock
 from src.strategies.services.scheduling import JobRun, MissedRun
 from src.strategies.services.strategy_definition import StrategyDefinition
+from src.swing.services.execution_service import price_wait_seconds
 from src.swing.database.db_models.swing_session_model import (
     RUN_NIGHTLY,
     RUN_REBALANCE,
@@ -444,7 +445,9 @@ class SwingScheduler:
             for portfolio_id in portfolios:
                 async with session_scope() as session:
                     service, _ = await self._build(session, definition)
-                    outcome = await service.run_rebalance(portfolio_id)
+                    outcome = await service.run_rebalance(
+                        portfolio_id, price_wait_seconds=price_wait_seconds()
+                    )
                     await session.commit()
                 placed += outcome.sells_placed + outcome.buys_placed
             run.portfolios = len(portfolios)

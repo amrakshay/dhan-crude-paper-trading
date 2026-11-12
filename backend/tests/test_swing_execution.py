@@ -11,6 +11,7 @@ The armed cases run through `submit_paper_order` like every other order in this
 application, against a real depth book, so a fill here is the same pessimistic
 fill a click on the chart gets.
 """
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -848,6 +849,61 @@ async def test_a_candidate_with_no_live_price_is_skipped_rather_than_priced_off_
     assert rows[top].action == ACTION_SKIPPED
     assert "no live price" in rows[top].reason
     assert "not used" in rows[top].reason
+
+
+async def test_a_price_that_arrives_while_the_rebalance_waits_is_used(
+    db_session, definition
+):
+    """The 2026-11-11 morning: the feed reconnected the second the rebalance
+    ran, every pinned name was still unpriced, and every buy was skipped for
+    "no live price". The rebalance now waits -- bounded -- for the prices of
+    the names it has just pinned before it sizes anything."""
+    await _seed_instruments(db_session)
+    portfolio_id = await _seed_portfolio(db_session)
+    await _seed_gate_on(db_session)
+    _seed_book(symbols=SYMBOLS[:-1])
+    _arm(True)
+
+    service = _service(db_session, definition)
+    snapshot = await service.ranking.session_snapshot()
+    top = snapshot.candidates[0].symbol
+    get_feed_manager().book.forget([SECURITY_IDS[top]])
+
+    async def _first_tick_arrives():
+        await asyncio.sleep(0.3)
+        _seed_book(symbols=[top])
+
+    ticker = asyncio.create_task(_first_tick_arrives())
+    outcome = await service.run_rebalance(portfolio_id, price_wait_seconds=10)
+    await ticker
+
+    rows = await _decisions(db_session, outcome.record.session_id)
+    assert rows[top].action == ACTION_BOUGHT
+
+
+async def test_the_wait_for_prices_is_bounded_and_a_name_never_priced_is_still_skipped(
+    db_session, definition
+):
+    await _seed_instruments(db_session)
+    portfolio_id = await _seed_portfolio(db_session)
+    await _seed_gate_on(db_session)
+    _seed_book(symbols=SYMBOLS[:-1])
+    _arm(True)
+
+    service = _service(db_session, definition)
+    snapshot = await service.ranking.session_snapshot()
+    top = snapshot.candidates[0].symbol
+    get_feed_manager().book.forget([SECURITY_IDS[top]])
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    outcome = await service.run_rebalance(portfolio_id, price_wait_seconds=0.6)
+    elapsed = loop.time() - started
+
+    assert elapsed < 5
+    rows = await _decisions(db_session, outcome.record.session_id)
+    assert rows[top].action == ACTION_SKIPPED
+    assert "no live price" in rows[top].reason
 
 
 # --- stale data ---------------------------------------------------------------

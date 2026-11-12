@@ -338,7 +338,8 @@ class VcpExecutionService:
     # =======================================================================
     # MORNING
     # =======================================================================
-    async def run_morning(self, portfolio_id: int) -> RunOutcome:
+    async def run_morning(self, portfolio_id: int,
+                          price_wait_seconds: float = 0.0) -> RunOutcome:
         outcome = RunOutcome()
         key = self.definition.key
         today = self._now().date()
@@ -381,7 +382,7 @@ class VcpExecutionService:
                                                     seen_date=signal_session)
             outcome.candidates = len(todays)
             if todays:
-                await self._pin(todays)
+                await self._pin(todays, price_wait_seconds)
             for signal in todays:
                 if await self._enter(record, signal, portfolio_id, armed):
                     outcome.bought += 1
@@ -603,20 +604,48 @@ class VcpExecutionService:
                                         "closing auction)." if fno else "."))
 
     # --- the book -----------------------------------------------------------
-    async def _pin(self, todays) -> None:
+    async def _pin(self, todays, wait_seconds: float = 0.0) -> None:
+        """Make sure this morning's candidates are priced before any is sized.
+
+        The warm-up three minutes earlier normally did this already, and then
+        nothing here waits. A name with no live price (a restart at 09:16, a
+        nightly that ran into the open, a feed that reconnected the same
+        second) is pinned now, and the morning waits -- bounded by
+        `wait_seconds` -- for its first tick. It used to sleep a fixed two
+        seconds; on 2026-11-11 the Swing rebalance skipped every buy for the
+        same race, and two seconds is no answer to a feed still connecting.
+        A name still unpriced at the end is skipped with its recorded reason.
+        """
         from src.market.services.feed_manager import get_feed_manager
 
         ids = {str(s.security_id) for s in todays if s.security_id}
-        # The warm-up three minutes earlier normally did this already. Only a
-        # name with no book at all (a restart at 09:16, say) is pinned now, and
-        # only then is it worth waiting for its first depth packet.
-        cold = {one for one in ids if not self.book.get(one)}
-        if not cold:
+
+        def unpriced():
+            return {one for one in ids if not (self.book.get(one) or {}).get("ltp")}
+
+        if not unpriced():
             return
         manager = get_feed_manager()
         manager.pin_instruments(self.definition.key, ids)
         await manager.resync()
-        await asyncio.sleep(2)
+        if wait_seconds <= 0:
+            return
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        while True:
+            missing = unpriced()
+            waited = loop.time() - started
+            if not missing or waited >= wait_seconds:
+                break
+            await asyncio.sleep(min(0.5, wait_seconds - waited))
+        if missing:
+            logger.warning(
+                "VCP morning for %s: %s of %s candidate(s) still had no live price "
+                "after %.1f s; they will be skipped with a recorded reason.",
+                self.definition.key, len(missing), len(ids), waited)
+        else:
+            logger.info("VCP morning for %s waited %.1f s for live prices.",
+                        self.definition.key, waited)
 
     async def warm_book(self) -> int:
         """Subscribe this morning's candidates a few minutes before the open."""

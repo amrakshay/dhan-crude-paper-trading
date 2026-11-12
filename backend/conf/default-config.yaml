@@ -329,6 +329,14 @@ swing:
   # not after it, and a subscription does not produce one instantly.
   warmup_minutes: 3
 
+  # The longest a morning order run (the Swing rebalance, and the VCP morning,
+  # which runs on this same clock) waits, immediately before sizing its buys,
+  # for every name it may buy to have a live price. Returns at once when the
+  # warm-up did its job; it matters when it could not -- a nightly that ran
+  # into the open, or a feed that reconnected the same second. Names still
+  # unpriced at the end are skipped with a recorded reason, as before.
+  price_wait_seconds: 20
+
   # How stale the stored daily bars may be before the REBALANCE refuses to
   # trade on them, in calendar days. The rebalance executes at the open of the
   # session after the one it decided; a session date days old means the bar
