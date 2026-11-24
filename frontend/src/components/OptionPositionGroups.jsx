@@ -131,7 +131,10 @@ export default function OptionPositionGroups({ refreshKey }) {
         ) : null}
         {span?.loaded ? (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            NSE SPAN file {span.businessDate} {span.snapshot === 'i1' ? 'beginning-of-day' : span.snapshot} ({formatQty(span.contracts)} contracts), the snapshot Dhan margins against. Blocked money is margin
+            NSE SPAN file {span.businessDate}, {span.snapshotLabel ?? span.snapshot} ({formatQty(span.contracts)} contracts)
+            {span.policy === 'beginning_of_day'
+              ? ', the snapshot Dhan margins against.'
+              : '; re-margined on each intraday snapshot.'} Blocked money is margin
             less net option value: a long blocks only its premium, a short's premium stays unspendable.
           </Typography>
         ) : null}

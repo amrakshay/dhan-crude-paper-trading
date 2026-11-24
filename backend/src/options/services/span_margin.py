@@ -214,6 +214,9 @@ class MarginCard:
         self.delivery_margin_fraction = float(expiry.get("delivery_margin_fraction", 1.0))
         self.settle_after = _hhmm(expiry.get("settle_after", "15:45"))
         self.exercise_fee_per_order = float(expiry.get("exercise_fee_per_order", 20.0))
+        limits = document.get("order_limits") or {}
+        self.enforce_freeze_quantity = bool(limits.get("freeze_quantity", False))
+        self.enforce_price_band = bool(limits.get("price_band", False))
         self.physical_delivery_charge_rate = float(expiry.get("physical_delivery_charge_rate", 0.001))
         self.delivery_rate_card = str(expiry.get("delivery_rate_card") or "nse-equity-delivery")
         parity = document.get("broker_parity") or {}

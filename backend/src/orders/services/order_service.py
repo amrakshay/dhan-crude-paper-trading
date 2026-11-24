@@ -365,6 +365,10 @@ class OrderService:
                 self._check_intraday_cutoff(strategy.key)
         if not reduces:
             await self._check_expiry_day(strategy.key, instrument)
+        # The exchange's own limits apply to EVERY order, a close included:
+        # NSE does not care why an order is large. Exits the application makes
+        # by itself are split into allowed sizes before they get here.
+        self._check_exchange_limits(strategy.key, instrument, quantity, order_type, limit_price)
 
         # Funds, in the validation block with every other rule rather than
         # scattered. Priced off the limit where there is one and off the live
@@ -521,6 +525,24 @@ class OrderService:
             terminal_when_incomplete=True, message=reason[:255],
         )
         return order
+
+    def _check_exchange_limits(self, strategy_key, instrument, quantity, order_type, limit_price) -> None:
+        """Freeze quantity and price range (OPTIONS_TRADER_PLAN.md D6)."""
+        from src.core.time_utils import ist_now
+        from src.options.services import contract_limits
+        from src.options.services.option_margin_service import card_for, uses_span
+
+        if not uses_span(strategy_key) or not instrument.option_type:
+            return
+        card = card_for(strategy_key)
+        if not (card.enforce_freeze_quantity or card.enforce_price_band):
+            return
+        reason = contract_limits.refusal(
+            instrument, quantity, order_type, limit_price, ist_now().date(), book=self.book,
+            check_freeze=card.enforce_freeze_quantity, check_band=card.enforce_price_band,
+        )
+        if reason:
+            raise OrderValidationError(reason)
 
     async def _reduces_open_position(self, portfolio_id: int, security_id, side: str, quantity: int) -> bool:
         """True when this order only shrinks the portfolio's open position."""

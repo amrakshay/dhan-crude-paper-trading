@@ -179,6 +179,8 @@ class BasketService:
                     "strike": float(instrument.strike_price) if instrument.strike_price else None,
                     "optionType": instrument.option_type,
                     "expiry": instrument.expiry_date.isoformat() if instrument.expiry_date else None,
+                    # What the exchange would refuse, said BEFORE Place (D6).
+                    "refusal": self._exchange_refusal(card, instrument, quantity, leg),
                 }
             )
 
@@ -331,17 +333,39 @@ class BasketService:
                     "reason": leg.reason,
                 }
             )
+        # The stored status is the one at placement; a resting leg may since
+        # have filled or been cancelled, so it is re-derived from the orders.
+        live = _basket_status([row["outcome"] for row in rows if row["outcome"]]) if rows else basket.status
         return {
             "id": basket.id,
             "strategyKey": basket.strategy_key,
             "portfolioId": basket.portfolio_id,
             "product": basket.product,
-            "status": basket.status,
+            "status": live,
+            "placedStatus": basket.status,
             "legCount": basket.leg_count,
             "previewedMargin": float(basket.previewed_margin) if basket.previewed_margin is not None else None,
             "createdAt": basket.created_at.isoformat() if basket.created_at else None,
             "legs": rows,
         }
+
+    async def recent_baskets(self, portfolio_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+        return [await self.describe(basket.id) for basket in await self.baskets.recent(int(portfolio_id), limit=limit)]
+
+    async def cancel_resting(self, basket_id: int) -> Dict[str, Any]:
+        """Cancel every leg of a basket that is still resting. Legs that have
+        filled stay filled -- a broker's basket cancel does not unwind them."""
+        from src.orders.services.order_service import OrderValidationError
+
+        service = self._order_service()
+        for leg in await self.baskets.legs(basket_id):
+            if not leg.order_id:
+                continue
+            try:
+                await service.cancel_paper_order(int(leg.order_id))
+            except OrderValidationError:
+                continue   # already filled, rejected or cancelled
+        return await self.describe(basket_id)
 
     # --- exits ---------------------------------------------------------------
     async def exit_group(
@@ -355,6 +379,17 @@ class BasketService:
             and (expiry is None or instrument.expiry_date == expiry)
             and (strategy_key is None or position.strategy_key == strategy_key),
             reason=reason,
+        )
+
+    def _exchange_refusal(self, card, instrument, quantity, leg) -> Optional[str]:
+        from src.core.time_utils import ist_now
+        from src.options.services import contract_limits
+
+        if not (card.enforce_freeze_quantity or card.enforce_price_band):
+            return None
+        return contract_limits.refusal(
+            instrument, quantity, leg.order_type, leg.limit_price, ist_now().date(), book=self.book,
+            check_freeze=card.enforce_freeze_quantity, check_band=card.enforce_price_band,
         )
 
     async def exit_matching(self, portfolio_id: int, predicate, reason: str) -> List[Dict[str, Any]]:
@@ -389,30 +424,41 @@ class BasketService:
             group.append((position, instrument, net))
         group.sort(key=lambda item: 0 if item[2] < 0 else 1)   # shorts first
 
+        from src.options.services.contract_limits import get_contract_limits, largest_order
+
         service = self._order_service()
         results = []
         for position, instrument, net in group:
-            quantity = abs(net)
             side = BUY if net < 0 else SELL
-            row = {"securityId": position.security_id, "tradingSymbol": instrument.trading_symbol,
-                   "side": side, "quantity": quantity, "strategyKey": position.strategy_key,
-                   "product": position.product}
-            try:
-                order = await service.submit_paper_order(
-                    security_id=position.security_id,
-                    side=side,
-                    order_type="MARKET",
-                    lots=max(1, quantity // max(int(instrument.lot_size), 1)),
-                    quantity_override=quantity,
-                    is_close_order=True,
-                    portfolio_id=int(portfolio_id),
-                    reason=reason,
-                    strategy_key=position.strategy_key,
-                )
-                row.update({"orderId": order.id, "outcome": order.status, "reason": order.rejection_reason})
-            except OrderValidationError as error:
-                row.update({"orderId": None, "outcome": "REJECTED", "reason": str(error)})
-            results.append(row)
+            # Above the freeze quantity an exit goes as several orders, the
+            # way a broker's square-off does; one order would be rejected and
+            # leave the position open (D6).
+            largest = largest_order(instrument, get_contract_limits().get(position.security_id))
+            remaining = abs(net)
+            while remaining > 0:
+                quantity = min(remaining, largest) if largest else remaining
+                remaining -= quantity
+                row = {"securityId": position.security_id, "tradingSymbol": instrument.trading_symbol,
+                       "side": side, "quantity": quantity, "strategyKey": position.strategy_key,
+                       "product": position.product}
+                try:
+                    order = await service.submit_paper_order(
+                        security_id=position.security_id,
+                        side=side,
+                        order_type="MARKET",
+                        lots=max(1, quantity // max(int(instrument.lot_size), 1)),
+                        quantity_override=quantity,
+                        is_close_order=True,
+                        portfolio_id=int(portfolio_id),
+                        reason=reason,
+                        strategy_key=position.strategy_key,
+                    )
+                    row.update({"orderId": order.id, "outcome": order.status, "reason": order.rejection_reason})
+                except OrderValidationError as error:
+                    row.update({"orderId": None, "outcome": "REJECTED", "reason": str(error)})
+                results.append(row)
+                if row["outcome"] == "REJECTED":
+                    break   # the rest would meet the same refusal
         return results
 
     # --- grouped positions ------------------------------------------------------

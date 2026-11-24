@@ -94,6 +94,26 @@ async def basket(
     return await controller.basket(basket_id)
 
 
+@options_trader_router.get("/baskets")
+async def baskets(
+    portfolio_id: int = Query(..., alias="portfolioId"),
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """The portfolio's recent baskets, each leg's order status read live."""
+    return await controller.baskets(portfolio_id)
+
+
+@options_trader_router.post("/basket/{basket_id}/cancel")
+async def cancel_basket(
+    basket_id: int,
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """Cancel the basket's resting legs; filled legs stay filled."""
+    return await controller.cancel_basket(basket_id)
+
+
 @options_trader_router.post("/exit-group")
 async def exit_group(
     request: ExitGroupRequest,

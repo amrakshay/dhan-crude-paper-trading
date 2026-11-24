@@ -417,6 +417,10 @@ options:
   # its public calculator, 0.64% mean error over 25 contracts; `latest` is the
   # newest snapshot, which is what Zerodha's calculator matched that evening.
   span_snapshot: "beginning_of_day"
+  # IST times, on weekdays, at which the refresher wakes early: just after
+  # NSE publishes each snapshot (observed 23-Nov-2026: i2 11:08, i3 12:37,
+  # i4 14:08, i5 15:46, s 17:12, next i1 about 21:00).
+  span_snapshot_times: "11:10,12:40,14:10,15:50,17:15,21:05"
   # The options risk desk (src/options/services/risk_desk.py): its rules and
   # times are in the margin card (conf/margins/nse-span.yaml, risk_desk).
   rms_enabled: "${OPTIONS_RMS_ENABLED:true}"

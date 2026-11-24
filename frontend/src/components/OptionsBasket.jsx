@@ -210,7 +210,13 @@ export default function OptionsBasket({ legs, setLegs, spot, onPlaced }) {
                 <Select
                   size="small"
                   value={leg.orderType}
-                  onChange={(event) => update(index, { orderType: event.target.value })}
+                  onChange={(event) => {
+                    const orderType = event.target.value;
+                    // Like Dhan's ticket: switching to LMT starts at the
+                    // current price rather than an empty box.
+                    const start = orderType === 'LIMIT' && !leg.limitPrice ? priceOf(leg) : null;
+                    update(index, { orderType, ...(start != null ? { limitPrice: String(start) } : {}) });
+                  }}
                   sx={{ fontSize: 12, '& .MuiSelect-select': { py: 0.5 } }}
                 >
                   <MenuItem value="MARKET">MKT</MenuItem>
@@ -264,6 +270,11 @@ export default function OptionsBasket({ legs, setLegs, spot, onPlaced }) {
                 <MoneyRow label="Charges (estimate)" value={rupees(preview.charges)} />
                 <MoneyRow label="Funds this needs" value={rupees(preview.requiredFunds)} strong />
                 <MoneyRow label={`Available in ${portfolio?.name ?? 'portfolio'}`} value={rupees(preview.available)} />
+                {(preview.legs ?? []).filter((row) => row.refusal).map((row) => (
+                  <Alert key={`${row.securityId}-${row.side}`} severity="error" sx={{ mt: 1 }}>
+                    {row.refusal} This leg would be rejected; the others would still go.
+                  </Alert>
+                ))}
                 {preview.affordable === false ? (
                   <Alert severity="error" sx={{ mt: 1 }}>
                     Not enough available funds for the whole basket. Legs that do not fit will be rejected.

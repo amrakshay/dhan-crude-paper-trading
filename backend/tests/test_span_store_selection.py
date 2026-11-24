@@ -47,3 +47,40 @@ def test_the_client_names_every_snapshot_and_refuses_anything_else():
         pass
     else:
         raise AssertionError("an unknown variant must not reach a URL")
+
+
+# --- intraday snapshots (Phase 5) ----------------------------------------------
+def test_under_latest_each_intraday_snapshot_replaces_the_one_before():
+    session = {(WED, "i1"): "a", (WED, "i2"): "b"}
+    assert SpanStore._choose(session, WED, LATEST) == (WED, "i2")
+    session[(WED, "i3")] = "c"
+    assert SpanStore._choose(session, WED, LATEST) == (WED, "i3")
+    # ...while Dhan's beginning-of-day rule keeps the session's i1 all day.
+    assert SpanStore._choose(session, WED, BEGINNING_OF_DAY) == (WED, "i1")
+
+
+def test_mid_session_latest_asks_nse_for_the_next_snapshot_before_older_ones():
+    wanted = SpanStore._candidates(WED, LATEST)
+    todays = [variant for day, variant in wanted if day == WED]
+    assert todays == ["s", "i5", "i4", "i3", "i2", "i1"]
+
+
+def test_the_refresher_wakes_just_after_each_snapshot_not_half_an_hour_late():
+    from datetime import datetime
+
+    from src.core.time_utils import IST
+    from src.options.services.span_store import seconds_until_next_pass
+
+    at_1100 = datetime(2026, 11, 25, 11, 0, tzinfo=IST)
+    assert seconds_until_next_pass(at_1100, 1800) == 600          # 11:10, not 11:30
+    at_2200 = datetime(2026, 11, 25, 22, 0, tzinfo=IST)
+    assert seconds_until_next_pass(at_2200, 1800) == 1800         # nothing due: the interval
+    friday_night = datetime(2026, 11, 27, 21, 30, tzinfo=IST)
+    assert seconds_until_next_pass(friday_night, 10 ** 6) == (datetime(2026, 11, 30, 11, 10, tzinfo=IST) - friday_night).total_seconds()
+
+
+def test_the_status_says_which_snapshot_is_in_force():
+    from src.options.services.span_store import SNAPSHOT_LABELS
+
+    assert SNAPSHOT_LABELS["i1"] == "beginning of day"
+    assert "intraday" in SNAPSHOT_LABELS["i2"]

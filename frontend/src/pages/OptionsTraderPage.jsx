@@ -8,6 +8,7 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  MenuItem,
   Stack,
   Table,
   TableBody,
@@ -26,6 +27,8 @@ import SyntheticBanner from '../components/SyntheticBanner';
 import OptionsBasket from '../components/OptionsBasket';
 import OptionPositionGroups from '../components/OptionPositionGroups';
 import OptionsRiskDesk from '../components/OptionsRiskDesk';
+import OptionsRestingBaskets from '../components/OptionsRestingBaskets';
+import { TEMPLATES, pickTemplate } from '../options/templates';
 import { formatCompact, formatPrice, formatQty } from '../utils/format';
 
 /**
@@ -275,23 +278,43 @@ export default function OptionsTraderPage() {
   const selected = underlyings?.find((one) => one.symbol === symbol) ?? null;
   // B / S add a leg. A basket holds ONE underlying: the payoff and the SPAN
   // preview are about one book of risk, and mixing two would mislead both.
+  const legFor = useCallback(
+    (contract, row, optionType, side) => ({
+      securityId: contract.securityId,
+      tradingSymbol: contract.tradingSymbol,
+      underlying: chain?.underlying?.symbol,
+      side,
+      lots: 1,
+      lotSize: contract.lotSize,
+      orderType: 'MARKET',
+      limitPrice: '',
+      optionType,
+      strike: row?.strike,
+      price: contract.ltp ?? contract.chainLtp ?? null,
+    }),
+    [chain],
+  );
+
+  // A template REPLACES the basket: it is a whole position, and adding it to
+  // legs already there would build something nobody chose.
+  const [templateKey, setTemplateKey] = useState(TEMPLATES[0].key);
+  const [templateWidth, setTemplateWidth] = useState(2);
+  const applyTemplate = () => {
+    const template = TEMPLATES.find((one) => one.key === templateKey);
+    const { picks, missing } = pickTemplate(template, chain, templateWidth);
+    if (missing) {
+      setNotice(missing);
+      return;
+    }
+    setLegs(picks.map(({ contract, row, optionType, side }) => legFor(contract, row, optionType, side)));
+    setNotice(`${template.label} built from ATM ${formatPrice(chain.atmStrike)}, ${templateWidth} strike(s) wide. Nothing is placed until you confirm.`);
+  };
+
   const onTrade = useCallback(
     (contract, side) => {
       const row = chain?.rows.find((one) => one.call?.securityId === contract.securityId || one.put?.securityId === contract.securityId);
       const optionType = row?.call?.securityId === contract.securityId ? 'CE' : 'PE';
-      const leg = {
-        securityId: contract.securityId,
-        tradingSymbol: contract.tradingSymbol,
-        underlying: chain?.underlying?.symbol,
-        side,
-        lots: 1,
-        lotSize: contract.lotSize,
-        orderType: 'MARKET',
-        limitPrice: '',
-        optionType,
-        strike: row?.strike,
-        price: contract.ltp ?? contract.chainLtp ?? null,
-      };
+      const leg = legFor(contract, row, optionType, side);
       setLegs((current) => {
         if (current.length && current[0].underlying !== leg.underlying) {
           setNotice(`Basket cleared: a basket holds one underlying (${leg.underlying} now).`);
@@ -301,7 +324,7 @@ export default function OptionsTraderPage() {
         return [...current, leg];
       });
     },
-    [chain],
+    [chain, legFor],
   );
 
   return (
@@ -402,6 +425,36 @@ export default function OptionsTraderPage() {
           ) : null}
         </Card>
         <Box sx={{ position: { lg: 'sticky' }, top: { lg: 80 } }}>
+          <Card variant="outlined" sx={{ mb: 2 }}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <TextField
+                  select
+                  size="small"
+                  label="Template"
+                  value={templateKey}
+                  onChange={(event) => setTemplateKey(event.target.value)}
+                  sx={{ minWidth: 200, flexGrow: 1 }}
+                >
+                  {TEMPLATES.map((one) => (
+                    <MenuItem key={one.key} value={one.key}>{one.label}</MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  size="small"
+                  type="number"
+                  label="Width (strikes)"
+                  value={templateWidth}
+                  onChange={(event) => setTemplateWidth(Math.max(1, Math.min(10, Number(event.target.value) || 1)))}
+                  inputProps={{ min: 1, max: 10 }}
+                  sx={{ width: 120 }}
+                />
+                <Button size="small" variant="outlined" onClick={applyTemplate} disabled={!chain?.atmStrike}>
+                  Build
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
           <OptionsBasket
             legs={legs}
             setLegs={setLegs}
@@ -411,6 +464,7 @@ export default function OptionsTraderPage() {
         </Box>
       </Box>
 
+      {portfolioId ? <OptionsRestingBaskets refreshKey={placedCount} /> : null}
       {portfolioId ? <OptionPositionGroups refreshKey={placedCount} /> : null}
       {portfolioId ? <OptionsRiskDesk refreshKey={placedCount} /> : null}
       {portfolioId ? null : (

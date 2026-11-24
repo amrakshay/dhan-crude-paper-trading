@@ -124,3 +124,18 @@ expiry_settlement:
   exercise_fee_per_order: 20.00
   physical_delivery_charge_rate: 0.001
   delivery_rate_card: "nse-equity-delivery"
+
+order_limits:
+  # The exchange's per-order limits, which Dhan enforces by rejecting the
+  # order (OPTIONS_TRADER_PLAN.md D6, approved 2026-11-25). Values are not
+  # here: they are read per contract from NSE's daily F&O contract file
+  # (NSE_FO_contract_DDMMYYYY.csv.gz), which replaced the qtyfreeze report
+  # on 2024-04-15 (circular NSE/FAOP/61157).
+  #   freeze_quantity -- an order above the contract's freeze limit is refused;
+  #     the risk desk's own exits are split into allowed sizes instead.
+  #   price_band -- a LIMIT price outside the session's range is refused, only
+  #     when the file is for today and the live price is still inside it.
+  # as-of: 2026-11-25   confidence: CONFIRMED (file, ids), INTERPRETED (an
+  #   order must be BELOW MaxTradQty: 1801 listed for NIFTY's 1,800 limit)
+  freeze_quantity: true
+  price_band: true

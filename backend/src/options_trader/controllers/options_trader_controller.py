@@ -111,6 +111,17 @@ class OptionsTraderController:
             raise HTTPException(status_code=404, detail=f"No basket {basket_id}")
         return await service.describe(basket_id)
 
+    async def baskets(self, portfolio_id: int) -> dict:
+        return {"baskets": await self._baskets().recent_baskets(portfolio_id)}
+
+    async def cancel_basket(self, basket_id: int) -> dict:
+        service = self._baskets()
+        if await service.baskets.get(basket_id) is None:
+            raise HTTPException(status_code=404, detail=f"No basket {basket_id}")
+        result = await service.cancel_resting(basket_id)
+        await self.session.commit()
+        return result
+
     async def exit_group(self, request: ExitGroupRequest) -> dict:
         results = await self._baskets().exit_group(
             request.portfolio_id, request.underlying.upper(), request.expiry, reason="Exit all"

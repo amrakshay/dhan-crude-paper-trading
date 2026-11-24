@@ -21,6 +21,20 @@ verified 2026-11-24 by probing the archive.
   * `latest` -- the newest file of any kind, which is what Zerodha's
     calculator matched to the rupee the same evening.
 
+INTRADAY SNAPSHOTS (Phase 5). NSE published the 23-Nov-2026 files at (IST):
+i1 20:58 the previous Friday, i2 11:08, i3 12:37, i4 14:08, i5 15:46, s 17:12
+-- read from the archive's Last-Modified headers on 2026-11-25. Under
+`latest` the book is re-margined on each one, the way an exchange-mandated
+intraday re-margin works; the risk desk reads `current()` every pass, so a
+snapshot that widens risk can produce a shortfall the next pass acts on.
+Rather than find a snapshot up to half an hour late, the refresher also wakes
+just after each publication time (`options.span_snapshot_times`).
+
+Whether DHAN re-margins on the intraday snapshots is NOT yet measured: the
+2026-11-24 calibration ran on a market holiday, when there were none. The
+default therefore stays `beginning_of_day` until Dhan's calculator is
+compared against i1 and i2 after 11:10 on a trading day.
+
 A missing file is a STATE, reported with its reason, never a zero: the margin
 calculator falls back to its labelled scenario model, and `status()` says so.
 """
@@ -56,6 +70,42 @@ def _interval() -> int:
     return config_utils.get_property_value_int("options.span_refresh_interval_seconds", 1800)
 
 
+SNAPSHOT_LABELS = {
+    "i1": "beginning of day",
+    "i2": "intraday snapshot 1 (about 11:00)",
+    "i3": "intraday snapshot 2 (about 12:30)",
+    "i4": "intraday snapshot 3 (about 14:00)",
+    "i5": "intraday snapshot 4 (after the close)",
+    "s": "end of day",
+}
+DEFAULT_WAKE_TIMES = ("11:10", "12:40", "14:10", "15:50", "17:15", "21:05")
+
+
+def wake_times() -> list:
+    raw = config_utils.get_property_value("options.span_snapshot_times", "")
+    items = [one.strip() for one in str(raw).strip("[]").replace("'", "").replace('"', "").split(",") if one.strip()]
+    parsed = []
+    for item in items or DEFAULT_WAKE_TIMES:
+        hour, minute = item.split(":")
+        parsed.append((int(hour), int(minute)))
+    return sorted(parsed)
+
+
+def seconds_until_next_pass(now: datetime, interval: int) -> float:
+    """The regular interval, or sooner if a snapshot is due before then."""
+    best = float(interval)
+    for offset in range(0, 8):
+        day = (now + timedelta(days=offset)).date()
+        if day.weekday() >= 5:
+            continue
+        for hour, minute in wake_times():
+            moment = now.replace(year=day.year, month=day.month, day=day.day, hour=hour, minute=minute,
+                                 second=0, microsecond=0)
+            if moment > now:
+                return max(30.0, min(best, (moment - now).total_seconds()))
+    return best
+
+
 def snapshot_policy() -> str:
     value = str(config_utils.get_property_value("options.span_snapshot", BEGINNING_OF_DAY))
     return value if value in (BEGINNING_OF_DAY, LATEST) else BEGINNING_OF_DAY
@@ -86,6 +136,7 @@ class SpanStore:
             "loaded": data is not None,
             "businessDate": data.business_date.isoformat() if data else None,
             "snapshot": self.loaded_key[1] if self.loaded_key else None,
+            "snapshotLabel": SNAPSHOT_LABELS.get(self.loaded_key[1]) if self.loaded_key else None,
             "policy": snapshot_policy(),
             "created": data.created if data else None,
             "contracts": len(data.contracts) if data else 0,
@@ -197,6 +248,8 @@ class SpanStore:
 
     # --- the task --------------------------------------------------------------
     async def _run(self) -> None:
+        from src.options.services.contract_limits import get_contract_limits
+
         while True:
             try:
                 await self.refresh(download=True)
@@ -204,12 +257,23 @@ class SpanStore:
                 raise
             except Exception:  # noqa: BLE001 - the task must not die
                 logger.exception("SPAN refresh pass failed")
-            await asyncio.sleep(_interval())
+            try:
+                # Same host, same cadence, same task: NSE's F&O contract file
+                # carries the freeze quantity and price range (D6).
+                await get_contract_limits().refresh(download=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("Contract-limits refresh pass failed")
+            await asyncio.sleep(seconds_until_next_pass(ist_now(), _interval()))
 
     async def start(self) -> None:
         if not refresh_enabled():
             # Still load whatever is on disk, so margin works offline.
+            from src.options.services.contract_limits import get_contract_limits
+
             await self.refresh(download=False)
+            await get_contract_limits().refresh(download=False)
             return
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run(), name=TASK_NAME)

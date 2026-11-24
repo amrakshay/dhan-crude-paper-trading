@@ -16,6 +16,9 @@ export const optionsTraderApi = {
   positions: (portfolioId) =>
     api.get(`/options-trader/positions?portfolioId=${encodeURIComponent(portfolioId)}`),
   span: () => api.get('/options-trader/span'),
+  baskets: (portfolioId) =>
+    api.get(`/options-trader/baskets?portfolioId=${encodeURIComponent(portfolioId)}`),
+  cancelBasket: (basketId) => api.post(`/options-trader/basket/${encodeURIComponent(basketId)}/cancel`, {}),
   riskDesk: (portfolioId) =>
     api.get(`/options-trader/rms?portfolioId=${encodeURIComponent(portfolioId)}`),
 };

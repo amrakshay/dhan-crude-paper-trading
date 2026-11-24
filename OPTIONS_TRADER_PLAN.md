@@ -550,14 +550,15 @@ decisions, and the existing equity modules are **not** modified.
 | D3 | Basket | **Mirror Dhan: leg by leg, buys first, per-leg rejects, hedge-break on exit.** This replaces revision 1's "refuse whole basket". |
 | D4 | Stock option expiry | **Full physical settlement** with the delivery-margin ramp and RMS square-off on shortfall. This replaces revision 1's cash-settle. |
 | D5 | RMS rules | **Intraday 15:25, MTM ≥ 80% and margin shortfall:** all three. |
-| D6 | Freeze quantity and price band | **Not selected.** Orders above NSE's freeze quantity or outside the day's band are **accepted**, where Dhan would reject them. This is a known gap; it is a small add-on if wanted. |
+| D6 | Freeze quantity and price band | **Built in Phase 5 (approved 2026-11-25).** Orders above NSE's freeze quantity, and limit prices outside the day's range, are refused as Dhan refuses them. See section 15. |
 | D7 | Reuse by automated strategies | **Build a shared engine** (`src/options/`) for SPAN margin, baskets, exit and hedge-break, the contract picker, RMS and expiry, covering every NSE option position. The Options Trader page is the first module on it. Automated option modules come later (section 7a), each one gated on a backtest on real option prices. |
 
 ## 9. Known gaps against Dhan, and what is unverified
 
 - **Fills** stay pessimistic (backend CLAUDE.md section 4). A real order may get
   a better fill than the simulator gives.
-- **Freeze quantity and price band** are not enforced (D6).
+- **Freeze quantity and price band** are enforced from Phase 5 (D6), with the
+  two softenings in section 15.
 - **Intraday SPAN** is v1-later. Until then, margin is fixed at the end-of-day
   file's parameters plus live prices.
 - **Intraday product margin** is the same SPAN + ELM as carry-forward here.
@@ -775,3 +776,94 @@ code and names no strategy. It is run by the risk desk's task.
 
 **Tested:** 15 tests in `tests/test_options_expiry.py`, run with a fixed IST
 clock and a fake closing-price provider.
+
+## 15. Phase 5 as built (2026-11-25)
+
+Built: the four NSE items. **BSE is deferred** (decision 2026-11-25): its SPAN
+comes from ICCL, a new outbound host, and gets its own decision once that
+file and host have been checked.
+
+### D6: freeze quantity and price range
+
+- **Source.** NSE's daily F&O contract file, `NSE_FO_contract_DDMMYYYY.csv.gz`.
+  - It comes from the already-approved host, and is fetched in
+    `nse_span_client.py`, still the only module naming that host.
+  - NSE stopped publishing `qtyfreeze` on 2024-04-15 (circular
+    NSE/FAOP/61157). The old URL now redirects to that circular, which names
+    this file as the replacement.
+  - The file's `FinInstrmId` is Dhan's security ID (verified on 47810,
+    47941 and 144259), so no mapping is needed.
+  - The SPAN refresher fetches it on the same pass, and it is held in
+    `src/options/services/contract_limits.py`.
+- **Freeze quantity.** An order above the freeze limit is refused, and the
+  refusal says how to split it.
+  - The limit is the file's `MaxTradQty` minus 1. NSE lists 1801 for NIFTY,
+    whose published freeze limit is 1,800, so an order must be BELOW the
+    listed value.
+  - This applies to every order, a close included: the exchange does not ask
+    why an order is large.
+  - Exits the application makes itself (risk desk, Exit all) are split into
+    whole-lot orders of at most the limit. A single order would be rejected
+    and leave the position open.
+- **Price range.** A LIMIT price outside `MinPric`–`MaxPric` is refused.
+  - It is applied only when the file is for today's session.
+  - It is not applied when the live last price is already outside the range:
+    NSE widens option ranges intraday, and the file cannot show that.
+- **Before Place.** The basket preview shows any refusal per leg, before
+  anything is placed.
+- **Switches.** Both rules can be turned off in the margin card's
+  `order_limits` block.
+
+### Intraday SPAN snapshots
+
+- **File names and times verified 2026-11-25** from the archive's
+  Last-Modified headers for the 23-Nov session (IST):
+
+  | File | Published |
+  |---|---|
+  | i1 | 20:58 the previous Friday |
+  | i2 | 11:08 |
+  | i3 | 12:37 |
+  | i4 | 14:08 |
+  | i5 | 15:46 |
+  | s | 17:12 |
+
+- **Faster pickup.** The refresher now wakes just after each of those times
+  (`options.span_snapshot_times`) as well as every 30 minutes, so a new
+  snapshot is in force within minutes, not up to half an hour late.
+- **Re-margining.** Under `span_snapshot: latest` the book is re-margined on
+  each snapshot. The risk desk reads the file in force on every pass, so a
+  snapshot that raises margin past the cash leads to the shortfall rule.
+- **Labelled on the page.** The page names the snapshot in force ("intraday
+  snapshot 1 (about 11:00)") and whether it is Dhan's beginning-of-day rule.
+- **The default stays `beginning_of_day`.** Whether Dhan re-margins
+  intraday is **not measured**: the calibration ran on a holiday, when there
+  were no intraday files. To settle it, on a trading day after 11:10, compare
+  Dhan's calculator for a few naked shorts against i1 and against i2. Switch
+  the default only if i2 matches.
+
+### Templates
+
+- Ten templates on the Options page: bull/bear call and put spreads (debit
+  and credit), long/short straddle and strangle, iron condor, iron butterfly.
+- Each is built from the chain's ATM strike with a chosen width.
+- A template REPLACES the basket and places nothing. The legs go through the
+  same preview, payoff and confirm step as legs added by hand.
+- Pure frontend: `frontend/src/options/templates.js`.
+
+### Limit-order baskets
+
+- Limit legs were already accepted from Phase 2. What was missing was what
+  happens after placing.
+  - **Resting baskets** now appear on the page with each leg's live order
+    status.
+  - **Cancel resting legs** withdraws only the legs still open. Filled legs
+    stay filled, as a broker's basket cancel behaves.
+  - A basket's status is now re-derived from its orders, not frozen at
+    placement.
+- **Switching a leg to LMT** starts it at the current price.
+
+**Tests:**
+- `tests/test_options_order_limits.py`: 11 tests, including a real cut of
+  NSE's contract file.
+- 4 new tests in `tests/test_span_store_selection.py`.
