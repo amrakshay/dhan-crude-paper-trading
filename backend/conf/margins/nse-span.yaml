@@ -56,3 +56,23 @@ fallback:
   extreme_move_multiple: 2.0
   extreme_cover_fraction: 0.35
   default_iv: 0.18               # when the chain has no IV for a contract
+
+broker_parity:
+  # HOW THE BROKER BEING MIRRORED APPLIES THE EXCHANGE'S NUMBERS. Not an
+  # add-on: measured 2026-11-24 against Dhan's public calculator
+  # (dhan.co/calculators/margin-calculator), Dhan's figure for 25 single
+  # contracts was NSE's own SPAN from the session's beginning-of-day file, plus
+  # the option's value, plus exposure margin -- 0.64% mean error, under 0.3%
+  # near the money -- and three baskets matched within 0.7%. What made our
+  # first figures look 25% off was WHICH file and WHICH prices, not the method.
+  #
+  # valuation: "span_file" values options and the exposure-margin base at the
+  #   SPAN file's own prices (Dhan); "live" uses the live book (what a
+  #   real-time broker would re-margin to).
+  # count_premium_received: false -- Dhan: "Any option Receivable will not be
+  #   consider against initial margin shortfall". A sell is checked as if its
+  #   premium had not arrived; premium PAID on a buy is required up front.
+  # as-of: 2026-11-24   confidence: MEASURED (public calculator, holiday data)
+  broker: "dhan"
+  valuation: "span_file"
+  count_premium_received: false

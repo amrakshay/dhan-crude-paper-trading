@@ -115,6 +115,10 @@ class UnderlyingMargin:
             "shortOptionValue": round(self.short_option_value, 2),
             "netOptionValue": round(self.net_option_value, 2),
             "blocked": round(self.blocked, 2),
+            # What a broker labels SPAN: scan risk less net option value, so a
+            # short's premium sits inside it (Zerodha's 1,55,675 on 2026-11-24
+            # was exactly scan 1,38,543.6 + premium 17,131).
+            "brokerSpan": round(max(self.span - self.net_option_value, 0.0), 2),
             "span": round(self.span, 2),
             "exposure": round(self.exposure, 2),
             "expiryDayAddon": round(self.expiry_day_addon, 2),
@@ -173,6 +177,7 @@ class PortfolioMargin:
             "total": round(self.total, 2),
             "netOptionValue": round(self.net_option_value, 2),
             "blocked": round(self.blocked, 2),
+            "brokerSpan": round(sum(max(one.span - one.net_option_value, 0.0) for one in self.underlyings.values()), 2),
             "source": self.source,
             "spanFileDate": self.span_file_date.isoformat() if self.span_file_date else None,
             "underlyings": [one.as_dict() for one in self.underlyings.values()],
@@ -197,6 +202,14 @@ class MarginCard:
         self.extreme_cover = float(fallback["extreme_cover_fraction"])
         self.default_iv = float(fallback["default_iv"])
         self.version = str(document.get("version") or "")
+        parity = document.get("broker_parity") or {}
+        self.broker = str(parity.get("broker") or "exchange")
+        self.valuation = str(parity.get("valuation") or "live")
+        self.count_premium_received = bool(parity.get("count_premium_received", True))
+
+    @property
+    def values_at_span_file(self) -> bool:
+        return self.valuation == "span_file"
 
 
 # --- risk arrays --------------------------------------------------------------

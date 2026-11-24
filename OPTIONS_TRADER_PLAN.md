@@ -635,3 +635,53 @@ the exchange level; that is unverified.
   "aligned to Dhan" is unverified.
 - **Known simplification:** risk arrays are end-of-day; live prices move only
   the NOV and the exposure notional. Intraday SPAN snapshots are Phase 5.
+
+## 12. Calibrated to Dhan (2026-11-24): the P2 exit gate, closed on measured data
+
+**How it was measured.** Dhan's public calculator
+(dhan.co/calculators/margin-calculator) needs no login. It was queried for one
+lot SOLD of 23 contracts (NIFTY weekly and monthly, ITM through deep OTM,
+calls and puts; BANKNIFTY; RELIANCE; HDFCBANK) and for three NIFTY baskets.
+Zerodha's public SPAN calculator was queried as a second broker.
+
+**What Dhan does.** Dhan uses NSE's own SPAN with no hidden add-on:
+- risk arrays from the **session's beginning-of-day file**, `nsccl.D.i1`;
+- options and the exposure base valued at **that file's prices**;
+- blocked = scan risk − net option value + exposure (2% index, 3.5% stock);
+- a basket's final margin adds **premium paid**, and premium received is not
+  counted.
+
+24-Nov was a holiday, so Dhan was still on 23-Nov's `i01`, built from NIFTY's
+Friday close of 25,800.6. Zerodha had already moved to 25-Nov's `i1`, and
+matched our scan + premium to the rupee (₹1,55,675). Our first comparison
+looked 25% off only because the engine read the end-of-day file at live prices.
+
+**The result, now in the app** (live preview on the verification copy):
+
+| | App | Dhan |
+|---|---|---|
+| Naked 25350 CE | ₹2,19,035 | ₹2,18,792 (0.11%) |
+| Naked 25700 CE | ₹1,96,244 | ₹1,96,279 (0.02%) |
+| Bear call 25350/25550 final | ₹58,270 | ₹57,885 (0.67%) |
+| Bear call hedge benefit | ₹1,72,465.15 | ₹1,72,465.15 (exact) |
+| 25700B + 25550B + 25350S final | ₹55,495 | ₹55,111 (0.70%) |
+| Same basket, hedge benefit | ₹1,83,602.25 | ₹1,83,602.25 (exact) |
+
+Across all 23 single shorts the mean error is **0.64%**: under 0.3% within 1%
+of spot, and up to 2.97% deep OTM, where Dhan values the premium slightly off
+the file. All of it is pinned in `tests/test_options_dhan_parity.py`, on a
+fixture cut from NSE's real `i01` file.
+
+**What changed.**
+- `options.span_snapshot` is `beginning_of_day` by default; `latest` is the
+  Zerodha-like alternative.
+- The margin card has a `broker_parity` block: `valuation: span_file` and
+  `count_premium_received: false`.
+- Previews report broker-style SPAN (scan less net option value).
+- Basket "overall margin" = each short alone + premium paid.
+
+**Still to watch:**
+- If Dhan changes when it rolls to the next `i1`, the parity test is where it
+  will show.
+- The exposure-margin base Zerodha uses (₹23,997.7/unit on 24-Nov) is not
+  explained and is not needed for Dhan parity.

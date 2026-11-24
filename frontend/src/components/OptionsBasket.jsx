@@ -253,7 +253,7 @@ export default function OptionsBasket({ legs, setLegs, spot, onPlaced }) {
                 <MoneyRow label="Hedge benefit" value={`− ${rupees(preview.hedgeBenefit)}`} tone={theme.market.up} />
                 <MoneyRow label="Final margin required (estimate)" value={rupees(preview.finalMargin)} strong />
                 <Typography variant="caption" color="text.secondary" className="numeric">
-                  SPAN {rupees(preview.breakdown?.span)} · exposure {rupees(preview.breakdown?.exposure)}
+                  SPAN {rupees(preview.breakdown?.brokerSpan)} · exposure {rupees(preview.breakdown?.exposure)}
                   {preview.breakdown?.expiryDayAddon ? ` · expiry-day ${rupees(preview.breakdown.expiryDayAddon)}` : ''} (portfolio, after)
                 </Typography>
                 <MoneyRow
@@ -277,7 +277,7 @@ export default function OptionsBasket({ legs, setLegs, spot, onPlaced }) {
                   </Alert>
                 ) : (
                   <Typography variant="caption" color="text.secondary">
-                    NSE SPAN file {preview.spanFileDate}. Short premium is not counted against margin.
+                    NSE SPAN file {preview.spanFileDate}, applied the way {preview.broker === 'dhan' ? 'Dhan' : 'the exchange'} does. Final margin includes premium paid; premium received is {preview.premiumReceivedCounted ? '' : 'not '}counted.
                   </Typography>
                 )}
               </Stack>

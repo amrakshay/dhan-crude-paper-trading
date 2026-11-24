@@ -110,8 +110,16 @@ class OptionMarginService:
                     spots[symbol] = cached[1]
         return spots
 
-    async def legs_for(self, changes: Sequence[Tuple[str, int]]) -> List[Leg]:
-        """(security id, signed units) -> legs. Non-options are skipped."""
+    async def legs_for(
+        self, changes: Sequence[Tuple[str, int]], card: Optional[MarginCard] = None
+    ) -> List[Leg]:
+        """(security id, signed units) -> legs. Non-options are skipped.
+
+        With the card's `valuation: span_file` (Dhan), live spot and price are
+        left OFF the legs, so the calculator values them at the SPAN file's own
+        prices -- unless no file is loaded, when live is all there is.
+        """
+        file_valued = bool(card and card.values_at_span_file and get_span_store().current())
         ids = [str(security_id) for security_id, quantity in changes if quantity]
         instruments = {
             one.security_id: one for one in await self.instruments.get_many_by_security_ids(ids)
@@ -135,6 +143,8 @@ class OptionMarginService:
                 if kind == span_margin.KIND_STOCK
                 else self._spot(instrument, kind)
             )
+            if file_valued:
+                spot = None
             legs.append(
                 Leg(
                     underlying=instrument.underlying_symbol,
@@ -145,7 +155,7 @@ class OptionMarginService:
                     quantity=int(quantity),
                     spot=spot,
                     iv=(float(iv) / 100.0) if iv else None,
-                    price=float(live["ltp"]) if live.get("ltp") else None,
+                    price=(None if file_valued else (float(live["ltp"]) if live.get("ltp") else None)),
                     ref=str(security_id),
                 )
             )
@@ -172,25 +182,30 @@ class OptionMarginService:
     async def for_portfolio(self, portfolio_id: int, card: Optional[MarginCard] = None) -> PortfolioMargin:
         changes = await self.position_changes(portfolio_id)
         card = card or self._default_card()
-        return self._compute(await self.legs_for(changes), card)
+        return self._compute(await self.legs_for(changes, card), card)
 
     async def with_changes(
         self, portfolio_id: int, changes: Sequence[Tuple[str, int]], card: MarginCard
     ) -> Tuple[PortfolioMargin, PortfolioMargin]:
         """(before, after) for the portfolio with these orders added."""
         current = await self.position_changes(portfolio_id)
-        before = self._compute(await self.legs_for(current), card)
+        before = self._compute(await self.legs_for(current, card), card)
         merged: Dict[str, int] = {}
         for security_id, quantity in [*current, *changes]:
             merged[str(security_id)] = merged.get(str(security_id), 0) + int(quantity)
-        after = self._compute(await self.legs_for(list(merged.items())), card)
+        after = self._compute(await self.legs_for(list(merged.items()), card), card)
         return before, after
 
     async def each_alone(self, changes: Sequence[Tuple[str, int]], card: MarginCard) -> float:
-        """Sum of each leg margined on its own: a broker's "overall margin"."""
+        """Sum of each leg on its own, as a broker's "overall margin" shows it:
+        a short's blocked margin, a long's premium."""
         total = 0.0
-        for leg in await self.legs_for(changes):
-            total += self._compute([leg], card).total
+        for leg in await self.legs_for(changes, card):
+            alone = self._compute([leg], card)
+            if leg.quantity > 0:
+                total += alone.underlyings[leg.underlying].long_option_value if leg.underlying in alone.underlyings else 0.0
+            else:
+                total += alone.blocked
         return total
 
     @staticmethod

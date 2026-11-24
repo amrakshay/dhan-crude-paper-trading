@@ -412,3 +412,8 @@ options:
   span_refresh_enabled: "${OPTIONS_SPAN_REFRESH_ENABLED:true}"
   span_refresh_interval_seconds: 1800
   span_cache_dir: "./data/span"
+  # Which NSE SPAN snapshot margins are computed from. `beginning_of_day`
+  # (the session's i1 file) is what Dhan uses -- measured 2026-11-24 against
+  # its public calculator, 0.64% mean error over 25 contracts; `latest` is the
+  # newest snapshot, which is what Zerodha's calculator matched that evening.
+  span_snapshot: "beginning_of_day"

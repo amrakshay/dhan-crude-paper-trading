@@ -25,8 +25,11 @@ from src.logging_config import get_logger
 logger = get_logger("options.span_client")
 
 SPAN_URL_TEMPLATE = (
-    "https://nsearchives.nseindia.com/archives/nsccl/span/nsccl.{yyyymmdd}.s.zip"
+    "https://nsearchives.nseindia.com/archives/nsccl/span/nsccl.{yyyymmdd}.{variant}.zip"
 )
+# `s` end of day; `i1` beginning of day (published the evening before);
+# `i2`..`i5` intraday snapshots. Verified against the archive 2026-11-24.
+VARIANTS = ("s", "i1", "i2", "i3", "i4", "i5")
 
 # NSE drops requests without one. A generic browser string, naming nobody.
 BROWSER_USER_AGENT = (
@@ -45,14 +48,18 @@ class SpanNotPublished(SpanDownloadError):
     """404: that session's file is not up yet, or it was not a trading day."""
 
 
-def url_for(day: date) -> str:
-    return SPAN_URL_TEMPLATE.format(yyyymmdd=day.strftime("%Y%m%d"))
+def url_for(day: date, variant: str = "s") -> str:
+    if variant not in VARIANTS:
+        raise ValueError(f"Unknown SPAN file variant {variant!r}")
+    return SPAN_URL_TEMPLATE.format(yyyymmdd=day.strftime("%Y%m%d"), variant=variant)
 
 
-async def download(day: date, destination: str, timeout: Optional[int] = None) -> int:
-    """Fetch one day's zip to `destination`. Returns its size in bytes."""
+async def download(
+    day: date, destination: str, timeout: Optional[int] = None, variant: str = "s"
+) -> int:
+    """Fetch one session's zip to `destination`. Returns its size in bytes."""
     timeout = timeout or config_utils.get_property_value_int("dhan.http_timeout_seconds", 30)
-    url = url_for(day)
+    url = url_for(day, variant)
     headers = {"User-Agent": BROWSER_USER_AGENT, "Accept": "*/*"}
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
@@ -62,7 +69,7 @@ async def download(day: date, destination: str, timeout: Optional[int] = None) -
         # codebase's rule for outbound errors is the same everywhere.
         raise SpanDownloadError(f"NSE SPAN download failed: {type(error).__name__}") from error
     if response.status_code == 404:
-        raise SpanNotPublished(f"No SPAN file published for {day.isoformat()} yet")
+        raise SpanNotPublished(f"No {variant} SPAN file published for {day.isoformat()} yet")
     if response.status_code != 200:
         raise SpanDownloadError(f"NSE SPAN download returned HTTP {response.status_code}")
     body = response.content
@@ -72,5 +79,5 @@ async def download(day: date, destination: str, timeout: Optional[int] = None) -
         )
     with open(destination, "wb") as handle:
         handle.write(body)
-    logger.info("Downloaded NSE SPAN file for %s (%.1f MB)", day, len(body) / (1 << 20))
+    logger.info("Downloaded NSE SPAN %s file for %s (%.1f MB)", variant, day, len(body) / (1 << 20))
     return len(body)

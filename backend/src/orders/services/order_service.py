@@ -676,10 +676,19 @@ class OrderService:
 
             if uses_span(strategy_key):
                 signed = quantity if str(side).upper() == OrderSide.BUY.value else -quantity
+                card = card_for(strategy_key)
                 before, after = await OptionMarginService(
                     self.orders.session, book=self._book
-                ).with_changes(int(portfolio_id), [(str(security_id), signed)], card_for(strategy_key))
-                premium_flow = consideration if signed > 0 else -consideration
+                ).with_changes(int(portfolio_id), [(str(security_id), signed)], card)
+                # Premium PAID is required up front. Premium RECEIVED counts
+                # only if the card says so: Dhan does not count it against
+                # margin, so a sell must fit as if the credit had not arrived.
+                if signed > 0:
+                    premium_flow = consideration
+                elif card.count_premium_received:
+                    premium_flow = -consideration
+                else:
+                    premium_flow = Decimal("0")
                 change = Decimal(str(round(after.blocked - before.blocked, 2)))
                 return (charges + premium_flow + change).quantize(
                     MONEY_QUANTUM, rounding=ROUND_HALF_UP

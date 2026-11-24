@@ -118,7 +118,7 @@ export default function OptionPositionGroups({ refreshKey }) {
           <Box sx={{ flexGrow: 1 }} />
           {margin ? (
             <Typography variant="body2" className="numeric">
-              Margin (estimate) <b>{rupees(margin.total)}</b> · SPAN {rupees(margin.span)} · exposure {rupees(margin.exposure)}
+              Margin (estimate) <b>{rupees(margin.blocked)}</b> · SPAN {rupees(margin.brokerSpan)} · exposure {rupees(margin.exposure)}
               {margin.expiryDayAddon ? ` · expiry-day ${rupees(margin.expiryDayAddon)}` : ''}
             </Typography>
           ) : null}
@@ -131,7 +131,7 @@ export default function OptionPositionGroups({ refreshKey }) {
         ) : null}
         {span?.loaded ? (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            NSE SPAN file {span.businessDate} ({formatQty(span.contracts)} contracts). Blocked money is margin
+            NSE SPAN file {span.businessDate} {span.snapshot === 'i1' ? 'beginning-of-day' : span.snapshot} ({formatQty(span.contracts)} contracts), the snapshot Dhan margins against. Blocked money is margin
             less net option value: a long blocks only its premium, a short's premium stays unspendable.
           </Typography>
         ) : null}
@@ -159,7 +159,7 @@ export default function OptionPositionGroups({ refreshKey }) {
                     </Typography>
                     {groupMargin ? (
                       <Typography variant="caption" color="text.secondary" className="numeric">
-                        {group.underlying} margin {rupees(groupMargin.total)} (SPAN {rupees(groupMargin.span)}, exp {rupees(groupMargin.exposure)})
+                        {group.underlying} margin {rupees(groupMargin.blocked)} (SPAN {rupees(groupMargin.brokerSpan)}, exp {rupees(groupMargin.exposure)})
                       </Typography>
                     ) : null}
                     <Button size="small" color="error" variant="outlined" disabled={busy === key} onClick={() => exitAll(group)}>
