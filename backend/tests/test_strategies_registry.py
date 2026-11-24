@@ -94,7 +94,10 @@ def test_the_crude_module_ships_off_and_still_owns_crude_contracts():
     # question.
     assert registry.require(CRUDE).enabled_by_default is False
     assert registry.for_instrument("MCX_COMM", "CRUDEOIL").key == CRUDE
-    assert registry.for_instrument("NSE_FNO", "NIFTY") is None
+    # NIFTY's options belong to the NSE Options Trader since 2026-11-24, not
+    # to crude: a contract is owned by the module that describes it.
+    assert registry.for_instrument("NSE_FNO", "NIFTY").key == "nse-options-trader"
+    assert registry.for_instrument("NSE_FNO", "USDINR") is None
     # Same underlying on another segment is not the same instrument.
     assert registry.for_instrument("NSE_FNO", "CRUDEOIL") is None
 

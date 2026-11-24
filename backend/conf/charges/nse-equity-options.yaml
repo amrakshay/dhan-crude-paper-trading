@@ -1,0 +1,122 @@
+# ===========================================================================
+# NSE EQUITY OPTIONS CHARGE RATES (index options and stock options)
+#
+# Charged under by `nse-options-trader` and by any later module that trades
+# NSE options. Equity options pay STT, not CTT -- a different tax from the MCX
+# card, not the same tax at another rate.
+#
+# Every rate carries a source and an as-of date. Update rates here and
+# nowhere else -- no rate is hardcoded in Python (root CLAUDE.md section 7).
+#
+# Confidence markers:
+#   CONFIRMED   - read on a primary source (NSE / SEBI / Income Tax / Dhan)
+#   UNCONFIRMED - corroborated by brokers or secondary sources only
+#
+# Researched 2026-11-24 for OPTIONS_TRADER_PLAN.md section 6. Exercise and
+# assignment (STT on intrinsic value, Rs 20 per exercised contract) are
+# applied by the expiry job in Phase 4, not by per-order charges.
+# ===========================================================================
+
+version: "2026-11-24"
+currency: "INR"
+
+labels:
+  brokerage: "Brokerage"
+  stt: "STT"
+  exchange_transaction_charge: "Exchange transaction charge"
+  sebi_turnover_fee: "SEBI turnover fee"
+  stamp_duty: "Stamp duty"
+  gst: "GST"
+
+levies:
+  - name: "brokerage"
+    kind: "brokerage"
+  - name: "stt"
+    kind: "percent_of_turnover"
+    rate_key: "stt.sell_option_premium_rate"
+    sides: ["SELL"]
+    note: "STT on sale of an option in securities, on the premium (Budget 2026)"
+  - name: "exchange_transaction_charge"
+    kind: "percent_of_turnover"
+    rate_key: "exchange_transaction_charge.option_premium_rate"
+    note: "NSE equity options, on premium turnover"
+  - name: "sebi_turnover_fee"
+    kind: "percent_of_turnover"
+    rate_key: "sebi_turnover_fee.rate"
+    intermediate_rounding: "paise_half_even"
+    note: "Rs 10 per crore"
+  - name: "stamp_duty"
+    kind: "percent_of_turnover"
+    rate_key: "stamp_duty.option_premium_rate"
+    sides: ["BUY"]
+    intermediate_rounding: "rupee_half_up"
+    note: "Indian Stamp Act rules 2019, buy side only"
+  - name: "gst"
+    kind: "percent_of_components"
+    rate_key: "gst.rate"
+    applies_to:
+      - "brokerage"
+      - "exchange_transaction_charge"
+      - "sebi_turnover_fee"
+    intermediate_rounding: "paise_half_up"
+    note: "Not applied to trade value, STT or stamp duty"
+
+brokerage:
+  # Dhan: Rs 20 per executed order for F&O, and Rs 20 per executed order for
+  # options that expire, are exercised or are assigned (Phase 4).
+  # source: https://dhan.co/pricing/ (broker primary, no effective date shown)
+  # as-of: 2026-11-24   CONFIRMED
+  mode: "flat"
+  flat_per_order: 20.00
+  percentage_of_turnover: 0.0003
+  max_per_order: 20.00
+  include_strike_in_base: false
+
+stt:
+  # Sale of an option: 0.15% (was 0.10%), paid by the seller. Sale of an
+  # option that is exercised: 0.15% (was 0.125%). Effective 2026-04-01 under
+  # the Finance Act 2026.
+  # source: NSE circular NSE/FATAX/73524 (2026-03-31)
+  #   https://nsearchives.nseindia.com/content/circulars/FATAX73524.pdf
+  # as-of: 2026-11-24   CONFIRMED (rates). The BASE -- premium for a sale,
+  # intrinsic value on exercise -- is from the Finance (No.2) Act 2004 s.99 as
+  # summarised by brokers: UNCONFIRMED.
+  sell_option_premium_rate: 0.0015
+  exercise_settlement_rate: 0.0015
+
+exchange_transaction_charge:
+  # Equity options, on premium, each side: Rs 3,552.99 per crore transaction
+  # charge + Rs 0.01 per crore IPFT = Rs 3,553 per crore = 0.03553%, from
+  # 2026-03-01. One line here because the total is what is charged.
+  # source: NSE circular NSE/FA/73061 (2026-02-27)
+  #   https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+  # as-of: 2026-11-24   CONFIRMED
+  option_premium_rate: 0.0003553
+
+sebi_turnover_fee:
+  # 0.00010% of turnover (Rs 10 per crore), equity derivatives, from
+  # 2019-04-01: SEBI (Payment of Fees) (Amendment) Regulations 2019, annexed
+  # to NSE/FA/40632 https://nsearchives.nseindia.com/content/circulars/FA40632.pdf
+  # as-of: 2026-11-24   CONFIRMED (rate); charged on premium for options:
+  # UNCONFIRMED
+  rate: 0.000001
+  charge_on_exercise_notional: false
+
+stamp_duty:
+  # 0.003% of premium, buy side only (Indian Stamp Act as amended by the
+  # Finance Act 2019, in force 2020-07-01). Secondary sources only.
+  # as-of: 2026-11-24   UNCONFIRMED
+  option_premium_rate: 0.00003
+
+gst:
+  # 18% on brokerage, exchange charges and the SEBI fee.
+  # source: https://dhan.co/pricing/ (broker primary)   as-of: 2026-11-24
+  rate: 0.18
+  applies_to:
+    - "brokerage"
+    - "exchange_transaction_charge"
+    - "sebi_turnover_fee"
+
+rounding:
+  mode: "exact"
+  final_total_decimal_places: 2

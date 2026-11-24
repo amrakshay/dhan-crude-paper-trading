@@ -45,6 +45,7 @@ class OrderController:
                 limit_price=request.limit_price,
                 is_close_order=request.is_close_order,
                 portfolio_id=request.portfolio_id,
+                product=request.product,
             )
         except OrderValidationError as exc:
             logger.warning(

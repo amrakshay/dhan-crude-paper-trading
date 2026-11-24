@@ -49,6 +49,12 @@ from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("orders.service")
 
+# Dhan's product types, for the modules that offer the choice. See
+# `submit_paper_order(product=...)`.
+PRODUCT_INTRADAY = "INTRADAY"
+PRODUCT_CARRYFORWARD = "CARRYFORWARD"
+PRODUCTS = (PRODUCT_INTRADAY, PRODUCT_CARRYFORWARD)
+
 MONEY_QUANTUM = Decimal("0.01")
 PRICE_QUANTUM = Decimal("0.0001")
 
@@ -215,6 +221,7 @@ class OrderService:
         portfolio_id: Optional[int] = None,
         reason: Optional[str] = None,
         strategy_key: Optional[str] = None,
+        product: Optional[str] = None,
     ) -> Order:
         """Submit a paper order into one portfolio.
 
@@ -243,8 +250,21 @@ class OrderService:
         module passes its own key; a discretionary order on an unambiguous
         contract passes nothing and is resolved from the instrument as before.
         An ambiguous instrument with no key is refused, never guessed.
+
+        `product` is Dhan's product type, INTRADAY or CARRYFORWARD, for the
+        modules that offer the choice (the Options Trader). None means the
+        strategy does not choose one, which is every module before it. An
+        order whose product differs from the open position it would ADD to is
+        refused: Dhan keeps the two apart, and merging them here would let the
+        15:25 square-off close a carry-forward holding.
         """
         side = str(side).upper()
+        if product is not None:
+            product = str(product).strip().upper() or None
+            if product is not None and product not in PRODUCTS:
+                raise OrderValidationError(
+                    f"product must be one of {', '.join(PRODUCTS)}, got {product!r}"
+                )
         order_type = str(order_type).upper()
 
         logger.debug(
@@ -332,6 +352,9 @@ class OrderService:
         if quantity <= 0:
             raise OrderValidationError("Order quantity must be positive")
 
+        if product is not None and not is_close_order:
+            await self._check_product_matches(portfolio.id, instrument, product)
+
         # Funds, in the validation block with every other rule rather than
         # scattered. Priced off the limit where there is one and off the live
         # mark otherwise: an estimate, because what a market order actually
@@ -384,6 +407,7 @@ class OrderService:
             filled_quantity=0,
             average_fill_price=None,
             is_close_order=is_close_order,
+            product=product,
             placed_at=now,
             last_event_at=now,
         )
@@ -409,6 +433,25 @@ class OrderService:
 
         await self._attempt_initial_fill(order, instrument)
         return order
+
+    async def _check_product_matches(self, portfolio_id: int, instrument, product: str) -> None:
+        """Refuse an opening order whose product differs from the open position's."""
+        from src.positions.database.db_operations.position_repository import (
+            PositionRepository,
+        )
+
+        position = await PositionRepository(self.orders.session).get_open_for_security(
+            portfolio_id, str(instrument.security_id)
+        )
+        if position is None or int(position.net_quantity or 0) == 0:
+            return
+        if position.product and position.product != product:
+            raise OrderValidationError(
+                f"{instrument.trading_symbol} is already open as "
+                f"{position.product.title()} in this portfolio. Dhan keeps "
+                f"Intraday and Carry-forward positions apart; exit it, or "
+                f"place this order as {position.product.title()}."
+            )
 
     @staticmethod
     def _align_to_tick(price: Decimal, instrument) -> Decimal:
@@ -725,7 +768,7 @@ class OrderService:
             incremental_charges,
         )
 
-        await self.positions.apply_fill(
+        position, _ = await self.positions.apply_fill(
             strategy_key=order.strategy_key,
             portfolio_id=order.portfolio_id,
             security_id=order.security_id,
@@ -747,6 +790,10 @@ class OrderService:
                 "reason": await self._placed_reason(order),
             },
         )
+        # A position is stamped with the product it was OPENED under, once.
+        # Covers a flip too: `apply_fill` returns the fresh residual row.
+        if order.product and position is not None and position.is_open and not position.product:
+            position.product = order.product
 
         await self._record_cash_effect(
             order,

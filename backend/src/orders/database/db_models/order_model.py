@@ -60,6 +60,11 @@ class Order(TimestampedModel):
 
     # Set to true when this order was created to close an existing position.
     is_close_order = Column(Boolean, nullable=False, default=False)
+    # Dhan's product type: "INTRADAY" (squared off by the risk desk at 15:25)
+    # or "CARRYFORWARD" (held until exited or settled). NULL for every order
+    # placed before 2026-11-24 and for strategies that never choose -- the
+    # cash rotation holds delivery, and MCX crude has no such choice here.
+    product = Column(String(16), nullable=True)
 
     placed_at = Column(PreciseDateTime, nullable=False, index=True)
     last_event_at = Column(PreciseDateTime, nullable=False)

@@ -26,12 +26,24 @@ class InstrumentRepository(BaseRepository[Instrument]):
     async def get_many_by_security_ids(
         self, security_ids: Sequence[str]
     ) -> List[Instrument]:
-        if not security_ids:
+        """Batched, because the Options Trader ingests ~69,000 NSE option rows
+        and SQLite refuses a statement with more than 32,766 bound parameters.
+        Before 2026-11-24 the largest refresh was ~1,700 rows and one IN clause
+        was fine."""
+        ids = list(dict.fromkeys(security_ids))
+        if not ids:
             return []
-        result = await self.session.execute(
-            select(Instrument).where(Instrument.security_id.in_(list(security_ids)))
-        )
-        return list(result.scalars().all())
+        found: List[Instrument] = []
+        for start in range(0, len(ids), self.IN_CLAUSE_BATCH):
+            result = await self.session.execute(
+                select(Instrument).where(
+                    Instrument.security_id.in_(ids[start:start + self.IN_CLAUSE_BATCH])
+                )
+            )
+            found.extend(result.scalars().all())
+        return found
+
+    IN_CLAUSE_BATCH = 5000
 
     async def list_by_symbols(
         self, underlying_symbols: Sequence[str], exchange_segment: Optional[str] = None
@@ -85,6 +97,47 @@ class InstrumentRepository(BaseRepository[Instrument]):
             .order_by(Instrument.strike_price.asc(), Instrument.option_type.asc())
         )
         return list(result.scalars().all())
+
+    async def option_underlyings(
+        self, underlying_symbols: Sequence[str], exchange_segment: str
+    ) -> Dict[str, int]:
+        """{underlying: lot size} for every name with an ACTIVE option row.
+
+        One grouped query for the Options Trader's picker. A name whose
+        options were all deactivated (it left F&O, or the strategy is off and
+        a refresh dropped them) is simply absent rather than offered empty.
+        """
+        symbols = list(dict.fromkeys(underlying_symbols))
+        if not symbols:
+            return {}
+        result = await self.session.execute(
+            select(Instrument.underlying_symbol, func.max(Instrument.lot_size))
+            .where(
+                Instrument.underlying_symbol.in_(symbols),
+                Instrument.exchange_segment == exchange_segment,
+                Instrument.option_type.is_not(None),
+                Instrument.is_active.is_(True),
+            )
+            .group_by(Instrument.underlying_symbol)
+        )
+        return {str(symbol): int(lot or 0) for symbol, lot in result.all()}
+
+    async def find_cash_row(
+        self, underlying_symbol: str, exchange_segment: str
+    ) -> Optional[Instrument]:
+        """The underlying's own cash row (its spot price), if ingested."""
+        result = await self.session.execute(
+            select(Instrument)
+            .where(
+                Instrument.underlying_symbol == underlying_symbol,
+                Instrument.exchange_segment == exchange_segment,
+                Instrument.option_type.is_(None),
+                Instrument.expiry_date.is_(None),
+                Instrument.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        return result.scalars().first()
 
     async def list_futures(
         self, underlying_symbol: str, futures_instrument_type: str, on_or_after: Optional[date] = None

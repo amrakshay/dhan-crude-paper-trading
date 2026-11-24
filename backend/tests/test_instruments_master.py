@@ -17,7 +17,19 @@ from src.instruments.services.instrument_master_service import (
 
 @pytest.fixture
 def service():
-    return InstrumentMasterService(repository=None)
+    """Scoped to MCX crude, which is what these tests are about.
+
+    Until 2026-11-24 the default (every enabled strategy) was the same thing,
+    because no other module claimed an NSE_FNO row. The Options Trader claims
+    NIFTY's options, so the sample master's NIFTY row is no longer anybody's
+    to filter out -- which is right, and is not this file's subject.
+    """
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    return InstrumentMasterService(
+        repository=None,
+        strategies=[get_strategy_registry().require("mcx-crude-options")],
+    )
 
 
 def test_parse_selects_only_the_configured_underlying(service, sample_master_csv):

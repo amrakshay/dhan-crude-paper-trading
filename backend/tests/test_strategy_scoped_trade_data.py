@@ -162,11 +162,13 @@ async def test_a_contract_belonging_to_no_strategy_cannot_be_traded(auth_client)
                     "exchange_id": "NSE",
                     "exchange_segment": "NSE_FNO",
                     "segment_code": 2,
-                    "instrument_type": "OPTIDX",
-                    "underlying_symbol": "NIFTY",
-                    "underlying_scrip": 13,
-                    "trading_symbol": "NIFTY 24000 CALL",
-                    "display_name": "NIFTY 24000 CALL",
+                    # A currency option: claimed by no module. (NIFTY was
+                    # the example until the Options Trader claimed it.)
+                    "instrument_type": "OPTCUR",
+                    "underlying_symbol": "USDINR",
+                    "underlying_scrip": 10093,
+                    "trading_symbol": "USDINR 84 CALL",
+                    "display_name": "USDINR 84 CALL",
                     "expiry_date": NEAR_OPTION_EXPIRY,
                     "strike_price": Decimal("24000"),
                     "option_type": "CE",
