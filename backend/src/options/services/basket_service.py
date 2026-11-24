@@ -349,6 +349,23 @@ class BasketService:
         reason: str = "Exit all",
     ) -> List[Dict[str, Any]]:
         """Close every open option position on an underlying (and expiry), SHORTS FIRST."""
+        return await self.exit_matching(
+            portfolio_id,
+            lambda position, instrument: instrument.underlying_symbol == underlying
+            and (expiry is None or instrument.expiry_date == expiry)
+            and (strategy_key is None or position.strategy_key == strategy_key),
+            reason=reason,
+        )
+
+    async def exit_matching(self, portfolio_id: int, predicate, reason: str) -> List[Dict[str, Any]]:
+        """Close every open OPTION position the predicate accepts, SHORTS FIRST.
+
+        The one exit path: Exit all, the risk desk's square-offs and (later)
+        expiry all come through here, so "shorts first" is said once. Each
+        close is an ordinary paper order through `submit_paper_order` -- it
+        crosses the spread and can be refused -- and its reason is written on
+        the order, so the owning strategy's record shows why it closed.
+        """
         from src.orders.services.order_service import OrderValidationError
         from src.positions.database.db_operations.position_repository import (
             PositionRepository,
@@ -367,11 +384,7 @@ class BasketService:
             net = int(position.net_quantity or 0)
             if not net or instrument is None or not instrument.option_type:
                 continue
-            if instrument.underlying_symbol != underlying:
-                continue
-            if expiry is not None and instrument.expiry_date != expiry:
-                continue
-            if strategy_key is not None and position.strategy_key != strategy_key:
+            if not predicate(position, instrument):
                 continue
             group.append((position, instrument, net))
         group.sort(key=lambda item: 0 if item[2] < 0 else 1)   # shorts first
@@ -380,10 +393,14 @@ class BasketService:
         results = []
         for position, instrument, net in group:
             quantity = abs(net)
+            side = BUY if net < 0 else SELL
+            row = {"securityId": position.security_id, "tradingSymbol": instrument.trading_symbol,
+                   "side": side, "quantity": quantity, "strategyKey": position.strategy_key,
+                   "product": position.product}
             try:
                 order = await service.submit_paper_order(
                     security_id=position.security_id,
-                    side=BUY if net < 0 else SELL,
+                    side=side,
                     order_type="MARKET",
                     lots=max(1, quantity // max(int(instrument.lot_size), 1)),
                     quantity_override=quantity,
@@ -392,13 +409,10 @@ class BasketService:
                     reason=reason,
                     strategy_key=position.strategy_key,
                 )
-                results.append({"securityId": position.security_id, "tradingSymbol": instrument.trading_symbol,
-                                "side": order.side, "orderId": order.id, "outcome": order.status,
-                                "reason": order.rejection_reason})
+                row.update({"orderId": order.id, "outcome": order.status, "reason": order.rejection_reason})
             except OrderValidationError as error:
-                results.append({"securityId": position.security_id, "tradingSymbol": instrument.trading_symbol,
-                                "side": BUY if net < 0 else SELL, "orderId": None, "outcome": "REJECTED",
-                                "reason": str(error)})
+                row.update({"orderId": None, "outcome": "REJECTED", "reason": str(error)})
+            results.append(row)
         return results
 
     # --- grouped positions ------------------------------------------------------

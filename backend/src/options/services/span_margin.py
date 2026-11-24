@@ -202,6 +202,10 @@ class MarginCard:
         self.extreme_cover = float(fallback["extreme_cover_fraction"])
         self.default_iv = float(fallback["default_iv"])
         self.version = str(document.get("version") or "")
+        desk = document.get("risk_desk") or {}
+        self.intraday_square_off_at = _hhmm(desk.get("intraday_square_off_at", "15:25"))
+        self.intraday_entry_cutoff_at = _hhmm(desk.get("intraday_entry_cutoff_at", "15:23"))
+        self.mtm_loss_fraction = float(desk.get("mtm_loss_fraction", 0.80))
         parity = document.get("broker_parity") or {}
         self.broker = str(parity.get("broker") or "exchange")
         self.valuation = str(parity.get("valuation") or "live")
@@ -210,6 +214,13 @@ class MarginCard:
     @property
     def values_at_span_file(self) -> bool:
         return self.valuation == "span_file"
+
+
+def _hhmm(value):
+    from datetime import time as _time
+
+    hour, minute = str(value).split(":")
+    return _time(int(hour), int(minute))
 
 
 # --- risk arrays --------------------------------------------------------------

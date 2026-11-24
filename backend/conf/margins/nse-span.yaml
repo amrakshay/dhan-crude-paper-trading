@@ -76,3 +76,24 @@ broker_parity:
   broker: "dhan"
   valuation: "span_file"
   count_premium_received: false
+
+risk_desk:
+  # What the broker's risk desk does WITHOUT asking (OPTIONS_TRADER_PLAN.md
+  # section 4.6), applied by src/options/services/risk_desk.py to every NSE
+  # option position on this card, whichever strategy holds it. Arming cannot
+  # opt a strategy out: a broker's RMS does not ask the algorithm.
+  #
+  # source: https://dhan.co/risk-management-policy/ (read 2026-11-24)
+  #   * NSE/BSE derivatives intraday square-off "3:25 PM onwards";
+  #   * orders placed in the 2 minutes before the system square-off may be
+  #     rejected -- modelled as: no NEW Intraday position from 15:23;
+  #   * Dhan "reserves the right to square-off ... where-in MTM crosses 80%
+  #     and above". The policy does not say 80% OF WHAT; read here as an
+  #     unrealised option loss of 80% of the margin the portfolio's option
+  #     book blocks. UNVERIFIED interpretation.
+  #   * a margin shortfall ("risk of margin shortfall or obligation towards
+  #     payin") is squared off, largest margin consumer first.
+  # as-of: 2026-11-24   confidence: CONFIRMED (times, 80%), UNVERIFIED (80% base)
+  intraday_square_off_at: "15:25"
+  intraday_entry_cutoff_at: "15:23"
+  mtm_loss_fraction: 0.80

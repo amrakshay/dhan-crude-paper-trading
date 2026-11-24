@@ -322,7 +322,16 @@ def _seed_book(security_id):
 
 
 @pytest.fixture
-async def trading(auth_client):
+async def trading(auth_client, monkeypatch):
+    # Mid-session, so the Intraday entry cut-off (15:23-15:30) never decides
+    # these tests by the wall clock.
+    from datetime import datetime
+
+    from src.core.time_utils import IST
+
+    monkeypatch.setattr(
+        "src.core.time_utils.ist_now", lambda: datetime(2026, 11, 25, 11, 0, tzinfo=IST)
+    )
     await _seed_nifty_chain()
     security_id = _id(25000, "CE")
     _seed_book(security_id)

@@ -25,6 +25,7 @@ import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 import SyntheticBanner from '../components/SyntheticBanner';
 import OptionsBasket from '../components/OptionsBasket';
 import OptionPositionGroups from '../components/OptionPositionGroups';
+import OptionsRiskDesk from '../components/OptionsRiskDesk';
 import { formatCompact, formatPrice, formatQty } from '../utils/format';
 
 /**
@@ -410,9 +411,9 @@ export default function OptionsTraderPage() {
         </Box>
       </Box>
 
-      {portfolioId ? (
-        <OptionPositionGroups refreshKey={placedCount} />
-      ) : (
+      {portfolioId ? <OptionPositionGroups refreshKey={placedCount} /> : null}
+      {portfolioId ? <OptionsRiskDesk refreshKey={placedCount} /> : null}
+      {portfolioId ? null : (
         <Alert severity="info">Select a portfolio in the header to trade.</Alert>
       )}
     </Stack>

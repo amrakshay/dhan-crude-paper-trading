@@ -40,6 +40,8 @@ os.environ.setdefault("APP_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("DHAN_SYNTHETIC_FEED", "true")
 # Tests never fetch NSE's SPAN file. Margin tests load a fixture into the store.
 os.environ["OPTIONS_SPAN_REFRESH_ENABLED"] = "false"
+# The risk desk acts on its own; tests drive `run_once` directly instead.
+os.environ["OPTIONS_RMS_ENABLED"] = "false"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB_PATH}"
 
 # ---------------------------------------------------------------------------

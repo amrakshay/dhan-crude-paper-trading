@@ -417,3 +417,7 @@ options:
   # its public calculator, 0.64% mean error over 25 contracts; `latest` is the
   # newest snapshot, which is what Zerodha's calculator matched that evening.
   span_snapshot: "beginning_of_day"
+  # The options risk desk (src/options/services/risk_desk.py): its rules and
+  # times are in the margin card (conf/margins/nse-span.yaml, risk_desk).
+  rms_enabled: "${OPTIONS_RMS_ENABLED:true}"
+  rms_interval_seconds: 5

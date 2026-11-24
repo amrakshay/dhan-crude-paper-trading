@@ -685,3 +685,39 @@ fixture cut from NSE's real `i01` file.
   will show.
 - The exposure-margin base Zerodha uses (₹23,997.7/unit on 24-Nov) is not
   explained and is not needed for Dhan parity.
+
+## 13. Phase 3 as built (2026-11-24): the risk desk
+
+`src/options/services/risk_desk.py` runs as the `options-rms` task. It has the
+`bracket_monitor` shape: its own session, off the tick path, registered in
+`TASK_DESCRIPTIONS` and `expected_task_names`. It serves **every**
+SPAN-margined option position, whichever strategy holds it, and arming cannot
+opt a strategy out of it. Its times and threshold are in the margin card's
+`risk_desk` block, from Dhan's risk policy.
+
+| Rule | Trigger | Action |
+|---|---|---|
+| Intraday square-off | 15:25 IST | Close every INTRADAY option position, shorts first |
+| Entry cut-off | 15:23 until the close | Refuse a NEW Intraday position (Dhan: orders in the 2 minutes before square-off may be rejected) |
+| MTM loss | Unrealised option loss ≥ 80% of the book's blocked margin | Close the portfolio's option book, shorts first |
+| Margin shortfall | Available below zero (for example, a wider SPAN file overnight) | Close the largest-margin underlying, then re-check next pass |
+
+- **Every action is an ordinary paper order.** Each goes through the single
+  exit path (`BasketService.exit_matching`), with the reason written on the
+  order.
+- **Every action is recorded and alerted.** It gets a row in
+  `options_risk_actions` and an alert (catalogue entry `options-rms`) tagged
+  with the owning strategy.
+- **Failed exits are retried, not hammered.** An exit that could not fill is
+  marked FAILED/PARTIAL, alerted as CRITICAL, and retried after 60 s rather
+  than on every pass.
+- **It is careful about data and time.** An unmarked position never triggers
+  the MTM rule, and nothing acts outside market hours.
+
+**Unverified:** what Dhan's "MTM crosses 80%" is a percentage of. It is read
+here as 80% of the blocked option margin.
+
+**Verified on the database copy:** the task ran and was reported running by
+System Health, and the page panel rendered. A live square-off needs market
+hours; the 11 tests in `tests/test_options_risk_desk.py` drive every rule with
+a fixed IST clock on the real-file SPAN fixture.

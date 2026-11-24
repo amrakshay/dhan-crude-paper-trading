@@ -72,6 +72,9 @@ EVENT_STALE_BARS = "stale-bars"
 EVENT_DEFERRED_STOPS = "deferred-stops"
 EVENT_BTST_EXIT_INCOMPLETE = "btst-exit-incomplete"
 EVENT_APP_STARTED = "app-started"
+# The options risk desk: one event name for its three rules, the rule being
+# part of the dedupe key (src/options/services/risk_desk.py).
+EVENT_OPTIONS_RMS = "options-rms"
 # The IPO dashboard's own two. Neither is `strategy_scoped`: no strategy owns
 # an IPO, and `alerts.strategy_key` stays NULL on both.
 EVENT_IPO_CLOSING_REMINDER = "ipo-closing-reminder"
@@ -82,6 +85,7 @@ EVENT_IPO_SOURCE_UNREACHABLE = "ipo-source-unreachable"
 # does not have, which no amount of `strategy_scoped` can express.
 STRATEGY_SWING = "nse-swing-momentum"
 STRATEGY_BTST = "nse-btst-overnight"
+STRATEGY_OPTIONS_TRADER = "nse-options-trader"
 
 
 
@@ -396,6 +400,35 @@ RULES: Tuple[AlertRule, ...] = (
             "It reports that a position is still held, never that it was sold "
             "late. A sale after the window succeeds and is recorded EXITED_LATE "
             "with the delay on the row; look at the Live tab for those."
+        ),
+    ),
+    AlertRule(
+        key=EVENT_OPTIONS_RMS,
+        title="The risk desk squared off option positions",
+        trigger=(
+            "The options risk desk closed positions on its own: the 15:25 "
+            "Intraday square-off, an unrealised loss of 80% of the option "
+            "book's margin, or a margin shortfall (available below zero)."
+        ),
+        why=(
+            "A broker's risk desk acts without asking, and so does this one. "
+            "A position closed by somebody else is the one thing a trader most "
+            "needs to hear about the moment it happens -- and if the exit could "
+            "not fill, that it is still open."
+        ),
+        severity=SEVERITY_WARNING,
+        category=CATEGORY_STRATEGY,
+        kind=KIND_HEALTH,
+        dedupe_prefix=_health(EVENT_OPTIONS_RMS),
+        strategy_scoped=True,
+        strategy_keys=(STRATEGY_OPTIONS_TRADER,),
+        collapsing=(
+            "One message per rule, portfolio, day and outcome: a square-off "
+            "that filled, and one that could not, are two different messages."
+        ),
+        caveat=(
+            "CRITICAL when an exit was refused or found no depth; the desk "
+            "retries it a minute later rather than every pass."
         ),
     ),
     # --- trades -----------------------------------------------------------

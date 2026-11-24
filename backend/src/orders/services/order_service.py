@@ -354,6 +354,8 @@ class OrderService:
 
         if product is not None and not is_close_order:
             await self._check_product_matches(portfolio.id, instrument, product)
+            if product == PRODUCT_INTRADAY:
+                self._check_intraday_cutoff(strategy.key)
 
         # Funds, in the validation block with every other rule rather than
         # scattered. Priced off the limit where there is one and off the live
@@ -434,6 +436,32 @@ class OrderService:
 
         await self._attempt_initial_fill(order, instrument)
         return order
+
+    @staticmethod
+    def _check_intraday_cutoff(strategy_key: str) -> None:
+        """No NEW Intraday position in the last minutes before the risk desk's
+        square-off. Dhan: orders in the 2 minutes before its 15:25 square-off
+        may be rejected (dhan.co/risk-management-policy, read 2026-11-24). The
+        times are the margin card's, so they are configuration."""
+        from src.core.time_utils import ist_now
+        from src.options.services.option_margin_service import card_for, uses_span
+
+        if not uses_span(strategy_key):
+            return
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        card = card_for(strategy_key)
+        close = get_strategy_registry().require(strategy_key).market_hours.close
+        # Only between the cut-off and the session's close: outside the
+        # session nothing fills anyway, and a refusal at 23:00 for an order
+        # meant for tomorrow would be the cut-off misreading its own rule.
+        if card.intraday_entry_cutoff_at <= ist_now().time() <= close:
+            raise OrderValidationError(
+                f"New Intraday F&O positions are not accepted from "
+                f"{card.intraday_entry_cutoff_at:%H:%M} IST: the risk desk squares "
+                f"Intraday positions off at {card.intraday_square_off_at:%H:%M}. "
+                f"Place it as Carry-forward, or exit instead."
+            )
 
     async def _check_product_matches(self, portfolio_id: int, instrument, product: str) -> None:
         """Refuse an opening order whose product differs from the open position's."""

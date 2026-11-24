@@ -58,6 +58,10 @@ TASK_DESCRIPTIONS = {
         "Fetches NSE Clearing's daily SPAN file and swaps it in, the source of "
         "every NSE option margin figure"
     ),
+    "options-rms": (
+        "The options risk desk: Intraday square-off at 15:25, the MTM-loss "
+        "rule and margin shortfalls, on every SPAN-margined option position"
+    ),
     "telegram-commands": (
         "Long-polls Telegram for commands, authorised by resolving the sender "
         "to an application user"
@@ -238,6 +242,10 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
         "options.span_refresh_enabled", True
     ) and _span_expected():
         expected.add("span-refresher")
+    if config_utils.get_property_value_boolean(
+        "options.rms_enabled", True
+    ) and _span_expected():
+        expected.add("options-rms")
 
     if _automation_expected():
         # The rotation's two background tasks. Each has its own config switch

@@ -382,6 +382,9 @@ async def lifespan(app: FastAPI):
         from src.options.services.span_store import get_span_store
 
         await get_span_store().start()
+        from src.options.services.risk_desk import get_risk_desk
+
+        await get_risk_desk().start()
     except Exception:
         logger.exception(
             "IPO scheduler failed to start; the daily GMP refresh and the "
@@ -411,6 +414,9 @@ async def lifespan(app: FastAPI):
         from src.options.services.span_store import get_span_store
 
         await get_span_store().stop()
+        from src.options.services.risk_desk import shutdown_risk_desk
+
+        await shutdown_risk_desk()
         await shutdown_alert_watcher()
         await shutdown_alert_dispatcher()
         await shutdown_token_refresh_monitor()

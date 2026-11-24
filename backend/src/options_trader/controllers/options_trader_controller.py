@@ -5,7 +5,12 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.time_utils import to_ist
 from src.logging_config import get_logger
+
+
+def to_ist_iso(value):
+    return to_ist(value).isoformat() if value is not None else None
 from src.options.services.basket_service import BasketError, BasketService, LegRequest
 from src.options.services.chain_view_service import ChainViewError, ChainViewService
 from src.options.services.span_store import get_span_store
@@ -121,3 +126,37 @@ class OptionsTraderController:
 
     def span_status(self) -> dict:
         return get_span_store().status()
+
+    async def risk_desk(self, portfolio_id: int) -> dict:
+        """What the risk desk did to this portfolio, newest first, and its state."""
+        import json
+
+        from src.options.database.db_operations.risk_action_repository import (
+            RiskActionRepository,
+        )
+        from src.options.services.option_margin_service import card_for
+        from src.options.services.risk_desk import get_risk_desk
+
+        self._enabled()
+        rows = await RiskActionRepository(self.session).recent(portfolio_id, limit=50)
+        card = card_for(STRATEGY_KEY)
+        return {
+            "status": get_risk_desk().status(),
+            "rules": {
+                "intradaySquareOffAt": card.intraday_square_off_at.strftime("%H:%M"),
+                "intradayEntryCutoffAt": card.intraday_entry_cutoff_at.strftime("%H:%M"),
+                "mtmLossFraction": card.mtm_loss_fraction,
+            },
+            "actions": [
+                {
+                    "id": row.id,
+                    "rule": row.rule,
+                    "outcome": row.outcome,
+                    "detail": row.detail,
+                    "strategyKeys": (row.strategy_keys or "").split(",") if row.strategy_keys else [],
+                    "orders": json.loads(row.orders_json or "[]"),
+                    "createdAt": to_ist_iso(row.created_at),
+                }
+                for row in rows
+            ],
+        }

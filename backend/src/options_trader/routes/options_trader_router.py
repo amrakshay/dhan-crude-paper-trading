@@ -121,3 +121,13 @@ async def span_status(
 ) -> dict:
     """Which NSE SPAN file is in force, and why not if none is."""
     return controller.span_status()
+
+
+@options_trader_router.get("/rms")
+async def risk_desk(
+    portfolio_id: int = Query(..., alias="portfolioId"),
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """The risk desk's actions on this portfolio, newest first, and its rules."""
+    return await controller.risk_desk(portfolio_id)
