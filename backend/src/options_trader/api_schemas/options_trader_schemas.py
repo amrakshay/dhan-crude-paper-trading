@@ -1,4 +1,6 @@
 """Response shapes for the Options Trader page. camelCase on the wire."""
+from datetime import date
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,5 +42,31 @@ class ChainResponse(BaseModel):
     snapshot_note: Optional[str] = Field(None, alias="snapshotNote")
     synthetic: bool = False
     margin_note: str = Field(alias="marginNote")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BasketLegRequest(BaseModel):
+    security_id: str = Field(..., alias="securityId")
+    side: str
+    lots: int = Field(1, gt=0)
+    order_type: str = Field("MARKET", alias="orderType")
+    limit_price: Optional[Decimal] = Field(None, alias="limitPrice")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BasketRequest(BaseModel):
+    portfolio_id: int = Field(..., alias="portfolioId")
+    product: Optional[str] = None
+    legs: List[BasketLegRequest]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ExitGroupRequest(BaseModel):
+    portfolio_id: int = Field(..., alias="portfolioId")
+    underlying: str
+    expiry: Optional[date] = None
 
     model_config = ConfigDict(populate_by_name=True)

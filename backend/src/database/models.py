@@ -22,6 +22,10 @@ from src.ipo.database.db_models.ipo_model import (  # noqa: F401
     IpoJobRun,
 )
 from src.notes.database.db_models.trade_note_model import TradeNote  # noqa: F401
+from src.options.database.db_models.basket_model import (  # noqa: F401
+    OptionBasket,
+    OptionBasketLeg,
+)
 from src.orders.database.db_models.order_model import (  # noqa: F401
     Order,
     OrderCharge,

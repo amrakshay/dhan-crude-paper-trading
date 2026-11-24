@@ -54,6 +54,10 @@ TASK_DESCRIPTIONS = {
         "Refreshes IPO GMP daily and sends the hourly closing-day reminders; "
         "the second clock, and nothing to do with any strategy"
     ),
+    "span-refresher": (
+        "Fetches NSE Clearing's daily SPAN file and swaps it in, the source of "
+        "every NSE option margin figure"
+    ),
     "telegram-commands": (
         "Long-polls Telegram for commands, authorised by resolving the sender "
         "to an application user"
@@ -156,6 +160,16 @@ def feed_flags() -> Dict[str, bool]:
     }
 
 
+def _span_expected() -> bool:
+    from src.strategies.services.strategy_definition import MarginModel
+    from src.strategies.services.strategy_registry import get_strategy_registry
+
+    return any(
+        strategy.margin.model == MarginModel.NSE_SPAN
+        for strategy in get_strategy_registry().enabled()
+    )
+
+
 def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
     """Which named tasks should be alive, given the current configuration."""
     expected: Set[str] = set()
@@ -217,6 +231,13 @@ def expected_task_names(*, is_synthetic: bool, feed_running: bool) -> Set[str]:
         "connections.telegram_commands_task_enabled", True
     ):
         expected.add("telegram-commands")
+
+    # The SPAN refresher runs while any ENABLED strategy is margined on
+    # NSE SPAN and refreshing is allowed. Off otherwise, and then not missing.
+    if config_utils.get_property_value_boolean(
+        "options.span_refresh_enabled", True
+    ) and _span_expected():
+        expected.add("span-refresher")
 
     if _automation_expected():
         # The rotation's two background tasks. Each has its own config switch

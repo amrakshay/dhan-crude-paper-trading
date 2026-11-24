@@ -197,6 +197,13 @@ class ChainViewService:
         elif snapshot is not None and snapshot.underlying_last_price:
             spot, spot_source = float(snapshot.underlying_last_price), "option-chain"
 
+        if spot is not None:
+            # The margin engine's freshest price for an index, which has no
+            # row on the feed (src/options/services/option_margin_service.py).
+            from src.options.services.option_margin_service import remember_spot
+
+            remember_spot(underlying.symbol, spot)
+
         strikes = sorted({Decimal(str(one.strike_price)) for one in contracts})
         atm = _nearest(strikes, spot) if spot is not None else None
         window = _window(strikes, atm, self.strike_window)

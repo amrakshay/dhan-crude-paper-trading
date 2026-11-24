@@ -376,6 +376,7 @@ class OrderService:
                 strategy_key=strategy.key,
                 lot_size=int(instrument.lot_size),
                 is_close_order=is_close_order,
+                security_id=str(instrument.security_id),
             )
             if refusal:
                 logger.warning(
@@ -594,6 +595,7 @@ class OrderService:
                 strategy_key=order.strategy_key,
                 lot_size=int(order.lot_size),
                 is_close_order=bool(order.is_close_order),
+                security_id=str(order.security_id),
             )
             if refusal:
                 # REJECTED, not partially filled to fit. Filling what fits
@@ -626,8 +628,19 @@ class OrderService:
         price: Decimal,
         strategy_key: str,
         lot_size: int,
+        portfolio_id: Optional[int] = None,
+        security_id: Optional[str] = None,
     ) -> Decimal:
         """What this execution would take out of a portfolio.
+
+        For a strategy on `margin.model: nse_span` this is EXACT rather than a
+        flat proxy: how much less the portfolio could spend after the fill
+        than before it -- charges, plus premium paid (or minus premium
+        received), plus the change in SPAN-blocked money for the WHOLE
+        portfolio. That is what makes a hedge cheap: a short call whose long
+        call has already filled moves the portfolio's SPAN by the spread's
+        risk, not by a naked short's. It can be NEGATIVE, which is a closing
+        order releasing margin.
 
         A BUY costs the premium plus charges. A SELL to open RECEIVES premium
         but ties up margin, and the margin estimate is larger than the credit
@@ -654,6 +667,24 @@ class OrderService:
             )
         )
 
+        if portfolio_id is not None and security_id is not None:
+            from src.options.services.option_margin_service import (
+                OptionMarginService,
+                card_for,
+                uses_span,
+            )
+
+            if uses_span(strategy_key):
+                signed = quantity if str(side).upper() == OrderSide.BUY.value else -quantity
+                before, after = await OptionMarginService(
+                    self.orders.session, book=self._book
+                ).with_changes(int(portfolio_id), [(str(security_id), signed)], card_for(strategy_key))
+                premium_flow = consideration if signed > 0 else -consideration
+                change = Decimal(str(round(after.blocked - before.blocked, 2)))
+                return (charges + premium_flow + change).quantize(
+                    MONEY_QUANTUM, rounding=ROUND_HALF_UP
+                )
+
         if str(side).upper() == OrderSide.BUY.value:
             return consideration + charges
 
@@ -677,20 +708,30 @@ class OrderService:
         strategy_key: str,
         lot_size: int,
         is_close_order: bool,
+        security_id: Optional[str] = None,
     ) -> Optional[str]:
         """None if affordable, otherwise why not, naming the shortfall.
 
-        A CLOSING order is never refused for funds. Closing a long releases
-        money and closing a short releases margin; refusing it would trap a
-        trader in a position precisely when they most need out of it.
+        A CLOSING order is never refused for funds -- with ONE exception, Dhan's
+        "Hedge Break Alert" (OPTIONS_TRADER_PLAN.md section 4.4). On SPAN,
+        exiting the LONG leg of a hedge can RAISE margin, because the short it
+        was protecting becomes naked. If the portfolio cannot carry that, the
+        exit is refused and says to cover the short first, or use Exit all.
+        Every other close -- closing a long on its own, closing a short --
+        releases money and is never refused, so nobody is trapped in a
+        position when they most need out of it.
         """
-        if is_close_order:
+        from src.options.services.option_margin_service import uses_span
+
+        span = uses_span(strategy_key) and security_id is not None
+        if is_close_order and not span:
             return None
 
         from src.portfolios.services.balance_service import BalanceService
 
         required = await self._estimated_debit(
-            side, quantity, price, strategy_key, lot_size
+            side, quantity, price, strategy_key, lot_size,
+            portfolio_id=portfolio_id, security_id=security_id,
         )
         if required <= 0:
             return None
@@ -704,6 +745,15 @@ class OrderService:
         shortfall = (required - available).quantize(
             MONEY_QUANTUM, rounding=ROUND_HALF_UP
         )
+        if is_close_order:
+            # Dhan's own wording for the case, so the message reads the way
+            # the broker's does.
+            return (
+                f"Hedge Break Alert: exiting this leg leaves a short position "
+                f"unhedged, raising margin by {required} against {available} "
+                f"available -- short by {shortfall}. Exit the short leg first, "
+                f"or use Exit all, which covers shorts before their hedges."
+            )
         return (
             f"Insufficient funds: this would need {required} but only "
             f"{available} is available -- short by {shortfall}."
@@ -1151,6 +1201,7 @@ class OrderService:
         required = await self._estimated_debit(
             side, quantity, Decimal(str(price)), strategy.key,
             int(instrument.lot_size),
+            portfolio_id=int(portfolio_id), security_id=str(instrument.security_id),
         )
         return {
             "portfolioId": int(portfolio_id),

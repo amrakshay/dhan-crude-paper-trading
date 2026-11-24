@@ -92,17 +92,14 @@ charges:
   rate_card: "nse-equity-options"
 
 margin:
-  # -------------------------------------------------------------------------
-  # PHASE 1 PLACEHOLDER -- NOT WHAT A BROKER WOULD BLOCK.
-  #
-  # Phase 2 replaces this with NSE SPAN + exposure margin computed from the
-  # exchange's own daily risk-parameter file. Until then a short option ties up
-  # this fraction of its PREMIUM notional, which understates a real index
-  # short by a wide margin. Every surface showing it says "estimate".
-  # as-of: 2026-11-24   confidence: APPROXIMATION
-  # -------------------------------------------------------------------------
-  model: "percent_of_notional"
-  short_option_percent_of_notional: 1.00
+  # NSE SPAN from the exchange's own daily risk-parameter file, plus exposure
+  # margin, computed per PORTFOLIO by the options engine (src/options/). The
+  # card holds what the file does not: exposure-margin rates, the expiry-day
+  # add-on and the labelled fallback. An ESTIMATE -- every surface says so --
+  # but built from the same file a broker starts from (OPTIONS_TRADER_PLAN.md
+  # section 5). Replaced the Phase 1 percent-of-premium placeholder 2026-11-24.
+  model: "nse_span"
+  card: "nse-span"
 
 capabilities:
   - "options-trader"

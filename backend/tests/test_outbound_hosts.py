@@ -42,6 +42,11 @@ OUTBOUND_HOSTS = {
     # can this process talk to", and a host listed here but never contacted
     # would weaken that answer. The display link is built in the browser.
     "webnodejs.investorgain.com": "ipo_source_client.py",
+    # NSE Clearing's daily SPAN risk-parameter file, for the Options Trader's
+    # margin (OPTIONS_TRADER_PLAN.md D1, approved 2026-11-24). Inbound data,
+    # one public file a day; it is not Dhan, so test_no_real_orders.py is
+    # unchanged by it.
+    "nsearchives.nseindia.com": "nse_span_client.py",
 }
 
 # Anything that looks like an external http(s) URL in a string literal.
@@ -214,3 +219,13 @@ def test_the_scanner_covers_a_meaningful_number_of_files():
     """If the walk breaks, every test above passes vacuously."""
     scanned = list(_iter_python_files(SRC_ROOT))
     assert len(scanned) >= 50, f"Only {len(scanned)} files scanned; the walk is broken"
+
+
+def test_the_span_client_can_only_build_an_nse_span_archive_url():
+    from datetime import date
+
+    from src.options.services import nse_span_client
+
+    assert nse_span_client.url_for(date(2026, 11, 23)) == (
+        "https://nsearchives.nseindia.com/archives/nsccl/span/nsccl.20261123.s.zip"
+    )

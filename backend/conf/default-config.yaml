@@ -402,3 +402,13 @@ ipo:
   # How long to wait for the source before giving up. A slow page must not hold
   # the sweep past its own hour.
   source_timeout_seconds: 20
+
+options:
+  # The shared NSE options engine (src/options/, OPTIONS_TRADER_PLAN.md).
+  # NSE Clearing's daily SPAN file: where it is kept, how often a newer one is
+  # looked for, and whether to look at all. Switching refreshing off still
+  # loads whatever file is on disk; with none, margin falls back to the
+  # labelled scenario model in conf/margins/nse-span.yaml.
+  span_refresh_enabled: "${OPTIONS_SPAN_REFRESH_ENABLED:true}"
+  span_refresh_interval_seconds: 1800
+  span_cache_dir: "./data/span"

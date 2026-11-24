@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.dependencies import SessionPrincipal, require_session
 from src.database.session import get_async_session
 from src.options_trader.api_schemas.options_trader_schemas import (
+    BasketRequest,
     ChainResponse,
+    ExitGroupRequest,
     UnderlyingListResponse,
 )
 from src.options_trader.controllers.options_trader_controller import (
@@ -61,3 +63,61 @@ async def release_view(
     """The page closed: release the pinned strikes now."""
     await controller.release()
     return Response(status_code=204)
+
+
+@options_trader_router.post("/basket/preview")
+async def preview_basket(
+    request: BasketRequest,
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """Overall vs final margin and the hedge benefit. Places nothing."""
+    return await controller.preview_basket(request)
+
+
+@options_trader_router.post("/basket", status_code=201)
+async def place_basket(
+    request: BasketRequest,
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """Send every leg as its own paper order, buys first. Returns each leg's outcome."""
+    return await controller.place_basket(request)
+
+
+@options_trader_router.get("/basket/{basket_id}")
+async def basket(
+    basket_id: int,
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    return await controller.basket(basket_id)
+
+
+@options_trader_router.post("/exit-group")
+async def exit_group(
+    request: ExitGroupRequest,
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """Exit every option on an underlying (and expiry), SHORTS FIRST."""
+    return await controller.exit_group(request)
+
+
+@options_trader_router.get("/positions")
+async def positions(
+    portfolio_id: int = Query(..., alias="portfolioId"),
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """Open option positions grouped by underlying and expiry, with SPAN margin."""
+    return await controller.positions(portfolio_id)
+
+
+@options_trader_router.get("/span")
+async def span_status(
+    controller: OptionsTraderController = Depends(get_controller),
+    _: SessionPrincipal = Depends(require_session),
+) -> dict:
+    """Which NSE SPAN file is in force, and why not if none is."""
+    return controller.span_status()

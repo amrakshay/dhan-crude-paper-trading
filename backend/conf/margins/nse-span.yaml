@@ -1,0 +1,58 @@
+# ===========================================================================
+# NSE EQUITY-DERIVATIVES MARGIN CARD (model: nse_span)
+#
+# SPAN itself is NOT configured here. It is computed from NSE Clearing's own
+# daily risk-parameter file (nsccl.YYYYMMDD.s.spn), downloaded by
+# src/options/services/nse_span_client.py. What is configured is what that
+# file does not carry: the EXPOSURE MARGIN (ELM) rates, the SEBI expiry-day
+# add-on, and the parameters of the FALLBACK used only when no SPAN file is
+# available -- a fallback the UI labels as such and alerts on.
+#
+# Every rate: a primary source and an as-of date. Nothing hardcoded in Python
+# (root CLAUDE.md section 7). Read by src/options/services/span_margin.py.
+#
+# This is a per-EXCHANGE card, not per strategy: every module trading NSE
+# options names it, the way a strategy names its charges rate card.
+# ===========================================================================
+
+version: "2026-11-24"
+
+exposure_margin:
+  # On the NOTIONAL value (underlying price x quantity) of SHORT options.
+  # source: NSE Clearing consolidated circular NCL/CMPT/73997 (050/2026),
+  #   2026-04-30, section 10.4
+  #   https://nsearchives.nseindia.com/content/circulars/CMPT73997.zip
+  # as-of: 2026-11-24   CONFIRMED
+  index_options:
+    base_rate: 0.02
+    deep_otm_rate: 0.03
+    deep_otm_beyond: 0.10        # more than 10% out of the money
+    long_dated_rate: 0.05
+    long_dated_after_days: 270   # "more than 9 months to expiry"
+  stock_options:
+    base_rate: 0.035
+    deep_otm_rate: 0.0525
+    deep_otm_beyond: 0.30        # more than 30% out of the money
+
+expiry_day:
+  # SEBI/HO/MRD/TPD-1/P/CIR/2024/132 (2024-10-01): an additional 2% ELM on
+  # short INDEX options on the day they expire, from 2024-11-20; and no
+  # calendar-spread benefit for a contract expiring that day, from 2025-02-01.
+  # Whether the 2% applies to a HEDGED short is UNVERIFIED; it is applied to
+  # every expiring short index option here, which errs towards blocking more.
+  # as-of: 2026-11-24   CONFIRMED (rates), UNCONFIRMED (hedged scope)
+  index_short_additional_rate: 0.02
+  remove_calendar_benefit: true
+
+fallback:
+  # ONLY when no SPAN file is loaded, or a contract is missing from it: a
+  # SPAN-shaped 16-scenario array built with Black-76 from the live IV.
+  # Scan ranges approximate NSE's (the 2026-11-23 file has NIFTY's price scan
+  # at 2357.52 on 25,349.65 = 9.3%). APPROXIMATION -- labelled on every surface.
+  # as-of: 2026-11-24   confidence: APPROXIMATION
+  index_price_scan: 0.093
+  stock_price_scan: 0.15
+  volatility_scan: 0.04          # absolute vol points, as NSE's volScan
+  extreme_move_multiple: 2.0
+  extreme_cover_fraction: 0.35
+  default_iv: 0.18               # when the chain has no IV for a contract

@@ -376,6 +376,12 @@ async def lifespan(app: FastAPI):
 
     try:
         await get_ipo_scheduler().start()
+        # NSE SPAN for the options engine's margin. Started unconditionally:
+        # with refreshing switched off it still loads what is on disk, and a
+        # strategy enabled later finds the file already in force.
+        from src.options.services.span_store import get_span_store
+
+        await get_span_store().start()
     except Exception:
         logger.exception(
             "IPO scheduler failed to start; the daily GMP refresh and the "
@@ -402,6 +408,9 @@ async def lifespan(app: FastAPI):
     try:
         await shutdown_telegram_poller()
         await shutdown_ipo_scheduler()
+        from src.options.services.span_store import get_span_store
+
+        await get_span_store().stop()
         await shutdown_alert_watcher()
         await shutdown_alert_dispatcher()
         await shutdown_token_refresh_monitor()

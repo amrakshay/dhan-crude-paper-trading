@@ -36,6 +36,7 @@ from src.portfolios.database.db_operations.portfolio_repository import (
     CashLedgerRepository,
 )
 from src.positions.database.db_operations.position_repository import PositionRepository
+from src.strategies.services.strategy_definition import MarginModel
 from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("portfolios.balance")
@@ -94,6 +95,8 @@ class BalanceService:
         self.ledger = CashLedgerRepository(session)
         self.positions = PositionRepository(session)
         self._book = book
+        # The last SPAN computation, for surfaces that show its breakdown.
+        self.last_span_margin = None
 
     @property
     def book(self):
@@ -143,6 +146,10 @@ class BalanceService:
             return ZERO
 
         strategy = get_strategy_registry().get(position.strategy_key)
+        if strategy is not None and strategy.margin.model == MarginModel.NSE_SPAN:
+            # Margined per PORTFOLIO by the options engine, not per position:
+            # see `_span_blocked`. Counting it here too would block it twice.
+            return ZERO
         if strategy is None:
             # A position whose strategy has been removed still ties money up;
             # refusing to estimate would silently free it.
@@ -187,6 +194,9 @@ class BalanceService:
             # both cases.
             mark_to_market += Decimal(net) * mark
 
+        span_blocked, span_detail = await self._span_blocked(portfolio_id)
+        blocked += span_blocked
+
         cash = _q(cash)
         blocked = _q(blocked)
         return PortfolioBalance(
@@ -202,6 +212,33 @@ class BalanceService:
             unmarked_positions=unmarked,
             unmarked_strategies=unmarked_strategies,
         )
+
+    async def _span_blocked(self, portfolio_id: int):
+        """What the portfolio's NSE option book blocks under SPAN, if it has one.
+
+        One computation for the whole portfolio, because SPAN nets every leg
+        on an underlying whichever strategy holds it. `blocked` is margin
+        less net option value (src/options/services/span_margin.py): a long
+        option blocks nothing beyond the premium it already paid, a short
+        keeps its premium unspendable. An ESTIMATE, like every margin here.
+        """
+        from src.options.services.option_margin_service import OptionMarginService
+
+        service = OptionMarginService(self.session, book=self.book)
+        changes = await service.position_changes(portfolio_id)
+        if not changes:
+            return ZERO, None
+        try:
+            margin = await service.for_portfolio(portfolio_id)
+        except Exception:  # noqa: BLE001 - refusing to estimate would free the money
+            logger.exception(
+                "SPAN margin for portfolio %s could not be computed; its option "
+                "positions are blocked at their full short notional instead",
+                portfolio_id,
+            )
+            return ZERO, None
+        self.last_span_margin = margin
+        return Decimal(str(round(margin.blocked, 2))), margin
 
     async def available_balance(self, portfolio_id: int) -> Decimal:
         """What can be spent or withdrawn right now.
