@@ -11,11 +11,13 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, signal, headers } = {}) {
+async function request(path, { method = 'GET', body, signal, headers, keepalive } = {}) {
   const response = await fetch(`/api${path}`, {
     method,
     credentials: 'include',
     signal,
+    // Lets a request outlive the page that sent it (a release on page hide).
+    ...(keepalive ? { keepalive: true } : {}),
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...headers,

@@ -401,7 +401,15 @@ export default function OptionsTraderPage() {
 
   // Leaving the page releases the pinned strikes now, rather than after the
   // server's TTL. Best effort: the TTL is the backstop.
-  useEffect(() => () => { optionsTraderApi.release().catch(() => {}); }, []);
+  // A reload or a closed tab never unmounts, so `pagehide` covers those.
+  useEffect(() => {
+    const release = () => { optionsTraderApi.release().catch(() => {}); };
+    window.addEventListener('pagehide', release);
+    return () => {
+      window.removeEventListener('pagehide', release);
+      release();
+    };
+  }, []);
 
   const selected = underlyings?.find((one) => one.symbol === symbol) ?? null;
   const onTrade = useCallback((contract, side) => setTicket({ contract, side }), []);
@@ -428,7 +436,15 @@ export default function OptionsTraderPage() {
                 setExpiry(null);
                 setChain(null);
               }}
-              renderInput={(params) => <TextField {...params} label="Underlying" />}
+              // The value arrives after the options load, which leaves MUI's
+              // floating label sitting over it unless it is told to shrink.
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Underlying"
+                  InputLabelProps={{ ...params.InputLabelProps, shrink: true }}
+                />
+              )}
             />
             <Box>
               <Typography variant="h4" className="numeric">

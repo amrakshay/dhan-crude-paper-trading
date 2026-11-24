@@ -1,6 +1,6 @@
 # Options Trader: buy and sell options on any symbol, aligned to a real broker (Dhan)
 
-Status: **plan, revision 2, 2026-11-24. Nothing is built.**
+Status: **plan, revision 2, 2026-11-24. Phase 0 is done and Phase 1 is built on branch `feature/options-trader` (section 10).**
 
 **Goal:** behave as close to Dhan as a paper simulator can. Where this plan
 departs from Dhan, the gap is named in section 9. Revision 1 had treated
@@ -560,14 +560,42 @@ decisions, and the existing equity modules are **not** modified.
 - **Freeze quantity and price band** are not enforced (D6).
 - **Intraday SPAN** is v1-later. Until then, margin is fixed at the end-of-day
   file's parameters plus live prices.
-- **Unverified, to check in Phase 1:**
-  - whether `/optionchain` serves stock underlyings;
-  - Dhan's expiry-day square-off time for physical settlement;
-  - Dhan's fresh-order cut-off near 15:18;
-  - the 80% MTM threshold;
-  - whether premium received offsets margin at Dhan;
-  - the ELM source;
-  - whether the expiry-day 2% applies to hedged shorts;
-  - the NIFTY weekly expiry weekday (the plan reads expiries from the master
-    and assumes none);
-  - any lot-size revision (the plan reads lot size from the master).
+- **Intraday product margin** is the same SPAN + ELM as carry-forward here.
+  Whether Dhan offers extra intraday leverage on option selling is
+  unverified.
+
+## 10. Phase 0 results (2026-11-24, live checks)
+
+Every row was checked for real: a live call, a downloaded file, or a primary
+document read. Sources are in the rate card or below.
+
+| Question | Answer | How it was checked |
+|---|---|---|
+| NSE SPAN download | **Works only with a browser User-Agent.** Without one, the connection is dropped (curl reports 000). With one: `nsccl.20261123.s.zip`, 8.0 MB, 200. The same day's file was not up at 21:21 IST (404). The XML is standard SPAN 4.00: 229 option portfolios, 118,069 option risk arrays of 16 scenarios each. P2's design holds. The client must send a browser-like UA. | Live GET plus unzip, 2026-11-24 |
+| `/optionchain` for stocks | **Yes.** RELIANCE works with `UnderlyingScrip` 2885 (its NSE_EQ id) under `NSE_EQ` or `NSE_FNO`, giving 113 strikes with IV and greeks. | Live call |
+| `/optionchain` for indices | Needs the **IDX_I id** (NIFTY 13, BANKNIFTY 25, FINNIFTY 27, NIFTYNXT50 38, MIDCPNIFTY 442). The master's `UNDERLYING_SECURITY_ID` on option rows (NIFTY 26000) is refused with "813 Invalid SecurityId". | Live call |
+| Lot sizes | Unchanged: NIFTY 65, BANKNIFTY 30, FINNIFTY 60, MIDCPNIFTY 120, NIFTYNXT50 25. RELIANCE is 500. Read from the master at runtime anyway. | Fresh master |
+| NIFTY expiry weekday | Weekly **Tuesday** (01, 08, 15, 22 Dec); monthly 29-Dec. Stock monthlies 29-Dec and 25-Jan. Read from the master, never assumed. | Fresh master |
+| Option rows | 12,882 OPTIDX and 74,026 OPTSTK across 218 F&O stocks. A 70-day window ingests 69,117 rows (with equities) in 14.7 s. | Live refresh on a copy |
+| Id collisions | 4 NSE_FNO ids also appear as segment-G gold bonds (not ingested). The ingester refuses a real collision. | Master scan |
+| STT | **0.15%** sell side on premium, and **0.15%** on exercise, from 2026-04-01. | NSE/FATAX/73524 |
+| NSE txn charge | **0.03553%** of premium, from 2026-03-01. | NSE/FA/73061 |
+| ELM rates | Index short options 2%, 3% if more than 10% OTM, +2% on expiry day, 5% long-dated. Stock short options 3.5%, 5.25% if more than 30% OTM. | NCL/CMPT/73997 s.10.4 |
+| ELM daily file | `F_AEL_OPT_CONTRACTS_DDMMYYYY.CSV` exists (NCL/CMPT/74569, live 2026-07-07), but its **public URL was not found**. P2 uses the circular's rates from the YAML. | Circulars; URL probes 404 |
+| Dhan intraday square-off | **15:25** for NSE/BSE derivatives. Orders in the 2 minutes before may be rejected. The 15:18 fresh-order block is **not** on Dhan's page. | dhan.co/risk-management-policy |
+| Dhan MTM rule | Squares off where "MTM crosses **80%** and above". | Same page |
+| Dhan physical settlement | **Different from the plan's assumption.** No fresh stock-option position of any product on expiry day. Delivery needs **100% of contract value before 10:00 on expiry day**, and on a shortfall Dhan "reserves the right to square-off". **No E-4 ramp appears on Dhan's pages** (that ramp is the NSE's, which other brokers pass through). | Dhan RMS page plus Dhan FAQ (still says Thursday) |
+| Premium credit | "Any option Receivable will not be consider against initial margin shortfall (Span + Exposure)." Whether premium counts as available cash is not stated. | Dhan RMS page |
+
+**Consequence for Phase 4, needing your call before then.** Dhan's rule is
+"100% before 10:00 on expiry day, no fresh positions that day". The plan's
+10/25/45/70% ramp is NSE's own and is what some other brokers apply. Phase 4
+should model Dhan's rule (decision D0). The NSE ramp may still apply on top at
+the exchange level; that is unverified.
+
+### Still unverified
+- Dhan's exact square-off time on expiry day for physical settlement.
+- Whether premium received counts towards available funds at Dhan.
+- Whether the expiry-day 2% ELM applies to hedged shorts.
+- The STT base on exercise (intrinsic value, by secondary sources).
+- Stamp duty and GST against their own notifications (broker-primary only).

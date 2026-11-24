@@ -475,6 +475,19 @@ class FeedManager:
             include_closed=False, strategy_key=strategy.key
         )
         wanted = {position.security_id for position in positions}
+        # A RESTING order needs its book as much as a held position does: it
+        # fills only when the market trades through it, which the matcher can
+        # see only on the feed. Found 2026-11-24 on the Options Trader, whose
+        # chain pin lapsed and took a resting limit order's contract off the
+        # feed with it -- an order that could then never fill.
+        from src.orders.database.db_operations.order_repository import OrderRepository
+
+        resting = [
+            order
+            for order in await OrderRepository(repository.session).list_open_orders()
+            if order.strategy_key == strategy.key
+        ]
+        wanted.update(order.security_id for order in resting)
         wanted.update(self._pinned.get(strategy.key, set()))
 
         for instrument in await repository.get_many_by_security_ids(sorted(wanted)):
@@ -487,8 +500,8 @@ class FeedManager:
         state.subscribed_expiries = []
         state.instrument_count = len(targets)
         logger.debug(
-            "Resolved %s live instruments for %s (%s held, %s pinned)",
-            len(targets), strategy.key, len(positions),
+            "Resolved %s live instruments for %s (%s held, %s resting, %s pinned)",
+            len(targets), strategy.key, len(positions), len(resting),
             len(self._pinned.get(strategy.key, set())),
         )
         return targets, meta

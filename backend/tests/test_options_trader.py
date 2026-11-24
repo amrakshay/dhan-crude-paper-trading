@@ -443,3 +443,26 @@ def test_the_options_page_is_granted_by_its_capability_and_leaves_with_it():
     registry.set_enabled(KEY, False)  # restored by the baseline fixture
 
     assert "/options" not in registry.feature_pages()
+
+
+async def test_a_resting_order_keeps_its_contract_on_the_feed_after_the_pin_lapses(trading):
+    """Found live on 2026-11-24: the chain's pin lapsed and took a resting
+    limit order's contract off the feed with it, so the order could never
+    fill. A `positions` strategy now subscribes what it HOLDS and what it has
+    RESTING, pinned or not."""
+    client, portfolio_id, security_id = trading
+    response = await _order(
+        client, portfolio_id, security_id, side="SELL", product="CARRYFORWARD",
+        orderType="LIMIT", limitPrice="500",
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "OPEN", "far above the book: it rests"
+
+    manager = get_feed_manager()
+    manager.pin_instruments(KEY, set())
+    async with session_scope() as session:
+        targets, _ = await manager._resolve_strategy_targets(
+            _definition(), InstrumentRepository(session)
+        )
+
+    assert ("NSE_FNO", security_id) in targets

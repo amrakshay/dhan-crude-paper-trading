@@ -10,5 +10,6 @@ export const optionsTraderApi = {
   },
   // The page closed: release the strikes it pinned to the feed now, rather
   // than waiting for the server's TTL.
-  release: () => api.delete('/options-trader/view'),
+  // `keepalive` so a reload or a closed tab still sends it.
+  release: () => api.delete('/options-trader/view', { keepalive: true }),
 };
