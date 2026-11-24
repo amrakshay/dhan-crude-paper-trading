@@ -324,6 +324,10 @@ class ChainViewService:
                 "vega": leg.vega,
                 "oiChange": leg.oi_change,
                 "prevClose": leg.previous_close_price,
+                # The chain's last traded price: what a basket preview prices a
+                # leg at when the book has no touch (after hours). Labelled by
+                # name so nothing mistakes it for a live LTP.
+                "chainLastPrice": leg.last_price or None,
                 "greeksSource": "dhan",
             }
             book.merge_greeks(

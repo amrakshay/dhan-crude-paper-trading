@@ -1,6 +1,6 @@
 # Options Trader: buy and sell options on any symbol, aligned to a real broker (Dhan)
 
-Status: **plan, revision 2, 2026-11-24. Phase 0 is done and Phase 1 is built on branch `feature/options-trader` (section 10).**
+Status: **plan, revision 2, 2026-11-24. Phases 0, 1 and 2 are built on branch `feature/options-trader` (sections 10 and 11). Phase 2's comparison against Dhan's own basket figures is still open: it needs your numbers.**
 
 **Goal:** behave as close to Dhan as a paper simulator can. Where this plan
 departs from Dhan, the gap is named in section 9. Revision 1 had treated
@@ -599,3 +599,39 @@ the exchange level; that is unverified.
 - Whether the expiry-day 2% ELM applies to hedged shorts.
 - The STT base on exercise (intrinsic value, by secondary sources).
 - Stamp duty and GST against their own notifications (broker-primary only).
+
+## 11. Phase 2 as built (2026-11-24)
+
+- **SPAN in practice.** The app downloads `nsccl.YYYYMMDD.s.zip`, which needs a
+  browser User-Agent. On 24-Nov the newest file was 23-Nov's, because 24-Nov's
+  was still 404 at 22:57 IST. It parses in 1.5 s (119,188 contracts, 247
+  underlyings) and is cached as a pickle. Parsing peaks at 147 MB.
+- **Margin formula.**
+  - Per underlying: margin = max(worst of the 16 scenarios + calendar spread
+    charge, SOM) + exposure + the expiry-day add-on.
+  - On expiry day the expiring legs are scanned separately, so they get no
+    calendar benefit.
+  - **Blocked = margin − net option value.** NSE credits NOV to net worth
+    rather than inside SPAN. The result is that a long blocks only its
+    premium, and a short's premium stays unspendable, matching Dhan's
+    "receivable not considered" rule.
+- **Figures on the 2026-11-23 file** (NIFTY 01-Dec, 1 lot of 65):
+
+| Position | Margin (SPAN + exposure) | Blocked |
+|---|---|---|
+| Short 25350 CE | ₹1,70,613 | ₹1,87,744 |
+| Long 25350 CE | ₹17,131 (= premium) | ₹0 |
+| Bear call 25350/25550 | ₹40,010 | ₹45,584 |
+| Short strangle 25800 CE / 24900 PE | ₹1,80,618 | ₹1,92,422 |
+| Iron condor | ₹73,943 | ₹78,652 |
+| RELIANCE short 1350 PE (lot 500) | ₹96,592 | ₹1,16,092 |
+
+  SPAN on the strangle (₹1,17,790) is below the call alone (₹1,24,290),
+  because the short put gains in the rally scenario. That is correct SPAN
+  behaviour.
+
+- **Still needed for the P2 exit gate:** your 5–10 baskets from Dhan's own
+  basket screen, priced on the same day, so these can be compared. Until then
+  "aligned to Dhan" is unverified.
+- **Known simplification:** risk arrays are end-of-day; live prices move only
+  the NOV and the exposure notional. Intraday SPAN snapshots are Phase 5.

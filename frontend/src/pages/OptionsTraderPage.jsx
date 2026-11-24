@@ -20,19 +20,18 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { optionsTraderApi } from '../api/optionsTrader';
-import { positionsApi } from '../api/trading';
 import { useMarketFeed } from '../market/MarketFeedContext';
 import { useActivePortfolio } from '../portfolios/ActivePortfolioContext';
 import SyntheticBanner from '../components/SyntheticBanner';
-import OrderTicket from '../components/OrderTicket';
-import { chipTone } from '../theme/chipTone';
-import { formatCompact, formatPrice, formatQty, formatSignedPrice } from '../utils/format';
+import OptionsBasket from '../components/OptionsBasket';
+import OptionPositionGroups from '../components/OptionPositionGroups';
+import { formatCompact, formatPrice, formatQty } from '../utils/format';
 
 /**
  * NSE Options Trader (OPTIONS_TRADER_PLAN.md, Phase 1).
  *
- * Any NSE index or F&O stock's chain, and single-leg orders on it, in the
- * active portfolio. The layout follows the mock the owner reviewed
+ * Any NSE index or F&O stock's chain; B and S add legs to a basket that is
+ * previewed on NSE SPAN and placed leg by leg, buys first (Phase 2). The layout follows the mock the owner reviewed
  * (mocks/options-trader/index.html); the colours do NOT -- everything here is
  * `theme.palette.*` / `theme.market.*` (frontend/CLAUDE.md section 1).
  *
@@ -43,22 +42,8 @@ import { formatCompact, formatPrice, formatQty, formatSignedPrice } from '../uti
  *    also returned by the chain endpoint, polled at CHAIN_POLL_MS -- that poll
  *    is also what keeps the pin alive. It is NOT tick data (section 2).
  */
-const STRATEGY_KEY = 'nse-options-trader';
 const CHAIN_POLL_MS = 10000;
-const POSITIONS_POLL_MS = 2000;
 
-const PRODUCTS = [
-  {
-    value: 'CARRYFORWARD',
-    label: 'Carry-forward',
-    help: 'Held until you exit it, or until expiry.',
-  },
-  {
-    value: 'INTRADAY',
-    label: 'Intraday',
-    help: "Dhan squares Intraday F&O positions off at 15:25 IST. (This simulator's risk desk arrives in Phase 3.)",
-  },
-];
 
 function num(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -69,7 +54,7 @@ function firstDefined(...values) {
   return values.find((value) => value !== null && value !== undefined);
 }
 
-/** B / S on one side of a strike. Opens the ticket; never places directly. */
+/** B / S on one side of a strike: adds a leg to the basket; never places. */
 function TradeButtons({ contract, onTrade }) {
   const theme = useTheme();
   if (!contract) return null;
@@ -226,132 +211,6 @@ function Chain({ chain, onTrade }) {
   );
 }
 
-function OpenPositions({ portfolioId, refreshKey }) {
-  const theme = useTheme();
-  const [positions, setPositions] = useState(null);
-  const [error, setError] = useState(null);
-  const [closing, setClosing] = useState(null);
-  const { refresh: refreshPortfolio } = useActivePortfolio();
-
-  const load = useCallback(async () => {
-    if (!portfolioId) return;
-    try {
-      const data = await positionsApi.list(false, portfolioId);
-      const rows = (data?.positions ?? data ?? []).filter(
-        (one) => one.strategyKey === STRATEGY_KEY && one.netQuantity !== 0,
-      );
-      setPositions(rows);
-      setError(null);
-    } catch (loadError) {
-      setError(loadError.message);
-    }
-  }, [portfolioId]);
-
-  useEffect(() => {
-    load();
-    const timer = window.setInterval(load, POSITIONS_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [load, refreshKey]);
-
-  const exit = async (position) => {
-    setClosing(position.id);
-    try {
-      await positionsApi.close(position.id, { orderType: 'MARKET' });
-      refreshPortfolio?.();
-      await load();
-    } catch (exitError) {
-      setError(exitError.message);
-    } finally {
-      setClosing(null);
-    }
-  };
-
-  return (
-    <Card variant="outlined">
-      <CardContent>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-          <Typography variant="h5">Open option positions</Typography>
-          <Typography variant="caption" color="text.secondary">
-            in the active portfolio · this module only · full history on Positions
-          </Typography>
-        </Stack>
-        {error ? <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert> : null}
-        {positions === null ? (
-          <CircularProgress size={20} />
-        ) : positions.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No open option positions in this portfolio.
-          </Typography>
-        ) : (
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Contract</TableCell>
-                <TableCell>Product</TableCell>
-                <TableCell align="right">Net qty</TableCell>
-                <TableCell align="right">Avg</TableCell>
-                <TableCell align="right">Mark</TableCell>
-                <TableCell align="right">Unrealised P&amp;L</TableCell>
-                <TableCell />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {positions.map((position) => {
-                const pnl = position.unrealizedPnl === null ? null : Number(position.unrealizedPnl);
-                const long = position.netQuantity > 0;
-                return (
-                  <TableRow key={position.id} className="numeric">
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={long ? 'LONG' : 'SHORT'}
-                        sx={{ mr: 1, ...chipTone(theme, long ? 'done' : 'problem') }}
-                      />
-                      {position.tradingSymbol}
-                    </TableCell>
-                    <TableCell>
-                      {position.product ? (
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label={position.product === 'INTRADAY' ? 'Intraday' : 'Carry-forward'}
-                          sx={chipTone(theme, position.product === 'INTRADAY' ? 'pending' : 'neutral')}
-                        />
-                      ) : '—'}
-                    </TableCell>
-                    <TableCell align="right">{formatQty(position.netQuantity)}</TableCell>
-                    <TableCell align="right">{formatPrice(position.averagePrice)}</TableCell>
-                    <TableCell align="right">
-                      {position.hasMark ? formatPrice(position.markPrice) : 'no mark'}
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      sx={{ color: pnl === null ? 'text.secondary' : pnl >= 0 ? theme.market.up : theme.market.down }}
-                    >
-                      {pnl === null ? 'no mark' : formatSignedPrice(pnl)}
-                    </TableCell>
-                    <TableCell align="right">
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={closing === position.id}
-                        onClick={() => exit(position)}
-                      >
-                        Exit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 export default function OptionsTraderPage() {
   const theme = useTheme();
   const { activeId: portfolioId, active: portfolio } = useActivePortfolio();
@@ -361,8 +220,9 @@ export default function OptionsTraderPage() {
   const [chain, setChain] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [ticket, setTicket] = useState(null);
+  const [legs, setLegs] = useState([]);
   const [placedCount, setPlacedCount] = useState(0);
+  const [notice, setNotice] = useState(null);
   const requestSeq = useRef(0);
 
   useEffect(() => {
@@ -412,7 +272,36 @@ export default function OptionsTraderPage() {
   }, []);
 
   const selected = underlyings?.find((one) => one.symbol === symbol) ?? null;
-  const onTrade = useCallback((contract, side) => setTicket({ contract, side }), []);
+  // B / S add a leg. A basket holds ONE underlying: the payoff and the SPAN
+  // preview are about one book of risk, and mixing two would mislead both.
+  const onTrade = useCallback(
+    (contract, side) => {
+      const row = chain?.rows.find((one) => one.call?.securityId === contract.securityId || one.put?.securityId === contract.securityId);
+      const optionType = row?.call?.securityId === contract.securityId ? 'CE' : 'PE';
+      const leg = {
+        securityId: contract.securityId,
+        tradingSymbol: contract.tradingSymbol,
+        underlying: chain?.underlying?.symbol,
+        side,
+        lots: 1,
+        lotSize: contract.lotSize,
+        orderType: 'MARKET',
+        limitPrice: '',
+        optionType,
+        strike: row?.strike,
+        price: contract.ltp ?? contract.chainLtp ?? null,
+      };
+      setLegs((current) => {
+        if (current.length && current[0].underlying !== leg.underlying) {
+          setNotice(`Basket cleared: a basket holds one underlying (${leg.underlying} now).`);
+          return [leg];
+        }
+        setNotice(null);
+        return [...current, leg];
+      });
+    },
+    [chain],
+  );
 
   return (
     <Stack spacing={2}>
@@ -486,37 +375,46 @@ export default function OptionsTraderPage() {
         </Alert>
       ) : null}
 
-      <Card variant="outlined">
-        {loading && !chain ? (
-          <Box sx={{ p: 3, textAlign: 'center' }}>
-            <CircularProgress size={24} />
-          </Box>
-        ) : chain ? (
-          <Chain chain={chain} onTrade={onTrade} />
-        ) : null}
-        {chain ? (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', p: 1 }}>
-            ATM ± {chain.strikeWindow} strikes are on the live feed. IV and Δ come from Dhan's
-            option chain; prices stream from the feed.
-          </Typography>
-        ) : null}
-      </Card>
+      {notice ? <Alert severity="info" onClose={() => setNotice(null)}>{notice}</Alert> : null}
 
-      {portfolioId ? <OpenPositions portfolioId={portfolioId} refreshKey={placedCount} /> : (
+      <Box
+        sx={{
+          display: 'grid',
+          gap: 2,
+          gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 440px' },
+          alignItems: 'start',
+        }}
+      >
+        <Card variant="outlined" sx={{ minWidth: 0 }}>
+          {loading && !chain ? (
+            <Box sx={{ p: 3, textAlign: 'center' }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : chain ? (
+            <Chain chain={chain} onTrade={onTrade} />
+          ) : null}
+          {chain ? (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', p: 1 }}>
+              ATM ± {chain.strikeWindow} strikes are on the live feed. IV and Δ come from Dhan's
+              option chain; prices stream from the feed.
+            </Typography>
+          ) : null}
+        </Card>
+        <Box sx={{ position: { lg: 'sticky' }, top: { lg: 80 } }}>
+          <OptionsBasket
+            legs={legs}
+            setLegs={setLegs}
+            spot={chain?.spot ?? null}
+            onPlaced={() => setPlacedCount((count) => count + 1)}
+          />
+        </Box>
+      </Box>
+
+      {portfolioId ? (
+        <OptionPositionGroups refreshKey={placedCount} />
+      ) : (
         <Alert severity="info">Select a portfolio in the header to trade.</Alert>
       )}
-
-      <OrderTicket
-        open={!!ticket}
-        contract={ticket?.contract}
-        defaultSide={ticket?.side ?? 'BUY'}
-        onClose={() => setTicket(null)}
-        onPlaced={() => setPlacedCount((count) => count + 1)}
-        products={PRODUCTS}
-        defaultProduct="CARRYFORWARD"
-        quantityUnit="units"
-        quantityUnitShort="units"
-      />
     </Stack>
   );
 }
