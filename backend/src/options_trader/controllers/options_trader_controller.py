@@ -137,16 +137,27 @@ class OptionsTraderController:
         from src.options.services.option_margin_service import card_for
         from src.options.services.risk_desk import get_risk_desk
 
+        from src.core.time_utils import ist_now
+        from src.options.services.expiry_service import ExpiryService
+
         self._enabled()
         rows = await RiskActionRepository(self.session).recent(portfolio_id, limit=50)
         card = card_for(STRATEGY_KEY)
+        expiries = await ExpiryService(self.session, card).upcoming(portfolio_id, ist_now())
         return {
             "status": get_risk_desk().status(),
             "rules": {
                 "intradaySquareOffAt": card.intraday_square_off_at.strftime("%H:%M"),
                 "intradayEntryCutoffAt": card.intraday_entry_cutoff_at.strftime("%H:%M"),
                 "mtmLossFraction": card.mtm_loss_fraction,
+                "noFreshStockOptionsOnExpiry": card.no_fresh_stock_options_on_expiry,
+                "deliveryMarginFrom": card.delivery_margin_from.strftime("%H:%M"),
+                "deliveryMarginFraction": card.delivery_margin_fraction,
+                "settleAfter": card.settle_after.strftime("%H:%M"),
+                "physicalDeliveryChargeRate": card.physical_delivery_charge_rate,
+                "exerciseFeePerOrder": card.exercise_fee_per_order,
             },
+            "expiries": expiries,
             "actions": [
                 {
                     "id": row.id,

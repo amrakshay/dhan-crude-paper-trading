@@ -97,6 +97,7 @@ class BalanceService:
         self._book = book
         # The last SPAN computation, for surfaces that show its breakdown.
         self.last_span_margin = None
+        self.last_delivery_margin = 0.0
 
     @property
     def book(self):
@@ -238,7 +239,23 @@ class BalanceService:
             )
             return ZERO, None
         self.last_span_margin = margin
-        return Decimal(str(round(margin.blocked, 2))), margin
+        blocked = margin.blocked
+        # Dhan: 100% of contract value from 10:00 on expiry day for an
+        # in-the-money stock option that will BUY shares (src/options/
+        # services/expiry_service.py). Zero on every other day.
+        try:
+            from src.core.time_utils import ist_now
+            from src.options.services.expiry_service import ExpiryService
+            from src.options.services.option_margin_service import OptionMarginService as _OMS
+
+            card = _OMS._default_card()
+            self.last_delivery_margin = await ExpiryService(
+                self.session, card, book=self.book
+            ).delivery_margin(portfolio_id, ist_now())
+            blocked += self.last_delivery_margin
+        except Exception:  # noqa: BLE001 - an estimate that cannot be made is logged, not zero
+            logger.exception("Delivery margin for portfolio %s could not be computed", portfolio_id)
+        return Decimal(str(round(blocked, 2))), margin
 
     async def available_balance(self, portfolio_id: int) -> Decimal:
         """What can be spent or withdrawn right now.

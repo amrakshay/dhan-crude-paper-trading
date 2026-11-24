@@ -721,3 +721,57 @@ here as 80% of the blocked option margin.
 System Health, and the page panel rendered. A live square-off needs market
 hours; the 11 tests in `tests/test_options_risk_desk.py` drive every rule with
 a fixed IST clock on the real-file SPAN fixture.
+
+## 14. Phase 4 as built (2026-11-24): expiry, on Dhan's rule
+
+Decision on 2026-11-24: follow **Dhan's own expiry rule**, not NSE's E-4
+margin ramp. Its values are in the margin card's `expiry_settlement` block.
+The logic is in `src/options/services/expiry_service.py`, which is engine
+code and names no strategy. It is run by the risk desk's task.
+
+| When | Stock options (physically settled) | Index options (cash-settled) |
+|---|---|---|
+| Expiry day, all session | No FRESH position of any product. Closing is allowed, including a plain SELL against a long. | Trade as normal |
+| Expiry day, from 10:00 | ITM and would BUY shares (long call, short put): 100% of contract value blocked. Obligations that cannot be met are closed by the risk desk (`PHYSICAL_DELIVERY`): a SELL of shares not held in that portfolio, or a BUY the portfolio cannot fund. | — |
+| After 15:45 (or any later pass) | ITM: the option closes at **0**, and the shares trade at the **strike** on the `nse-equity-delivery` card. OTM: the option closes at 0. | ITM: closed at intrinsic value against the official close. OTM: closed at 0. |
+
+- **Charges on exercise.**
+  - ₹20 exercise/assignment fee, plus GST on it.
+  - STT on exercise, from the strategy's own card: 0.15% of intrinsic value, long side only.
+  - 0.10% physical delivery charge on the contract value of contracts settled by delivery.
+- **Why the option closes at 0 when the shares are delivered.** Closing it at
+  intrinsic and also trading the shares at the strike would count the gain
+  twice. Closing at 0 puts the gain on the share position instead, and the
+  total P&L comes out the same.
+- **A sell obligation with no shares at settlement is cash-settled at
+  intrinsic, and its order says so.** This happens only if the 10:00 rule
+  could not act, for example because the desk was down. NSE would auction the
+  shortfall at a penalty, and this simulator cannot price that.
+- **The close is fetched, never guessed.** It is the underlying's daily bar
+  from `/charts/historical` (already allowlisted; IDX_I id for an index,
+  NSE_EQ id for a stock).
+  - If the bar is not published yet, or the call fails, settlement WAITS.
+  - The wait is journalled once a day, and the next pass tries again, even
+    after a restart the next morning.
+- **Settlement fills are ordinary orders.**
+  - `OrderService.record_off_market_fill` writes them with `order_type`
+    EXPIRY or DELIVERY, at a stated price.
+  - So positions, the cash ledger and P&L treat them like any other trade.
+- **Upcoming expiries are on the page.** The risk-desk card lists every
+  position expiring within 7 days and what expiry would do to it at today's
+  price.
+- **Fixed in passing.** The 15:23 Intraday cut-off refused a plain SELL that
+  closed an Intraday long. Both "new position only" rules now look at the
+  open position, not the client's `isCloseOrder` flag.
+
+**Unverified:**
+- The time of Dhan's own expiry-day square-off of undeliverable positions.
+  10:00 here is the time its margin rule starts, not a documented square-off
+  time.
+- Whether Dhan charges the ₹20 fee per order or per contract. It is applied
+  once per settled position.
+- How the first real settlement looks. That can only be checked on a real
+  expiry date, against a real Dhan contract note.
+
+**Tested:** 15 tests in `tests/test_options_expiry.py`, run with a fixed IST
+clock and a fake closing-price provider.

@@ -37,9 +37,11 @@ from src.core.time_utils import ist_now
 from src.database.session import session_scope
 from src.logging_config import get_logger
 from src.options.database.db_models.risk_action_model import (
+    RULE_EXPIRY_SETTLEMENT,
     RULE_INTRADAY_SQUARE_OFF,
     RULE_MARGIN_SHORTFALL,
     RULE_MTM_LOSS,
+    RULE_PHYSICAL_DELIVERY,
 )
 from src.options.database.db_operations.risk_action_repository import RiskActionRepository
 from src.strategies.services.strategy_definition import MarginModel
@@ -125,8 +127,10 @@ class RiskDesk:
                 logger.exception("Options risk desk pass failed")
 
     # --- one pass --------------------------------------------------------------
-    async def run_once(self, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        """One pass over every portfolio holding SPAN-margined options."""
+    async def run_once(self, now: Optional[datetime] = None, price_provider=None) -> List[Dict[str, Any]]:
+        """One pass: settle what has expired (any hour), then -- while the
+        market is open -- the intraday, delivery, MTM and shortfall rules."""
+        from src.options.services.expiry_service import ExpiryService
         from src.options.services.option_margin_service import load_card
         from src.strategies.services import market_clock
 
@@ -136,10 +140,13 @@ class RiskDesk:
         strategies = span_strategies()
         if not strategies:
             return []
-        if not any(market_clock.is_market_open(strategy, now) for strategy in strategies):
-            return []
         card = load_card(strategies[0].margin.card)
         keys = {strategy.key for strategy in strategies}
+        index_scrips: Dict[str, int] = {}
+        for strategy in strategies:
+            for symbol, scrip in (strategy.module_section("options").get("index_underlyings") or {}).items():
+                index_scrips[str(symbol).upper()] = int(scrip)
+        market_open = any(market_clock.is_market_open(strategy, now) for strategy in strategies)
 
         taken: List[Dict[str, Any]] = []
         async with session_scope() as session:
@@ -147,28 +154,64 @@ class RiskDesk:
                 PositionRepository,
             )
 
-            open_positions = [
-                position for position in await PositionRepository(session).list_all(include_closed=False)
-                if position.strategy_key in keys and position.option_type and int(position.net_quantity or 0)
-            ]
-            portfolios = sorted({int(position.portfolio_id) for position in open_positions})
-            for portfolio_id in portfolios:
-                mine = [position for position in open_positions if int(position.portfolio_id) == portfolio_id]
-                for rule in (RULE_INTRADAY_SQUARE_OFF, RULE_MTM_LOSS, RULE_MARGIN_SHORTFALL):
-                    action = await self._apply(session, rule, portfolio_id, mine, card, now)
-                    if action is not None:
-                        taken.append(action)
-                        # Positions changed; the next rule re-reads them.
-                        mine = [
-                            position for position in await PositionRepository(session).list_open(portfolio_id=portfolio_id)
-                            if position.strategy_key in keys and position.option_type and int(position.net_quantity or 0)
-                        ]
-                        if not mine:
-                            break
+            async def load_open():
+                return [
+                    position for position in await PositionRepository(session).list_all(include_closed=False)
+                    if position.strategy_key in keys and position.option_type and int(position.net_quantity or 0)
+                ]
+
+            open_positions = await load_open()
+
+            # 1. Settlement: any hour, so a restart after the close still
+            #    settles, and a position left open past its expiry is caught.
+            expiry = ExpiryService(session, card, book=self.book, price_provider=price_provider)
+            settled = await expiry.settle_due(open_positions, now, index_scrips)
+            if settled:
+                taken.extend(await self._record_settlement(session, settled, open_positions, now))
+                open_positions = await load_open()
+
+            if market_open:
+                portfolios = sorted({int(position.portfolio_id) for position in open_positions})
+                for portfolio_id in portfolios:
+                    mine = [position for position in open_positions if int(position.portfolio_id) == portfolio_id]
+                    for rule in (RULE_INTRADAY_SQUARE_OFF, RULE_PHYSICAL_DELIVERY, RULE_MTM_LOSS, RULE_MARGIN_SHORTFALL):
+                        action = await self._apply(session, rule, portfolio_id, mine, card, now)
+                        if action is not None:
+                            taken.append(action)
+                            mine = [
+                                position for position in await PositionRepository(session).list_open(portfolio_id=portfolio_id)
+                                if position.strategy_key in keys and position.option_type and int(position.net_quantity or 0)
+                            ]
+                            if not mine:
+                                break
             if taken:
                 await session.commit()
         self.actions += len(taken)
         return taken
+
+    async def _record_settlement(self, session, settled, positions, now) -> List[Dict[str, Any]]:
+        """One journal row (and alert) per portfolio for what expiry settled."""
+        by_portfolio: Dict[int, List[Dict[str, Any]]] = {}
+        for row in settled:
+            by_portfolio.setdefault(int(row["portfolioId"]), []).append(row)
+        actions = []
+        for portfolio_id, rows in by_portfolio.items():
+            done = [row for row in rows if row["outcome"] in ("SETTLED", "DELIVERED")]
+            waiting = [row for row in rows if row["outcome"] == "WAITING"]
+            if not done and waiting and self._acted.get((portfolio_id, "WAITING")) == now.date():
+                continue   # already said today that it is waiting
+            if waiting and not done:
+                self._acted[(portfolio_id, "WAITING")] = now.date()
+            outcome = "DONE" if not waiting else ("FAILED" if not done else "PARTIAL")
+            detail = (
+                f"Expiry settlement: {len([r for r in done if r['outcome'] == 'SETTLED'])} option position(s) "
+                f"settled, {len([r for r in done if r['outcome'] == 'DELIVERED'])} share delivery(ies)"
+                + (f"; {len(waiting)} waiting for the official close" if waiting else "")
+                + "."
+            )
+            actions.append(await self._journal(session, RULE_EXPIRY_SETTLEMENT, portfolio_id, detail,
+                                               rows, outcome, None, None, now))
+        return actions
 
     async def _apply(self, session, rule, portfolio_id, positions, card, now):
         key = (portfolio_id, rule)
@@ -187,6 +230,34 @@ class RiskDesk:
                 f"{len(targets)} Intraday option position(s) closed, shorts first."
             )
             return await self._exit(session, rule, portfolio_id, lambda position, _i: position.id in targets,
+                                    detail, None, None, now)
+
+        if rule == RULE_PHYSICAL_DELIVERY:
+            from src.options.services.expiry_service import ExpiryService
+            from src.portfolios.services.balance_service import BalanceService
+
+            if now.time() < card.delivery_margin_from:
+                return None
+            if not any(position.expiry_date == now.date() for position in positions):
+                return None
+            balance = await BalanceService(session, book=self.book).balance_for(portfolio_id)
+            refused = await ExpiryService(session, card, book=self.book).undeliverable(
+                portfolio_id, now, float(balance.available)
+            )
+            if not refused:
+                return None
+            ids = {item["position"].id for item in refused}
+            reasons = "; ".join(
+                f"{item['instrument'].trading_symbol}: "
+                + ("no shares to deliver" if item["obligation"] == "SELL_SHARES" else
+                   f"cannot fund delivery of {item['contractValue']:,.0f}")
+                for item in refused
+            )
+            detail = (
+                f"Physical delivery from {card.delivery_margin_from:%H:%M} on expiry day: "
+                f"obligations that cannot be met closed ({reasons})."
+            )
+            return await self._exit(session, rule, portfolio_id, lambda position, _i: position.id in ids,
                                     detail, None, None, now)
 
         if rule == RULE_MTM_LOSS:
@@ -252,7 +323,6 @@ class RiskDesk:
         return total
 
     async def _exit(self, session, rule, portfolio_id, predicate, detail, measured, threshold, now):
-        from src.connections.services.alert_service import AlertService
         from src.options.services.basket_service import BasketService
 
         reason = f"Risk desk: {rule.replace('_', ' ').lower()}"
@@ -267,6 +337,11 @@ class RiskDesk:
             self._attempted.pop(key, None)
         else:
             self._attempted[key] = time.monotonic()
+        return await self._journal(session, rule, portfolio_id, detail, orders, outcome, measured, threshold, now)
+
+    async def _journal(self, session, rule, portfolio_id, detail, orders, outcome, measured, threshold, now):
+        from src.connections.services.alert_service import AlertService
+
         strategy_keys = sorted({order["strategyKey"] for order in orders if order.get("strategyKey")})
         row = await RiskActionRepository(session).add(
             portfolio_id=portfolio_id,
@@ -285,7 +360,7 @@ class RiskDesk:
                 severity=severity,
                 title=f"Risk desk: {rule.replace('_', ' ').title()} ({outcome})",
                 body=f"Portfolio {portfolio_id}. {detail} Orders: "
-                + ", ".join(f"{o['side']} {o['quantity']} {o['tradingSymbol']} -> {o['outcome']}" for o in orders),
+                + ", ".join(f"{o.get('side', '')} {o.get('quantity', '')} {o['tradingSymbol']} -> {o['outcome']}" for o in orders),
                 dedupe_key=f"health|{ALERT_EVENT}|{rule}|{portfolio_id}|{now.date().isoformat()}|{outcome}",
                 strategy_key=strategy_key,
             )

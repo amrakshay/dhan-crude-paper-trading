@@ -404,11 +404,14 @@ RULES: Tuple[AlertRule, ...] = (
     ),
     AlertRule(
         key=EVENT_OPTIONS_RMS,
-        title="The risk desk squared off option positions",
+        title="The risk desk closed or settled option positions",
         trigger=(
-            "The options risk desk closed positions on its own: the 15:25 "
-            "Intraday square-off, an unrealised loss of 80% of the option "
-            "book's margin, or a margin shortfall (available below zero)."
+            "The options risk desk acted on its own: the 15:25 Intraday "
+            "square-off, an unrealised loss of 80% of the option book's "
+            "margin, a margin shortfall (available below zero), an expiry-day "
+            "delivery obligation that could not be met (from 10:00), or the "
+            "after-close settlement of options that expired -- including when "
+            "settlement is WAITING for the official close."
         ),
         why=(
             "A broker's risk desk acts without asking, and so does this one. "

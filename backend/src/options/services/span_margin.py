@@ -206,6 +206,16 @@ class MarginCard:
         self.intraday_square_off_at = _hhmm(desk.get("intraday_square_off_at", "15:25"))
         self.intraday_entry_cutoff_at = _hhmm(desk.get("intraday_entry_cutoff_at", "15:23"))
         self.mtm_loss_fraction = float(desk.get("mtm_loss_fraction", 0.80))
+        expiry = document.get("expiry_settlement") or {}
+        self.no_fresh_stock_options_on_expiry = bool(
+            expiry.get("no_fresh_stock_option_positions_on_expiry_day", True)
+        )
+        self.delivery_margin_from = _hhmm(expiry.get("delivery_margin_from", "10:00"))
+        self.delivery_margin_fraction = float(expiry.get("delivery_margin_fraction", 1.0))
+        self.settle_after = _hhmm(expiry.get("settle_after", "15:45"))
+        self.exercise_fee_per_order = float(expiry.get("exercise_fee_per_order", 20.0))
+        self.physical_delivery_charge_rate = float(expiry.get("physical_delivery_charge_rate", 0.001))
+        self.delivery_rate_card = str(expiry.get("delivery_rate_card") or "nse-equity-delivery")
         parity = document.get("broker_parity") or {}
         self.broker = str(parity.get("broker") or "exchange")
         self.valuation = str(parity.get("valuation") or "live")

@@ -97,3 +97,30 @@ risk_desk:
   intraday_square_off_at: "15:25"
   intraday_entry_cutoff_at: "15:23"
   mtm_loss_fraction: 0.80
+
+expiry_settlement:
+  # How positions END (OPTIONS_TRADER_PLAN.md section 4.5, decision D4 as
+  # revised 2026-11-24 to follow DHAN's rule rather than NSE's E-4 ramp).
+  #
+  # source: https://dhan.co/risk-management-policy/ and Dhan support article
+  #   82000879978 (physical settlement), read 2026-11-24:
+  #   * no fresh stock-option position of any product on expiry day;
+  #   * to take delivery, 100% of contract value as margin before 10:00 AM on
+  #     expiry day; on a shortfall Dhan "reserves the right to square-off";
+  #   * the exact square-off time on expiry day is NOT published -- modelled
+  #     here as: from 10:00, an obligation that cannot be met is closed.
+  # source: https://dhan.co/pricing/ -- Rs 20 per executed order for options
+  #   that are exercised or assigned; 0.10% of contract value for F&O that go
+  #   to physical delivery.
+  # Index options are cash-settled at intrinsic value against the closing
+  # index value; stock options are physically settled at the strike.
+  # STT on exercise is read from the strategy's own rate card
+  # (stt.exercise_settlement_rate), not restated here.
+  # as-of: 2026-11-24   confidence: CONFIRMED (rules, fees), UNVERIFIED (square-off time)
+  no_fresh_stock_option_positions_on_expiry_day: true
+  delivery_margin_from: "10:00"
+  delivery_margin_fraction: 1.0
+  settle_after: "15:45"
+  exercise_fee_per_order: 20.00
+  physical_delivery_charge_rate: 0.001
+  delivery_rate_card: "nse-equity-delivery"

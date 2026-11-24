@@ -213,3 +213,20 @@ async def test_a_new_span_file_that_raises_margin_past_the_cash_cuts_the_largest
     assert [action["rule"] for action in actions] == ["MARGIN_SHORTFALL"]
     assert "NIFTY" in actions[0]["detail"]
     assert await _open_positions(portfolio_id) == {}
+
+
+async def test_a_plain_sell_that_closes_an_intraday_long_is_allowed_after_the_cutoff(span_book, monkeypatch):
+    """The cut-off refuses NEW positions. A SELL against an open long is a
+    close whether or not the client flagged it as one."""
+    client = span_book
+    portfolio_id = await _portfolio(client, "1000000")
+    await _open(client, portfolio_id, [("71002", "BUY")], "INTRADAY")
+    monkeypatch.setattr("src.core.time_utils.ist_now", lambda: at("15:24"))
+
+    closed = await client.post(
+        "/api/orders",
+        json={"securityId": "71002", "side": "SELL", "orderType": "MARKET", "lots": 1,
+              "portfolioId": portfolio_id, "product": "INTRADAY"},
+    )
+
+    assert closed.status_code == 201, closed.text

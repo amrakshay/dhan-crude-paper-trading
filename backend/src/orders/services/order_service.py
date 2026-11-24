@@ -352,10 +352,19 @@ class OrderService:
         if quantity <= 0:
             raise OrderValidationError("Order quantity must be positive")
 
+        # A REDUCING order is not a fresh position whatever the client called
+        # it: a plain SELL against an open long closes it. The two rules that
+        # refuse only NEW positions (the 15:23 Intraday cut-off and Dhan's
+        # expiry-day rule) must not trap a trader in one.
+        reduces = is_close_order or await self._reduces_open_position(
+            portfolio.id, instrument.security_id, side, quantity
+        )
         if product is not None and not is_close_order:
             await self._check_product_matches(portfolio.id, instrument, product)
-            if product == PRODUCT_INTRADAY:
+            if product == PRODUCT_INTRADAY and not reduces:
                 self._check_intraday_cutoff(strategy.key)
+        if not reduces:
+            await self._check_expiry_day(strategy.key, instrument)
 
         # Funds, in the validation block with every other rule rather than
         # scattered. Priced off the limit where there is one and off the live
@@ -436,6 +445,111 @@ class OrderService:
 
         await self._attempt_initial_fill(order, instrument)
         return order
+
+    async def record_off_market_fill(
+        self,
+        *,
+        instrument,
+        portfolio_id: int,
+        strategy_key: str,
+        side: str,
+        quantity: int,
+        price: Decimal,
+        reason: str,
+        is_close_order: bool,
+        order_type: str,
+        charges: Optional[tuple] = None,
+        product: Optional[str] = None,
+    ) -> Order:
+        """A fill that did NOT come from the market: expiry settlement and
+        physical delivery (OPTIONS_TRADER_PLAN.md section 4.5).
+
+        It is an ordinary `orders` row with one fill at a STATED price --
+        intrinsic value, zero for an option that expired worthless, or the
+        strike for shares delivered -- so positions, the cash ledger and the
+        P&L replay (`pnl_service`) treat it exactly like any other trade and
+        agree by construction. It never touches the book or the fill
+        simulator: there is no market to cross at settlement.
+
+        `charges` is `(turnover, [ChargeComponent], rates_version)` when the
+        settlement's charges are not a normal order's (STT on exercise, the
+        broker's exercise fee); None charges it on the strategy's own card.
+        `order_type` is a short label ("EXPIRY", "DELIVERY") so the order
+        history says what it was.
+        """
+        now = utc_now()
+        order = Order(
+            client_order_id=uuid.uuid4().hex,
+            strategy_key=strategy_key,
+            portfolio_id=int(portfolio_id),
+            security_id=instrument.security_id,
+            trading_symbol=instrument.trading_symbol,
+            expiry_date=instrument.expiry_date,
+            strike_price=instrument.strike_price,
+            option_type=instrument.option_type,
+            lot_size=int(instrument.lot_size),
+            side=str(side).upper(),
+            order_type=str(order_type)[:8],
+            lots=max(1, int(quantity) // max(int(instrument.lot_size), 1)),
+            quantity=int(quantity),
+            limit_price=None,
+            status=OrderStatus.PENDING.value,
+            filled_quantity=0,
+            average_fill_price=None,
+            is_close_order=is_close_order,
+            product=product,
+            placed_at=now,
+            last_event_at=now,
+        )
+        self.orders.session.add(order)
+        await self.orders.session.flush()
+        await self.orders.add_event(
+            order, "PLACED", OrderStatus.PENDING.value, now,
+            price=Decimal(str(price)), quantity=int(quantity), message=reason[:255],
+        )
+        if charges is not None:
+            if not hasattr(self, "_charge_overrides"):
+                self._charge_overrides = {}
+            self._charge_overrides[order.id] = charges
+        fill = fill_simulator.SimulatedFill(
+            price=Decimal(str(price)), quantity=int(quantity), book_level=0,
+            slippage_ticks=0, reference_price=Decimal(str(price)),
+        )
+        await self._apply_fills(order, fill_simulator.FillResult(fills=[fill]))
+        await self._finalise(
+            order, OrderStatus.FILLED.value, OrderStatus.PARTIALLY_FILLED.value,
+            terminal_when_incomplete=True, message=reason[:255],
+        )
+        return order
+
+    async def _reduces_open_position(self, portfolio_id: int, security_id, side: str, quantity: int) -> bool:
+        """True when this order only shrinks the portfolio's open position."""
+        from src.positions.database.db_operations.position_repository import (
+            PositionRepository,
+        )
+
+        position = await PositionRepository(self.orders.session).get_open_for_security(
+            int(portfolio_id), str(security_id)
+        )
+        net = int(position.net_quantity or 0) if position is not None else 0
+        if not net:
+            return False
+        opposite = (net > 0 and side == OrderSide.SELL.value) or (net < 0 and side == OrderSide.BUY.value)
+        return opposite and int(quantity) <= abs(net)
+
+    async def _check_expiry_day(self, strategy_key: str, instrument) -> None:
+        """Dhan: no fresh stock-option position of any product on expiry day."""
+        from src.core.time_utils import ist_now
+        from src.options.services.expiry_service import ExpiryService
+        from src.options.services.option_margin_service import card_for, uses_span
+
+        if not uses_span(strategy_key):
+            return
+        refusal = ExpiryService(self.orders.session, card_for(strategy_key), book=self._book).check_fresh_position(
+            instrument, ist_now().date()
+        )
+        if refusal:
+            raise OrderValidationError(refusal)
 
     @staticmethod
     def _check_intraday_cutoff(strategy_key: str) -> None:
@@ -968,6 +1082,21 @@ class OrderService:
         order takes.
         """
         import json
+
+        override = getattr(self, "_charge_overrides", {}).get(order.id)
+        if override is not None:
+            turnover, components, version = override
+            total = sum((component.amount for component in components), Decimal("0"))
+            await self.orders.upsert_charges(
+                order,
+                {
+                    "turnover": turnover,
+                    "total_charges": total,
+                    "rates_version": version,
+                    "breakdown_json": json.dumps([component.as_dict() for component in components]),
+                },
+            )
+            return total
 
         engine = ChargesEngine.for_strategy_key(order.strategy_key)
         breakdown = engine.compute_order_charges_for_quantity(

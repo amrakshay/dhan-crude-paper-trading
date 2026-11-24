@@ -12,7 +12,14 @@ from src.database.base import Money, TimestampedModel
 RULE_INTRADAY_SQUARE_OFF = "INTRADAY_SQUARE_OFF"
 RULE_MTM_LOSS = "MTM_LOSS"
 RULE_MARGIN_SHORTFALL = "MARGIN_SHORTFALL"
-RULES = (RULE_INTRADAY_SQUARE_OFF, RULE_MTM_LOSS, RULE_MARGIN_SHORTFALL)
+# Phase 4: an expiry-day delivery obligation that cannot be met, and the
+# after-close settlement of everything that expired.
+RULE_PHYSICAL_DELIVERY = "PHYSICAL_DELIVERY"
+RULE_EXPIRY_SETTLEMENT = "EXPIRY_SETTLEMENT"
+RULES = (
+    RULE_INTRADAY_SQUARE_OFF, RULE_MTM_LOSS, RULE_MARGIN_SHORTFALL,
+    RULE_PHYSICAL_DELIVERY, RULE_EXPIRY_SETTLEMENT,
+)
 
 
 class RiskAction(TimestampedModel):
