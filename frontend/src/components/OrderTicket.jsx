@@ -41,9 +41,24 @@ import { formatPrice, formatQty } from '../utils/format';
  * -- the server refuses it anyway, but finding that out after clicking is a
  * worse way to learn it.
  */
-export default function OrderTicket({ open, contract, onClose, onPlaced, defaultSide = 'BUY' }) {
+export default function OrderTicket({
+  open,
+  contract,
+  onClose,
+  onPlaced,
+  defaultSide = 'BUY',
+  // Dhan's product choice, offered only by modules that have one (the NSE
+  // Options Trader). Omitted, the ticket sends no product, exactly as before.
+  products = null,
+  defaultProduct = null,
+  // What one unit of `lotSize` is called. MCX crude is barrels; an NSE option
+  // is a share of the underlying.
+  quantityUnit = 'barrels',
+  quantityUnitShort = 'bbl',
+}) {
   const theme = useTheme();
   const [side, setSide] = useState(defaultSide);
+  const [product, setProduct] = useState(defaultProduct);
   const [orderType, setOrderType] = useState('MARKET');
   const [lots, setLots] = useState(1);
   const [limitPrice, setLimitPrice] = useState('');
@@ -61,12 +76,13 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
   useEffect(() => {
     if (!open) return;
     setSide(defaultSide);
+    setProduct(defaultProduct);
     setOrderType('MARKET');
     setLots(1);
     setLimitPrice('');
     setPreview(null);
     setError(null);
-  }, [open, securityId, defaultSide]);
+  }, [open, securityId, defaultSide, defaultProduct]);
 
   // Seed the limit price from the touch the trader would be crossing.
   useEffect(() => {
@@ -124,6 +140,7 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
         lots: Number(lots),
         limitPrice: orderType === 'LIMIT' ? limitPrice : undefined,
         portfolioId: portfolioId ?? undefined,
+        product: product ?? undefined,
       });
       // The header's available balance has just moved.
       refreshPortfolio?.();
@@ -146,6 +163,7 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
     !placing &&
     !preview.rejectionReason &&
     !unaffordable &&
+    (!products || !!product) &&
     Number(lots) >= 1;
 
   return (
@@ -166,7 +184,7 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
             <Chip
               size="small"
               variant="outlined"
-              label={`lot ${formatQty(contract?.lotSize ?? row?.lotSize)} bbl`}
+              label={`lot ${formatQty(contract?.lotSize ?? row?.lotSize)} ${quantityUnitShort}`}
             />
           </Stack>
         </Stack>
@@ -194,6 +212,27 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
             </ToggleButton>
           </ToggleButtonGroup>
 
+          {products ? (
+            <Stack spacing={0.5}>
+              <ToggleButtonGroup
+                exclusive
+                fullWidth
+                size="small"
+                value={product}
+                onChange={(_event, value) => value && setProduct(value)}
+              >
+                {products.map((option) => (
+                  <ToggleButton key={option.value} value={option.value}>
+                    {option.label}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary">
+                {products.find((option) => option.value === product)?.help ?? ' '}
+              </Typography>
+            </Stack>
+          ) : null}
+
           <Stack direction="row" spacing={2}>
             <TextField
               label="Lots"
@@ -205,7 +244,7 @@ export default function OrderTicket({ open, contract, onClose, onPlaced, default
               inputProps={{ min: 1, step: 1 }}
               helperText={
                 contract?.lotSize
-                  ? `${formatQty(Number(lots || 0) * contract.lotSize)} barrels`
+                  ? `${formatQty(Number(lots || 0) * contract.lotSize)} ${quantityUnit}`
                   : ' '
               }
             />
