@@ -227,6 +227,10 @@ export default function OptionsTraderPage() {
   const [legs, setLegs] = useState([]);
   const [placedCount, setPlacedCount] = useState(0);
   const [notice, setNotice] = useState(null);
+  // The basket and template panel takes 440px from the chain, so it is
+  // HIDDEN until it is wanted: it opens itself when a leg is added (B / S),
+  // and the button above the chain shows or hides it.
+  const [panelOpen, setPanelOpen] = useState(false);
   const requestSeq = useRef(0);
 
   useEffect(() => {
@@ -315,6 +319,7 @@ export default function OptionsTraderPage() {
       const row = chain?.rows.find((one) => one.call?.securityId === contract.securityId || one.put?.securityId === contract.securityId);
       const optionType = row?.call?.securityId === contract.securityId ? 'CE' : 'PE';
       const leg = legFor(contract, row, optionType, side);
+      setPanelOpen(true);
       setLegs((current) => {
         if (current.length && current[0].underlying !== leg.underlying) {
           setNotice(`Basket cleared: a basket holds one underlying (${leg.underlying} now).`);
@@ -401,11 +406,23 @@ export default function OptionsTraderPage() {
 
       {notice ? <Alert severity="info" onClose={() => setNotice(null)}>{notice}</Alert> : null}
 
+      <Stack direction="row" justifyContent="flex-end">
+        <Button
+          size="small"
+          variant={panelOpen ? 'text' : 'outlined'}
+          onClick={() => setPanelOpen((open) => !open)}
+        >
+          {panelOpen
+            ? 'Hide basket & templates'
+            : `Basket & templates${legs.length ? ` (${legs.length} leg${legs.length === 1 ? '' : 's'})` : ''}`}
+        </Button>
+      </Stack>
+
       <Box
         sx={{
           display: 'grid',
           gap: 2,
-          gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 440px' },
+          gridTemplateColumns: { xs: '1fr', lg: panelOpen ? 'minmax(0, 1fr) 440px' : '1fr' },
           alignItems: 'start',
         }}
       >
@@ -424,7 +441,7 @@ export default function OptionsTraderPage() {
             </Typography>
           ) : null}
         </Card>
-        <Box sx={{ position: { lg: 'sticky' }, top: { lg: 80 } }}>
+        <Box sx={{ position: { lg: 'sticky' }, top: { lg: 80 }, display: panelOpen ? 'block' : 'none' }}>
           <Card variant="outlined" sx={{ mb: 2 }}>
             <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
               <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
