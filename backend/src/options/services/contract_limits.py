@@ -13,12 +13,22 @@ contract file (see nse_span_client.py), not from configuration:
 Two deliberate softenings, both because a refusal the exchange would not make
 is worse than an acceptance it would:
 
-  * The price range is applied only when the file is TODAY's. A range from an
-    earlier session describes yesterday's premium, not today's.
-  * NSE widens an option's range during the day when trades reach it. Where
-    the live last price is already outside the file's range, the range has
-    plainly been widened, and the check stands aside rather than refusing
-    orders at prices the market is trading.
+  * The price range is applied only from the file that SETS today's range.
+    NSE publishes the file named for session D in D's evening (20-Nov at
+    17:47 IST, 23-Nov at 19:02, read from Last-Modified on 2026-11-25); its
+    base prices are D's closes, so its range is for the NEXT session. Today's
+    range therefore comes from the newest file dated BEFORE today, and only
+    if that file is recent (`MAX_FILE_AGE_DAYS`, which spans a weekend plus a
+    holiday). A file dated today describes tomorrow. (Found live on
+    2026-11-25: the first version waited for a file dated today, which NSE
+    never publishes during the session, so the range never applied.)
+  * NSE widens an option's range during the day. Where the live last price
+    is already outside the file's range, the range has plainly moved, so it
+    is SCALED by last price / base price rather than applied as published.
+    (Found live on 2026-11-25: after a 2.3% gap-up the NIFTY 26300 CE traded
+    at 110 against a file range of 0.05-70.15. The first version stood aside
+    entirely there, and a buy limit at 5,000 went through.) The scaled range
+    is an approximation of NSE's flexing, which it does not publish.
 
 The freeze quantity is stable from session to session, so any recent file
 serves for it.
@@ -45,6 +55,12 @@ logger = get_logger("options.contract_limits")
 
 FILE_PATTERN = re.compile(r"NSE_FO_contract_(\d{8})\.csv\.gz$")
 LOOKBACK_DAYS = 7
+MAX_FILE_AGE_DAYS = 4
+
+
+def sets_range_for(file_date: date, today: date) -> bool:
+    """Whether the file published in `file_date`'s evening sets today's range."""
+    return file_date < today and (today - file_date).days <= MAX_FILE_AGE_DAYS
 
 
 @dataclass(frozen=True)
@@ -53,6 +69,7 @@ class ContractLimits:
     min_price: Decimal
     max_price: Decimal
     session: date
+    base_price: Optional[Decimal] = None
 
 
 def parse(path: str, session: date) -> Dict[str, ContractLimits]:
@@ -66,11 +83,12 @@ def parse(path: str, session: date) -> Dict[str, ContractLimits]:
                 freeze = int(float(row["MaxTradQty"]))
                 low = Decimal(row["MinPric"]) / 100
                 high = Decimal(row["MaxPric"]) / 100
+                base = Decimal(row["BasePric"]) / 100 if row.get("BasePric") else None
             except (KeyError, ValueError, ArithmeticError):
                 continue
             if freeze <= 1:
                 continue
-            found[row["FinInstrmId"]] = ContractLimits(freeze - 1, low, high, session)
+            found[row["FinInstrmId"]] = ContractLimits(freeze - 1, low, high, session, base)
     return found
 
 
@@ -175,6 +193,25 @@ def largest_order(instrument, limits: Optional[ContractLimits]) -> Optional[int]
     return (limits.max_order_quantity // lot) * lot or None
 
 
+def current_range(limits: ContractLimits, book, security_id):
+    """(low, high, note): the file's range, or that range scaled to the live
+    price when the market has already traded outside it."""
+    low, high = limits.min_price, limits.max_price
+    ltp = None
+    if book is not None:
+        row = book.get(str(security_id)) or {}
+        ltp = row.get("ltp")
+    if not ltp or low <= Decimal(str(ltp)) <= high:
+        return low, high, ""
+    if not limits.base_price or limits.base_price <= 0:
+        return None, None, ""   # moved, and nothing to scale by: do not guess
+    scale = Decimal(str(ltp)) / limits.base_price
+    tick = Decimal("0.05")
+    scaled_low = max(tick, (low * scale / tick).quantize(Decimal(1)) * tick)
+    scaled_high = (high * scale / tick).quantize(Decimal(1)) * tick
+    return scaled_low, scaled_high, " (the published range, scaled to today's price: NSE has widened it)"
+
+
 def refusal(instrument, quantity: int, order_type: str, limit_price, today: date, book=None,
             check_freeze: bool = True, check_band: bool = True) -> Optional[str]:
     """Why the exchange (and so Dhan) would reject this order, or None."""
@@ -193,18 +230,14 @@ def refusal(instrument, quantity: int, order_type: str, limit_price, today: date
         check_band
         and str(order_type).upper() == "LIMIT"
         and limit_price is not None
-        and limits.session == today
+        and sets_range_for(limits.session, today)
     ):
         price = Decimal(str(limit_price))
-        if limits.min_price <= price <= limits.max_price:
+        low, high, note = current_range(limits, book, instrument.security_id)
+        if low is None or low <= price <= high:
             return None
-        if book is not None:
-            row = book.get(str(instrument.security_id)) or {}
-            ltp = row.get("ltp")
-            if ltp and not (float(limits.min_price) <= float(ltp) <= float(limits.max_price)):
-                return None   # NSE has widened the range today; the file is behind
         return (
             f"{instrument.trading_symbol}: limit {price} is outside today's NSE price range "
-            f"{limits.min_price}-{limits.max_price}. Dhan rejects it."
+            f"{low}-{high}{note}. Dhan rejects it."
         )
     return None

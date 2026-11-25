@@ -27,6 +27,7 @@ from src.options.database.db_models.basket_model import (
     BASKET_COMPLETE,
     BASKET_PARTIAL,
     BASKET_PLACING,
+    BASKET_CANCELLED,
     BASKET_REJECTED,
     BASKET_RESTING,
 )
@@ -542,7 +543,8 @@ def _basket_status(outcomes: List[str]) -> str:
     if all(one in filled for one in outcomes):
         return BASKET_COMPLETE
     if all(one in ("REJECTED", "CANCELLED") for one in outcomes):
-        return BASKET_REJECTED
+        # A basket the trader withdrew is not one the exchange refused.
+        return BASKET_CANCELLED if "CANCELLED" in outcomes else BASKET_REJECTED
     if all(one in filled | open_ for one in outcomes):
         return BASKET_RESTING
     return BASKET_PARTIAL

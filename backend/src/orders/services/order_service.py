@@ -760,6 +760,7 @@ class OrderService:
                 lot_size=int(order.lot_size),
                 is_close_order=bool(order.is_close_order),
                 security_id=str(order.security_id),
+                exclude_order_id=order.id,
             )
             if refusal:
                 # REJECTED, not partially filled to fit. Filling what fits
@@ -882,6 +883,7 @@ class OrderService:
         lot_size: int,
         is_close_order: bool,
         security_id: Optional[str] = None,
+        exclude_order_id: Optional[int] = None,
     ) -> Optional[str]:
         """None if affordable, otherwise why not, naming the shortfall.
 
@@ -911,7 +913,7 @@ class OrderService:
 
         available = await BalanceService(
             self.orders.session, book=self._book
-        ).available_balance(portfolio_id)
+        ).available_balance(portfolio_id, exclude_order_id)
         if required <= available:
             return None
 

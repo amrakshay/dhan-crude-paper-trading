@@ -20,6 +20,7 @@ BASKET_COMPLETE = "COMPLETE"          # every leg filled
 BASKET_PARTIAL = "PARTIAL"            # some legs filled or resting, some not
 BASKET_RESTING = "RESTING"            # nothing refused, something still open
 BASKET_REJECTED = "REJECTED"          # nothing executed at all
+BASKET_CANCELLED = "CANCELLED"        # nothing executed, and the rest was withdrawn
 
 
 class OptionBasket(TimestampedModel):

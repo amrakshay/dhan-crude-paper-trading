@@ -167,7 +167,7 @@ class BalanceService:
         return _q(percent * notional)
 
     # --- the four numbers --------------------------------------------------
-    async def balance_for(self, portfolio_id: int) -> PortfolioBalance:
+    async def balance_for(self, portfolio_id: int, exclude_order_id: Optional[int] = None) -> PortfolioBalance:
         cash = await self.ledger.balance(portfolio_id)
         positions = await self.positions.list_open(portfolio_id=portfolio_id)
 
@@ -195,7 +195,7 @@ class BalanceService:
             # both cases.
             mark_to_market += Decimal(net) * mark
 
-        span_blocked, span_detail = await self._span_blocked(portfolio_id)
+        span_blocked, span_detail = await self._span_blocked(portfolio_id, exclude_order_id)
         blocked += span_blocked
 
         cash = _q(cash)
@@ -214,7 +214,34 @@ class BalanceService:
             unmarked_strategies=unmarked_strategies,
         )
 
-    async def _span_blocked(self, portfolio_id: int):
+    async def _resting_option_orders(self, portfolio_id: int, exclude_order_id: Optional[int] = None):
+        """[(security id, signed remaining units, limit price)] for option
+        orders still resting on a SPAN-margined strategy in this portfolio."""
+        from sqlalchemy import select
+
+        from src.orders.database.db_models.order_model import Order
+        from src.options.services.option_margin_service import uses_span
+
+        result = await self.session.execute(
+            select(Order).where(
+                Order.portfolio_id == int(portfolio_id),
+                Order.status.in_(["OPEN", "PARTIALLY_FILLED"]),
+                Order.completed_at.is_(None),
+                Order.option_type.is_not(None),
+            )
+        )
+        rows = []
+        for order in result.scalars().all():
+            if not uses_span(order.strategy_key) or (exclude_order_id is not None and order.id == exclude_order_id):
+                continue
+            remaining = int(order.quantity) - int(order.filled_quantity or 0)
+            if remaining <= 0:
+                continue
+            signed = remaining if order.side == "BUY" else -remaining
+            rows.append((str(order.security_id), signed, float(order.limit_price or 0)))
+        return rows
+
+    async def _span_blocked(self, portfolio_id: int, exclude_order_id: Optional[int] = None):
         """What the portfolio's NSE option book blocks under SPAN, if it has one.
 
         One computation for the whole portfolio, because SPAN nets every leg
@@ -227,7 +254,10 @@ class BalanceService:
 
         service = OptionMarginService(self.session, book=self.book)
         changes = await service.position_changes(portfolio_id)
-        if not changes:
+        # At a resting order's own fill its reservation must not count
+        # against it: it would be paying for itself twice.
+        pending = await self._resting_option_orders(portfolio_id, exclude_order_id)
+        if not changes and not pending:
             return ZERO, None
         try:
             margin = await service.for_portfolio(portfolio_id)
@@ -239,7 +269,26 @@ class BalanceService:
             )
             return ZERO, None
         self.last_span_margin = margin
-        blocked = margin.blocked
+        blocked = margin.blocked if changes else 0.0
+        if pending:
+            # Dhan blocks margin for a PENDING order as well (OPTIONS_TRADER_
+            # PLAN.md 4.4, "a resting leg blocks its margin while pending";
+            # found missing live on 2026-11-25). A resting SELL blocks what the
+            # book would add if it filled; a resting BUY blocks its premium at
+            # the limit price. A pending order never FREES margin: a resting
+            # hedge is not a hedge until it fills.
+            try:
+                from src.options.services.option_margin_service import OptionMarginService as _O
+
+                _before, after = await service.with_changes(
+                    portfolio_id, [(sid, qty) for sid, qty, _price in pending], _O._default_card()
+                )
+                self.last_pending_margin = max(0.0, after.blocked - blocked) + sum(
+                    qty * price for _sid, qty, price in pending if qty > 0
+                )
+                blocked += self.last_pending_margin
+            except Exception:  # noqa: BLE001
+                logger.exception("Margin for resting option orders in portfolio %s could not be computed", portfolio_id)
         # Dhan: 100% of contract value from 10:00 on expiry day for an
         # in-the-money stock option that will BUY shares (src/options/
         # services/expiry_service.py). Zero on every other day.
@@ -257,7 +306,7 @@ class BalanceService:
             logger.exception("Delivery margin for portfolio %s could not be computed", portfolio_id)
         return Decimal(str(round(blocked, 2))), margin
 
-    async def available_balance(self, portfolio_id: int) -> Decimal:
+    async def available_balance(self, portfolio_id: int, exclude_order_id: Optional[int] = None) -> Decimal:
         """What can be spent or withdrawn right now.
 
         Named for what it is. `get_fund_limits` is a broker SDK call and the
@@ -265,4 +314,4 @@ class BalanceService:
         reaches a broker for a balance, because the balance is paper money in a
         local table.
         """
-        return (await self.balance_for(portfolio_id)).available
+        return (await self.balance_for(portfolio_id, exclude_order_id)).available

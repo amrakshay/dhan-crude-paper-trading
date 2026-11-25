@@ -867,3 +867,58 @@ file and host have been checked.
 - `tests/test_options_order_limits.py`: 11 tests, including a real cut of
   NSE's contract file.
 - 4 new tests in `tests/test_span_store_selection.py`.
+
+### Live session, 2026-11-25 (paper trades on an isolated copy)
+
+Run during market hours on a copy of the database, on port 24611, with the
+live Dhan feed. It held one extra feed connection of Dhan's five; the
+schedulers, token renewal and Telegram were off in the copy.
+
+**Dhan re-margins on the beginning-of-day file, not on intraday snapshots.**
+NSE published i2 at 11:08. NIFTY had gapped from 25,350 (the i1 file's price)
+to about 25,920, which makes the two files very different. One lot sold, on
+10 NIFTY 01-Dec contracts and 2 RELIANCE 29-Dec contracts:
+
+| Dhan's calculator at | vs our i1 | vs our i2 |
+|---|---|---|
+| 11:10 | 0.68% mean error (worst 1.25%) | 18.4% mean error |
+| 11:17 | identical to 11:10, to the rupee | — |
+
+The `beginning_of_day` default stands. A re-check after the 12:37 snapshot
+is scheduled.
+
+**What worked:**
+- Market fills came one tick worse than the live ask (ATM call 282.65
+  against an ask of 282.60; RELIANCE call 51.35 against 51.30), as the
+  pessimistic simulator intends.
+- A 25950/26150 bear call spread filled in full, long leg first. Blocked
+  margin plus premium paid reconciled to the preview's 41,621.
+- A basket whose short was refused kept its filled hedge; nothing was rolled
+  back, as at a broker.
+- Exit all covered the short first, then sold four longs, and blocked margin
+  went to zero.
+- The freeze limit refused 28 lots of NIFTY and named 27.
+
+**Found and fixed in the same session:**
+1. **The price range never applied during the session.** NSE publishes the
+   file named for session D in D's evening, and its range is for the next
+   session. The first version waited for a file dated today. Fixed: the
+   newest file dated before today, at most 4 days old.
+2. **On a big move, the range check stood aside entirely.** After the gap-up
+   the 26300 CE traded at 110 against a published range of 0.05–70.15, and a
+   buy limit at 5,000 was accepted. Fixed: the range is scaled by last price
+   / base price (here to 0.20–275.10). This is an approximation: NSE does not
+   publish how it widens ranges.
+3. **Resting limit legs blocked no margin.** The plan said they would, as at
+   Dhan. Fixed:
+   - a resting sell blocks what it would add if filled;
+   - a resting buy blocks its premium at the limit price;
+   - a resting order never frees margin;
+   - at its own fill, its reservation is not counted against it.
+4. **A basket whose legs were all cancelled read REJECTED.** It now reads
+   CANCELLED.
+
+**Known gap, not fixed:** one contract is one position per portfolio, so a
+Carry-forward order is refused on a contract already open as Intraday. Dhan
+holds the two as separate lines. Changing this touches the positions model
+across the codebase and is its own decision.
