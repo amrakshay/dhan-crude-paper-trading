@@ -168,12 +168,14 @@ class OptionMarginService:
         )
 
         positions = await PositionRepository(self.session).list_open(portfolio_id=int(portfolio_id))
-        return [
-            (str(position.security_id), int(position.net_quantity or 0))
-            for position in positions
-            if int(position.net_quantity or 0) and uses_span(position.strategy_key)
-            and position.option_type
-        ]
+        # Summed per contract: an Intraday and a Carry-forward line in the same
+        # contract are two lines to the trader but ONE net position to the
+        # exchange, and SPAN margins the net.
+        net: Dict[str, int] = {}
+        for position in positions:
+            if int(position.net_quantity or 0) and uses_span(position.strategy_key) and position.option_type:
+                net[str(position.security_id)] = net.get(str(position.security_id), 0) + int(position.net_quantity)
+        return [(security_id, quantity) for security_id, quantity in net.items() if quantity]
 
     # --- margin ----------------------------------------------------------------
     def _compute(self, legs: List[Leg], card: MarginCard) -> PortfolioMargin:

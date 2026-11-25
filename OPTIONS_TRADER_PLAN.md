@@ -918,7 +918,29 @@ is scheduled.
 4. **A basket whose legs were all cancelled read REJECTED.** It now reads
    CANCELLED.
 
-**Known gap, not fixed:** one contract is one position per portfolio, so a
-Carry-forward order is refused on a contract already open as Intraday. Dhan
-holds the two as separate lines. Changing this touches the positions model
-across the codebase and is its own decision.
+**Intraday and Carry-forward lines (fixed the same day, on request).** A
+contract held as both products is now TWO lines, as at Dhan: each has its own
+average and P&L, and the 15:25 square-off closes only the Intraday one.
+
+- **Lookups.** `PositionRepository.get_open_for_security` takes the product
+  when the caller names one. Strategies without products pass none and are
+  unchanged.
+- **Margin.** It still nets the two lines per contract, because the exchange
+  margins the client's NET position.
+- **Orders without a product.**
+  - With one open line, the order takes that line.
+  - With two, it is refused and asks which.
+  - A close naming a line that does not exist is refused, rather than
+    opening a position on the other product.
+- **Closes and exits** (position close, Exit all, the risk desk) always name
+  the line they close.
+- **Reports.** The P&L replay keys by product too, so the report and the
+  positions agree.
+- **Verified live at 11:36:**
+  - an Intraday long and a Carry-forward short in the NIFTY 25900 CE became
+    two lines, and margin netted to zero;
+  - closing the Intraday line left the short, blocking 1,53,260 (Dhan's
+    figure for that contract: 1,54,345).
+
+**Unverified:** that Dhan's own RMS nets the two products in one contract for
+margin, as the exchange does.

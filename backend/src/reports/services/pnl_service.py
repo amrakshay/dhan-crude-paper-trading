@@ -131,7 +131,10 @@ class PnlService:
         events: List[RealisationEvent] = []
 
         for fill, order in rows:
-            key = f"{order.portfolio_id}:{order.security_id}"
+            # Per PRODUCT too, exactly as positions are keyed: an Intraday and a
+            # Carry-forward line in one contract are separate round trips, and
+            # replaying them as one would realise P&L against the wrong average.
+            key = f"{order.portfolio_id}:{order.security_id}" + (f":{order.product}" if order.product else "")
             position = positions[key]
             position.security_id = order.security_id
             quantity = int(fill.quantity)

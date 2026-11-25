@@ -356,13 +356,17 @@ class OrderService:
         # it: a plain SELL against an open long closes it. The two rules that
         # refuse only NEW positions (the 15:23 Intraday cut-off and Dhan's
         # expiry-day rule) must not trap a trader in one.
+        # WHICH LINE. Intraday and Carry-forward positions in one contract are
+        # separate lines (Dhan's model). An order that names no product on a
+        # strategy that has products is resolved from the lines that exist:
+        # one line -> that line; two -> refused, because closing "the"
+        # position would have to guess which.
+        product = await self._resolve_product(strategy.key, portfolio.id, instrument, product, is_close_order)
         reduces = is_close_order or await self._reduces_open_position(
-            portfolio.id, instrument.security_id, side, quantity
+            portfolio.id, instrument.security_id, side, quantity, product
         )
-        if product is not None and not is_close_order:
-            await self._check_product_matches(portfolio.id, instrument, product)
-            if product == PRODUCT_INTRADAY and not reduces:
-                self._check_intraday_cutoff(strategy.key)
+        if product == PRODUCT_INTRADAY and not reduces:
+            self._check_intraday_cutoff(strategy.key)
         if not reduces:
             await self._check_expiry_day(strategy.key, instrument)
         # The exchange's own limits apply to EVERY order, a close included:
@@ -544,14 +548,46 @@ class OrderService:
         if reason:
             raise OrderValidationError(reason)
 
-    async def _reduces_open_position(self, portfolio_id: int, security_id, side: str, quantity: int) -> bool:
-        """True when this order only shrinks the portfolio's open position."""
+    async def _resolve_product(self, strategy_key, portfolio_id, instrument, product, is_close_order=False):
+        from src.options.services.option_margin_service import uses_span
+        from src.positions.database.db_operations.position_repository import (
+            PositionRepository,
+        )
+
+        if not uses_span(strategy_key) or not instrument.option_type:
+            return product
+        lines = await PositionRepository(self.orders.session).list_open_lines(
+            int(portfolio_id), str(instrument.security_id)
+        )
+        products = {line.product for line in lines}
+        if product is not None:
+            # A CLOSE names a line that must exist; otherwise "close" would
+            # quietly open a new position on the other product.
+            if is_close_order and products and product not in products:
+                held = " and ".join(sorted(str(one).title() for one in products))
+                raise OrderValidationError(
+                    f"No {product.title()} position in {instrument.trading_symbol} "
+                    f"to close: it is open as {held}."
+                )
+            return product
+        if len(products) > 1:
+            raise OrderValidationError(
+                f"{instrument.trading_symbol} is open as both Intraday and "
+                f"Carry-forward in this portfolio. Say which: send the order "
+                f"with product INTRADAY or CARRYFORWARD."
+            )
+        return next(iter(products)) if products else None
+
+    async def _reduces_open_position(
+        self, portfolio_id: int, security_id, side: str, quantity: int, product: Optional[str] = None
+    ) -> bool:
+        """True when this order only shrinks the open position on ITS line."""
         from src.positions.database.db_operations.position_repository import (
             PositionRepository,
         )
 
         position = await PositionRepository(self.orders.session).get_open_for_security(
-            int(portfolio_id), str(security_id)
+            int(portfolio_id), str(security_id), product
         )
         net = int(position.net_quantity or 0) if position is not None else 0
         if not net:
@@ -597,25 +633,6 @@ class OrderService:
                 f"{card.intraday_entry_cutoff_at:%H:%M} IST: the risk desk squares "
                 f"Intraday positions off at {card.intraday_square_off_at:%H:%M}. "
                 f"Place it as Carry-forward, or exit instead."
-            )
-
-    async def _check_product_matches(self, portfolio_id: int, instrument, product: str) -> None:
-        """Refuse an opening order whose product differs from the open position's."""
-        from src.positions.database.db_operations.position_repository import (
-            PositionRepository,
-        )
-
-        position = await PositionRepository(self.orders.session).get_open_for_security(
-            portfolio_id, str(instrument.security_id)
-        )
-        if position is None or int(position.net_quantity or 0) == 0:
-            return
-        if position.product and position.product != product:
-            raise OrderValidationError(
-                f"{instrument.trading_symbol} is already open as "
-                f"{position.product.title()} in this portfolio. Dhan keeps "
-                f"Intraday and Carry-forward positions apart; exit it, or "
-                f"place this order as {position.product.title()}."
             )
 
     @staticmethod
@@ -1006,6 +1023,7 @@ class OrderService:
             strike_price=order.strike_price,
             option_type=order.option_type,
             charges=incremental_charges,
+            product=order.product,
             # The enrichment the trade alert wants and the position row cannot
             # know: which order this was, and WHY it was placed. The reason is
             # already on the PLACED event (`submit_paper_order(reason=...)`),

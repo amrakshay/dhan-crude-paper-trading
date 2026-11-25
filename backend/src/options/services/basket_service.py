@@ -453,6 +453,7 @@ class BasketService:
                         portfolio_id=int(portfolio_id),
                         reason=reason,
                         strategy_key=position.strategy_key,
+                        product=position.product,
                     )
                     row.update({"orderId": order.id, "outcome": order.status, "reason": order.rejection_reason})
                 except OrderValidationError as error:

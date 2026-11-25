@@ -15,6 +15,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from src.database.session import session_scope
 
 from src.core.time_utils import ist_today, utc_now
 from src.database.session import get_session_factory, session_scope
@@ -360,25 +361,55 @@ async def test_the_product_is_stored_on_the_order_and_the_position(trading):
     assert position.product == "INTRADAY" and position.strategy_key == KEY
 
 
-async def test_a_different_product_does_not_merge_into_an_open_position(trading):
+async def test_intraday_and_carry_forward_in_one_contract_are_two_lines(trading):
+    """Dhan keeps them apart, each with its own average and P&L (found
+    missing in the live session of 2026-11-25)."""
     client, portfolio_id, security_id = trading
     assert (await _order(client, portfolio_id, security_id, product="INTRADAY")).status_code == 201
-
-    response = await _order(client, portfolio_id, security_id, product="CARRYFORWARD")
-
-    assert response.status_code == 400
-    assert "Intraday" in response.json()["detail"]
-
-
-async def test_a_closing_order_is_not_refused_for_its_product(trading):
-    client, portfolio_id, security_id = trading
-    assert (await _order(client, portfolio_id, security_id, product="INTRADAY")).status_code == 201
-
-    response = await _order(
-        client, portfolio_id, security_id, side="SELL", product="CARRYFORWARD", isCloseOrder=True
-    )
-
+    response = await _order(client, portfolio_id, security_id, side="SELL", product="CARRYFORWARD")
     assert response.status_code == 201, response.text
+
+    async with session_scope() as session:
+        lines = await PositionRepository(session).list_open_lines(portfolio_id, security_id)
+    assert sorted((line.product, int(line.net_quantity)) for line in lines) == [("CARRYFORWARD", -65), ("INTRADAY", 65)]
+
+
+async def test_an_order_without_a_product_takes_the_only_line_and_refuses_with_two(trading):
+    client, portfolio_id, security_id = trading
+    assert (await _order(client, portfolio_id, security_id, product="INTRADAY")).status_code == 201
+
+    one_line = await client.post("/api/orders", json={"securityId": security_id, "side": "BUY", "orderType": "MARKET",
+                                                      "lots": 1, "portfolioId": portfolio_id})
+    assert one_line.status_code == 201 and one_line.json()["product"] == "INTRADAY", one_line.text
+
+    assert (await _order(client, portfolio_id, security_id, product="CARRYFORWARD")).status_code == 201
+    two_lines = await client.post("/api/orders", json={"securityId": security_id, "side": "SELL", "orderType": "MARKET",
+                                                       "lots": 1, "portfolioId": portfolio_id})
+    assert two_lines.status_code == 400 and "Say which" in two_lines.json()["detail"]
+
+
+async def test_a_close_naming_a_line_that_does_not_exist_is_refused(trading):
+    client, portfolio_id, security_id = trading
+    assert (await _order(client, portfolio_id, security_id, product="INTRADAY")).status_code == 201
+
+    response = await _order(client, portfolio_id, security_id, side="SELL", product="CARRYFORWARD", isCloseOrder=True)
+
+    assert response.status_code == 400 and "No Carryforward position" in response.json()["detail"]
+
+
+async def test_closing_a_position_closes_its_own_line(trading):
+    client, portfolio_id, security_id = trading
+    await _order(client, portfolio_id, security_id, product="INTRADAY")
+    await _order(client, portfolio_id, security_id, product="CARRYFORWARD", lots=2)
+    async with session_scope() as session:
+        lines = {line.product: line for line in await PositionRepository(session).list_open_lines(portfolio_id, security_id)}
+
+    closed = await client.post(f"/api/positions/{lines['INTRADAY'].id}/close", json={"orderType": "MARKET"})
+    assert closed.status_code == 200, closed.text
+
+    async with session_scope() as session:
+        left = await PositionRepository(session).list_open_lines(portfolio_id, security_id)
+    assert [(line.product, int(line.net_quantity)) for line in left] == [("CARRYFORWARD", 130)]
 
 
 async def test_an_unknown_product_is_refused(trading):
@@ -475,3 +506,39 @@ async def test_a_resting_order_keeps_its_contract_on_the_feed_after_the_pin_laps
         )
 
     assert ("NSE_FNO", security_id) in targets
+
+
+async def test_the_pnl_report_agrees_with_the_positions_when_both_lines_trade(trading):
+    """The replay must key by product as positions do, or a round trip on one
+    line is realised against the other line's average."""
+    client, portfolio_id, security_id = trading
+    book = get_feed_manager().book
+
+    def quote(price):
+        book.apply_packet({"security_id": security_id, "segment": 2, "ltp": price,
+                           "depth": [(5000, 5000, 9, 9, price - 0.5, price + 0.5)] + [(0, 0, 0, 0, 0.0, 0.0)] * 4})
+
+    quote(100.0)
+    await _order(client, portfolio_id, security_id, product="CARRYFORWARD")
+    quote(150.0)
+    await _order(client, portfolio_id, security_id, product="INTRADAY")
+    quote(160.0)
+    await _order(client, portfolio_id, security_id, side="SELL", product="INTRADAY", isCloseOrder=True)
+
+    async with session_scope() as session:
+        rows = [row for row in await PositionRepository(session).list_all(include_closed=True)
+                if row.portfolio_id == portfolio_id and row.security_id == security_id]
+    realised_by_positions = sum(float(row.realized_pnl) for row in rows)
+
+    from src.orders.database.db_operations.order_repository import OrderRepository
+    from src.reports.services.pnl_service import PnlService
+
+    async with session_scope() as session:
+        replay = await PnlService(OrderRepository(session)).replay_fills(portfolio_id=portfolio_id)
+    events = replay[0]
+    realised_by_report = sum(float(event.gross_pnl) for event in events)
+
+    assert realised_by_positions == pytest.approx(realised_by_report)
+    # About 9 a unit against the Intraday buy at ~150; against the blended
+    # ~125 average it would be about 35 a unit.
+    assert realised_by_positions == pytest.approx((159.5 - 150.5) * 65, abs=65), "against the Intraday buy, not the blended average"

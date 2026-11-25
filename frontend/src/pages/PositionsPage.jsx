@@ -36,6 +36,9 @@ import { useMarketFeed } from '../market/MarketFeedContext';
 import SyntheticBanner from '../components/SyntheticBanner';
 import { formatPrice, formatQty } from '../utils/format';
 
+const PRODUCT_LABEL = { INTRADAY: 'Intraday', CARRYFORWARD: 'Carry-forward' };
+const productSuffix = (position) => (position?.product ? ` · ${PRODUCT_LABEL[position.product] ?? position.product}` : '');
+
 function PnlCell({ value, hasMark = true }) {
   const theme = useTheme();
   if (value === null || value === undefined) {
@@ -271,6 +274,9 @@ export default function PositionsPage() {
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         {position.expiryDate}
+                        {/* Intraday and Carry-forward in one contract are two
+                            lines; without the product they look like a duplicate. */}
+                        {productSuffix(position)}
                       </Typography>
                       {position.strategyEnabled === false ? (
                         <Tooltip title="This strategy is switched off. The position is real and still counts, but nothing is marking it — the mark is blank rather than stale.">
@@ -340,7 +346,7 @@ export default function PositionsPage() {
               <TableBody>
                 {closedPositions.map((position) => (
                   <TableRow key={position.id} className="numeric">
-                    <TableCell>{position.tradingSymbol}</TableCell>
+                    <TableCell>{position.tradingSymbol}{productSuffix(position)}</TableCell>
                     <TableCell align="right">{formatQty(position.buyQuantity ?? 0)}</TableCell>
                     <TableCell align="right">{formatQty(position.sellQuantity ?? 0)}</TableCell>
                     <TableCell align="right">
@@ -366,7 +372,7 @@ export default function PositionsPage() {
       ) : null}
 
       <Dialog open={Boolean(closing)} onClose={() => setClosing(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Close {closing?.tradingSymbol}</DialogTitle>
+        <DialogTitle>Close {closing?.tradingSymbol}{productSuffix(closing)}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <Typography variant="body2" color="text.secondary">

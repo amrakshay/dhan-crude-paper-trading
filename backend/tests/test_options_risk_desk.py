@@ -230,3 +230,33 @@ async def test_a_plain_sell_that_closes_an_intraday_long_is_allowed_after_the_cu
     )
 
     assert closed.status_code == 201, closed.text
+
+
+async def test_at_1525_only_the_intraday_line_of_a_contract_is_squared_off(span_book):
+    """Same contract held as both products: the square-off is for Intraday
+    only, and the Carry-forward line must survive it untouched."""
+    client = span_book
+    portfolio_id = await _portfolio(client, "2000000")
+    await _open(client, portfolio_id, [("71002", "BUY")], "INTRADAY")
+    await _open(client, portfolio_id, [("71002", "BUY")], "CARRYFORWARD")
+
+    actions = await RiskDesk().run_once(now=at("15:25"))
+
+    assert [action["rule"] for action in actions] == ["INTRADAY_SQUARE_OFF"]
+    async with session_scope() as session:
+        left = await PositionRepository(session).list_open_lines(portfolio_id, "71002")
+    assert [(line.product, int(line.net_quantity)) for line in left] == [("CARRYFORWARD", 65)]
+
+
+async def test_margin_nets_the_two_lines_of_a_contract_as_the_exchange_does(span_book):
+    client = span_book
+    portfolio_id = await _portfolio(client, "2000000")
+    await _open(client, portfolio_id, [("71001", "BUY")], "INTRADAY")
+    naked = await client.post("/api/options-trader/basket/preview", json={
+        "portfolioId": portfolio_id, "product": "CARRYFORWARD",
+        "legs": [{"securityId": "71001", "side": "SELL", "lots": 1}]})
+    await _open(client, portfolio_id, [("71001", "SELL")], "CARRYFORWARD")
+
+    balance = (await client.get(f"/api/portfolios/{portfolio_id}")).json()["balance"]
+    assert Decimal(balance["blockedMargin"]) == Decimal("0.00"), "long 1 lot + short 1 lot of one contract is flat"
+    assert naked.json()["finalMargin"] < 50000, "the preview already counted the Intraday long as the hedge"

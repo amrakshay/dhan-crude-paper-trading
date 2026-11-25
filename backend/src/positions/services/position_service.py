@@ -49,6 +49,7 @@ class PositionService:
         option_type: Optional[str] = None,
         charges: Decimal = Decimal("0"),
         alert_context: Optional[dict] = None,
+        product: Optional[str] = None,
     ) -> Tuple[Position, Decimal]:
         """Apply one execution. Returns (position, realised P&L from this fill).
 
@@ -69,13 +70,15 @@ class PositionService:
 
         # Per portfolio: the same contract held in two portfolios is two
         # positions, and netting them would corrupt both books.
+        # ...and per PRODUCT where the order has one: an Intraday fill never
+        # nets against the Carry-forward line in the same contract.
         position = await self.repository.get_open_for_security(
-            portfolio_id, security_id
+            portfolio_id, security_id, product
         )
         if position is None:
             position = await self._open_position(
                 strategy_key, portfolio_id, security_id, trading_symbol, lot_size,
-                expiry_date, strike_price, option_type,
+                expiry_date, strike_price, option_type, product,
             )
 
         realized = Decimal("0")
@@ -110,7 +113,7 @@ class PositionService:
 
                 position = await self._open_position(
                     strategy_key, portfolio_id, security_id, trading_symbol,
-                    lot_size, expiry_date, strike_price, option_type,
+                    lot_size, expiry_date, strike_price, option_type, product,
                 )
                 position.net_quantity = residual if side == OrderSide.BUY.value else -residual
                 position.average_price = _q(price)
@@ -214,7 +217,7 @@ class PositionService:
 
     async def _open_position(
         self, strategy_key, portfolio_id, security_id, trading_symbol, lot_size,
-        expiry_date, strike_price, option_type,
+        expiry_date, strike_price, option_type, product=None,
     ) -> Position:
         position = Position(
             strategy_key=strategy_key,
@@ -224,6 +227,7 @@ class PositionService:
             expiry_date=expiry_date,
             strike_price=strike_price,
             option_type=option_type,
+            product=product,
             lot_size=lot_size,
             net_quantity=0,
             average_price=Decimal("0"),
