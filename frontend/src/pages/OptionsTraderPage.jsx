@@ -29,6 +29,9 @@ import OptionPositionGroups from '../components/OptionPositionGroups';
 import OptionsRiskDesk from '../components/OptionsRiskDesk';
 import OptionsRestingBaskets from '../components/OptionsRestingBaskets';
 import { TEMPLATES, pickTemplate } from '../options/templates';
+
+// The app bar is fixed (src/layout); sticky headings sit just below it.
+const APP_BAR_HEIGHT = 65;
 import { formatCompact, formatPrice, formatQty } from '../utils/format';
 
 /**
@@ -175,9 +178,20 @@ function Chain({ chain, onTrade }) {
   const rows = chain.rows.filter((row) => row.inWindow);
 
   return (
-    <TableContainer sx={{ maxHeight: 'calc(100vh - 360px)' }}>
-      <Table size="small" stickyHeader>
-        <TableHead>
+    // ONE scroll: the page's. The chain used to scroll inside its own box as
+    // well, which on a laptop meant two scrollbars. Its two heading rows now
+    // stick together under the app bar (fixed, 65px) as the PAGE scrolls; on
+    // a narrow screen the table may still scroll SIDEWAYS, never up and down.
+    <TableContainer sx={{ overflowX: { xs: 'auto', lg: 'visible' }, overflowY: 'visible' }}>
+      <Table size="small" stickyHeader sx={{ overflow: { lg: 'visible' } }}>
+        <TableHead
+          sx={{
+            position: { lg: 'sticky' },
+            top: { lg: APP_BAR_HEIGHT },
+            zIndex: 2,
+            '& th': { position: 'static' },
+          }}
+        >
           <TableRow>
             <TableCell colSpan={6} align="center" sx={{ color: theme.market.up, fontWeight: 700 }}>
               CALLS
@@ -426,7 +440,7 @@ export default function OptionsTraderPage() {
           alignItems: 'start',
         }}
       >
-        <Card variant="outlined" sx={{ minWidth: 0 }}>
+        <Card variant="outlined" sx={{ minWidth: 0, overflow: 'visible' }}>
           {loading && !chain ? (
             <Box sx={{ p: 3, textAlign: 'center' }}>
               <CircularProgress size={24} />
