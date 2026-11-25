@@ -884,8 +884,11 @@ to about 25,920, which makes the two files very different. One lot sold, on
 | 11:10 | 0.68% mean error (worst 1.25%) | 18.4% mean error |
 | 11:17 | identical to 11:10, to the rupee | — |
 
-The `beginning_of_day` default stands. A re-check after the 12:37 snapshot
-is scheduled.
+| 12:47 (i3 published 12:37) | identical to 11:10, to the rupee; 0.73% mean vs i1 | 17.8% mean error vs i3 |
+
+Dhan's figure did not move once in 97 minutes while NSE published two new
+snapshots, so it margins on the session's beginning-of-day file for the whole
+session. The `beginning_of_day` default is **confirmed**.
 
 **What worked:**
 - Market fills came one tick worse than the live ask (ATM call 282.65
