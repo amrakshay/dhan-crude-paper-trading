@@ -376,6 +376,15 @@ async def lifespan(app: FastAPI):
 
     try:
         await get_ipo_scheduler().start()
+        # NSE SPAN for the options engine's margin. Started unconditionally:
+        # with refreshing switched off it still loads what is on disk, and a
+        # strategy enabled later finds the file already in force.
+        from src.options.services.span_store import get_span_store
+
+        await get_span_store().start()
+        from src.options.services.risk_desk import get_risk_desk
+
+        await get_risk_desk().start()
     except Exception:
         logger.exception(
             "IPO scheduler failed to start; the daily GMP refresh and the "
@@ -402,6 +411,12 @@ async def lifespan(app: FastAPI):
     try:
         await shutdown_telegram_poller()
         await shutdown_ipo_scheduler()
+        from src.options.services.span_store import get_span_store
+
+        await get_span_store().stop()
+        from src.options.services.risk_desk import shutdown_risk_desk
+
+        await shutdown_risk_desk()
         await shutdown_alert_watcher()
         await shutdown_alert_dispatcher()
         await shutdown_token_refresh_monitor()
@@ -544,6 +559,7 @@ from src.btst import btst_main_router  # noqa: E402
 from src.vcp import vcp_main_router  # noqa: E402
 from src.instruments import instruments_main_router  # noqa: E402
 from src.ipo import ipo_main_router  # noqa: E402
+from src.options_trader import options_trader_main_router  # noqa: E402
 from src.charges import charges_main_router  # noqa: E402
 from src.connections import connections_main_router  # noqa: E402
 from src.health import health_main_router  # noqa: E402
@@ -573,6 +589,7 @@ app.include_router(strategies_main_router, prefix="/api")
 app.include_router(reports_main_router, prefix="/api")
 app.include_router(notes_main_router, prefix="/api")
 app.include_router(ipo_main_router, prefix="/api")
+app.include_router(options_trader_main_router, prefix="/api")
 app.include_router(settings_main_router, prefix="/api")
 app.include_router(swing_main_router, prefix="/api")
 app.include_router(btst_main_router, prefix="/api")

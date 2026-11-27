@@ -49,6 +49,12 @@ CAPABILITY_CHART_TRADING = "chart-trading"
 CAPABILITY_GREEKS = "greeks"
 CAPABILITY_TRADE_NOTES = "trade-notes"
 CAPABILITY_PNL_REPORTS = "pnl-reports"
+# The Options Trader page (`/options`): any NSE underlying's chain, and orders
+# on it. Separate from `option-chain`, which is MCX crude's own chain page and
+# reads that strategy's single underlying -- granting `/chain` to a module with
+# five indices and two hundred stocks would show the wrong thing. Added
+# 2026-11-24 with OPTIONS_TRADER_PLAN.md.
+CAPABILITY_OPTIONS_TRADER = "options-trader"
 
 KNOWN_CAPABILITIES: Tuple[str, ...] = (
     CAPABILITY_LIVE_PRICE,
@@ -58,6 +64,7 @@ KNOWN_CAPABILITIES: Tuple[str, ...] = (
     CAPABILITY_GREEKS,
     CAPABILITY_TRADE_NOTES,
     CAPABILITY_PNL_REPORTS,
+    CAPABILITY_OPTIONS_TRADER,
 )
 
 CAPABILITY_LABELS: Dict[str, str] = {
@@ -68,6 +75,7 @@ CAPABILITY_LABELS: Dict[str, str] = {
     CAPABILITY_GREEKS: "Greeks",
     CAPABILITY_TRADE_NOTES: "Trade notes",
     CAPABILITY_PNL_REPORTS: "P&L reports",
+    CAPABILITY_OPTIONS_TRADER: "Options trader",
 }
 
 CAPABILITY_DESCRIPTIONS: Dict[str, str] = {
@@ -81,6 +89,10 @@ CAPABILITY_DESCRIPTIONS: Dict[str, str] = {
     CAPABILITY_GREEKS: "Option-chain REST poll for delta, IV and the rest.",
     CAPABILITY_TRADE_NOTES: "Journal entries attached to trades.",
     CAPABILITY_PNL_REPORTS: "Realised P&L slices and the equity curve.",
+    CAPABILITY_OPTIONS_TRADER: (
+        "Option chain and orders for any NSE index or F&O stock, in any of "
+        "the strategy's portfolios."
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -252,6 +264,7 @@ SETTING_DESCRIPTIONS: Dict[str, str] = {
 CAPABILITY_PAGES: Dict[str, str] = {
     CAPABILITY_LIVE_PRICE: "/live",
     CAPABILITY_OPTION_CHAIN: "/chain",
+    CAPABILITY_OPTIONS_TRADER: "/options",
     CAPABILITY_TRADE_NOTES: "/notes",
     CAPABILITY_PNL_REPORTS: "/reports",
 }
@@ -265,7 +278,7 @@ CAPABILITY_PAGES: Dict[str, str] = {
 # everyone, but turning the last STRATEGY off must not, or a trader loses the
 # record of what that strategy did.
 CAPABILITY_LIVE_PAGES: FrozenSet[str] = frozenset(
-    {CAPABILITY_LIVE_PRICE, CAPABILITY_OPTION_CHAIN}
+    {CAPABILITY_LIVE_PRICE, CAPABILITY_OPTION_CHAIN, CAPABILITY_OPTIONS_TRADER}
 )
 
 # Pages granted by a strategy being live, WHATEVER that strategy is.
@@ -458,6 +471,14 @@ class InstrumentSet:
     # A free-text tag a strategy uses to find one of its own sets again, e.g.
     # "regime_index". Never interpreted by the framework.
     role: Optional[str] = None
+    # Only contracts expiring within this many days of the refresh are
+    # ingested. None means every expiry, which is what MCX crude has always
+    # done. It exists for NSE stock and index options: the master lists about
+    # 86,000 of them across every expiry out to a year, and a chain nobody
+    # trades a year out is 86,000 rows of upsert for nothing. It decides WHICH
+    # rows are claimed, not what they become, so it is deliberately not part
+    # of `ingestion_signature()`.
+    max_days_to_expiry: Optional[int] = None
 
     LOT_SIZE_FROM_CONFIG = "config"
     LOT_SIZE_FROM_MASTER = "master"
@@ -539,8 +560,16 @@ class MarginModel:
 
     model: str
     short_option_percent_of_notional: Decimal
+    # For `nse_span`: the margin card under conf/margins/ holding the
+    # exchange's exposure-margin rates and the fallback scan parameters. The
+    # SPAN numbers themselves come from NSE's daily file, not from here.
+    card: Optional[str] = None
 
     PERCENT_OF_NOTIONAL = "percent_of_notional"
+    # NSE SPAN from the exchange's own risk-parameter file, plus exposure
+    # margin, computed per PORTFOLIO by src/options/ (OPTIONS_TRADER_PLAN.md
+    # section 5). Added 2026-11-24.
+    NSE_SPAN = "nse_span"
 
 
 @dataclass(frozen=True)
@@ -932,9 +961,24 @@ def _build_instrument_sets(
                     if str(one).strip()
                 ),
                 role=(str(entry["role"]) if entry.get("role") else None),
+                max_days_to_expiry=_optional_positive_int(
+                    entry.get("max_days_to_expiry"), where, "max_days_to_expiry"
+                ),
             )
         )
     return tuple(built)
+
+
+def _optional_positive_int(value: Any, where: str, key: str) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise StrategyConfigError(f"{where}: {key!r} must be a whole number of days")
+    if parsed < 1:
+        raise StrategyConfigError(f"{where}: {key!r} must be at least 1")
+    return parsed
 
 
 def _build_reference_instruments(
@@ -1130,10 +1174,16 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
 
     margin = document.get("margin") or {}
     margin_model = str(margin.get("model") or MarginModel.PERCENT_OF_NOTIONAL)
-    if margin_model != MarginModel.PERCENT_OF_NOTIONAL:
+    if margin_model not in (MarginModel.PERCENT_OF_NOTIONAL, MarginModel.NSE_SPAN):
         raise StrategyConfigError(
             f"{source}: margin.model {margin_model!r} is not implemented. "
-            f"Only {MarginModel.PERCENT_OF_NOTIONAL!r} is."
+            f"Only {MarginModel.PERCENT_OF_NOTIONAL!r} and "
+            f"{MarginModel.NSE_SPAN!r} are."
+        )
+    if margin_model == MarginModel.NSE_SPAN and not margin.get("card"):
+        raise StrategyConfigError(
+            f"{source}: margin.model {MarginModel.NSE_SPAN!r} needs margin.card, "
+            f"the file under conf/margins/ holding its exposure-margin rates."
         )
 
     return StrategyDefinition(
@@ -1197,6 +1247,7 @@ def build_definition(document: Dict[str, Any], source: str) -> StrategyDefinitio
             short_option_percent_of_notional=Decimal(
                 str(margin.get("short_option_percent_of_notional", "0"))
             ),
+            card=(str(margin["card"]) if margin.get("card") else None),
         ),
         capabilities=frozenset(declared),
         automation=automation,

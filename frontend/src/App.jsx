@@ -5,6 +5,7 @@ import RoleRoute from './auth/RoleRoute';
 import LoginPage from './auth/LoginPage';
 import LivePricePage from './pages/LivePricePage';
 import OptionChainPage from './pages/OptionChainPage';
+import OptionsTraderPage from './pages/OptionsTraderPage';
 import PortfoliosPage from './pages/PortfoliosPage';
 import PositionsPage from './pages/PositionsPage';
 import OrderHistoryPage from './pages/OrderHistoryPage';
@@ -42,6 +43,7 @@ export default function App() {
       >
         <Route path="/live" element={<RoleRoute path="/live"><LivePricePage /></RoleRoute>} />
         <Route path="/chain" element={<RoleRoute path="/chain"><OptionChainPage /></RoleRoute>} />
+        <Route path="/options" element={<RoleRoute path="/options"><OptionsTraderPage /></RoleRoute>} />
         <Route path="/positions" element={<RoleRoute path="/positions"><PositionsPage /></RoleRoute>} />
         <Route path="/orders" element={<RoleRoute path="/orders"><OrderHistoryPage /></RoleRoute>} />
         <Route path="/portfolios" element={<RoleRoute path="/portfolios"><PortfoliosPage /></RoleRoute>} />

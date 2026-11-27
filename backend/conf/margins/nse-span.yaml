@@ -1,0 +1,141 @@
+# ===========================================================================
+# NSE EQUITY-DERIVATIVES MARGIN CARD (model: nse_span)
+#
+# SPAN itself is NOT configured here. It is computed from NSE Clearing's own
+# daily risk-parameter file (nsccl.YYYYMMDD.s.spn), downloaded by
+# src/options/services/nse_span_client.py. What is configured is what that
+# file does not carry: the EXPOSURE MARGIN (ELM) rates, the SEBI expiry-day
+# add-on, and the parameters of the FALLBACK used only when no SPAN file is
+# available -- a fallback the UI labels as such and alerts on.
+#
+# Every rate: a primary source and an as-of date. Nothing hardcoded in Python
+# (root CLAUDE.md section 7). Read by src/options/services/span_margin.py.
+#
+# This is a per-EXCHANGE card, not per strategy: every module trading NSE
+# options names it, the way a strategy names its charges rate card.
+# ===========================================================================
+
+version: "2026-11-24"
+
+exposure_margin:
+  # On the NOTIONAL value (underlying price x quantity) of SHORT options.
+  # source: NSE Clearing consolidated circular NCL/CMPT/73997 (050/2026),
+  #   2026-04-30, section 10.4
+  #   https://nsearchives.nseindia.com/content/circulars/CMPT73997.zip
+  # as-of: 2026-11-24   CONFIRMED
+  index_options:
+    base_rate: 0.02
+    deep_otm_rate: 0.03
+    deep_otm_beyond: 0.10        # more than 10% out of the money
+    long_dated_rate: 0.05
+    long_dated_after_days: 270   # "more than 9 months to expiry"
+  stock_options:
+    base_rate: 0.035
+    deep_otm_rate: 0.0525
+    deep_otm_beyond: 0.30        # more than 30% out of the money
+
+expiry_day:
+  # SEBI/HO/MRD/TPD-1/P/CIR/2024/132 (2024-10-01): an additional 2% ELM on
+  # short INDEX options on the day they expire, from 2024-11-20; and no
+  # calendar-spread benefit for a contract expiring that day, from 2025-02-01.
+  # Whether the 2% applies to a HEDGED short is UNVERIFIED; it is applied to
+  # every expiring short index option here, which errs towards blocking more.
+  # as-of: 2026-11-24   CONFIRMED (rates), UNCONFIRMED (hedged scope)
+  index_short_additional_rate: 0.02
+  remove_calendar_benefit: true
+
+fallback:
+  # ONLY when no SPAN file is loaded, or a contract is missing from it: a
+  # SPAN-shaped 16-scenario array built with Black-76 from the live IV.
+  # Scan ranges approximate NSE's (the 2026-11-23 file has NIFTY's price scan
+  # at 2357.52 on 25,349.65 = 9.3%). APPROXIMATION -- labelled on every surface.
+  # as-of: 2026-11-24   confidence: APPROXIMATION
+  index_price_scan: 0.093
+  stock_price_scan: 0.15
+  volatility_scan: 0.04          # absolute vol points, as NSE's volScan
+  extreme_move_multiple: 2.0
+  extreme_cover_fraction: 0.35
+  default_iv: 0.18               # when the chain has no IV for a contract
+
+broker_parity:
+  # HOW THE BROKER BEING MIRRORED APPLIES THE EXCHANGE'S NUMBERS. Not an
+  # add-on: measured 2026-11-24 against Dhan's public calculator
+  # (dhan.co/calculators/margin-calculator), Dhan's figure for 25 single
+  # contracts was NSE's own SPAN from the session's beginning-of-day file, plus
+  # the option's value, plus exposure margin -- 0.64% mean error, under 0.3%
+  # near the money -- and three baskets matched within 0.7%. What made our
+  # first figures look 25% off was WHICH file and WHICH prices, not the method.
+  #
+  # valuation: "span_file" values options and the exposure-margin base at the
+  #   SPAN file's own prices (Dhan); "live" uses the live book (what a
+  #   real-time broker would re-margin to).
+  # count_premium_received: false -- Dhan: "Any option Receivable will not be
+  #   consider against initial margin shortfall". A sell is checked as if its
+  #   premium had not arrived; premium PAID on a buy is required up front.
+  # as-of: 2026-11-24   confidence: MEASURED (public calculator, holiday data)
+  broker: "dhan"
+  valuation: "span_file"
+  count_premium_received: false
+
+risk_desk:
+  # What the broker's risk desk does WITHOUT asking (OPTIONS_TRADER_PLAN.md
+  # section 4.6), applied by src/options/services/risk_desk.py to every NSE
+  # option position on this card, whichever strategy holds it. Arming cannot
+  # opt a strategy out: a broker's RMS does not ask the algorithm.
+  #
+  # source: https://dhan.co/risk-management-policy/ (read 2026-11-24)
+  #   * NSE/BSE derivatives intraday square-off "3:25 PM onwards";
+  #   * orders placed in the 2 minutes before the system square-off may be
+  #     rejected -- modelled as: no NEW Intraday position from 15:23;
+  #   * Dhan "reserves the right to square-off ... where-in MTM crosses 80%
+  #     and above". The policy does not say 80% OF WHAT; read here as an
+  #     unrealised option loss of 80% of the margin the portfolio's option
+  #     book blocks. UNVERIFIED interpretation.
+  #   * a margin shortfall ("risk of margin shortfall or obligation towards
+  #     payin") is squared off, largest margin consumer first.
+  # as-of: 2026-11-24   confidence: CONFIRMED (times, 80%), UNVERIFIED (80% base)
+  intraday_square_off_at: "15:25"
+  intraday_entry_cutoff_at: "15:23"
+  mtm_loss_fraction: 0.80
+
+expiry_settlement:
+  # How positions END (OPTIONS_TRADER_PLAN.md section 4.5, decision D4 as
+  # revised 2026-11-24 to follow DHAN's rule rather than NSE's E-4 ramp).
+  #
+  # source: https://dhan.co/risk-management-policy/ and Dhan support article
+  #   82000879978 (physical settlement), read 2026-11-24:
+  #   * no fresh stock-option position of any product on expiry day;
+  #   * to take delivery, 100% of contract value as margin before 10:00 AM on
+  #     expiry day; on a shortfall Dhan "reserves the right to square-off";
+  #   * the exact square-off time on expiry day is NOT published -- modelled
+  #     here as: from 10:00, an obligation that cannot be met is closed.
+  # source: https://dhan.co/pricing/ -- Rs 20 per executed order for options
+  #   that are exercised or assigned; 0.10% of contract value for F&O that go
+  #   to physical delivery.
+  # Index options are cash-settled at intrinsic value against the closing
+  # index value; stock options are physically settled at the strike.
+  # STT on exercise is read from the strategy's own rate card
+  # (stt.exercise_settlement_rate), not restated here.
+  # as-of: 2026-11-24   confidence: CONFIRMED (rules, fees), UNVERIFIED (square-off time)
+  no_fresh_stock_option_positions_on_expiry_day: true
+  delivery_margin_from: "10:00"
+  delivery_margin_fraction: 1.0
+  settle_after: "15:45"
+  exercise_fee_per_order: 20.00
+  physical_delivery_charge_rate: 0.001
+  delivery_rate_card: "nse-equity-delivery"
+
+order_limits:
+  # The exchange's per-order limits, which Dhan enforces by rejecting the
+  # order (OPTIONS_TRADER_PLAN.md D6, approved 2026-11-25). Values are not
+  # here: they are read per contract from NSE's daily F&O contract file
+  # (NSE_FO_contract_DDMMYYYY.csv.gz), which replaced the qtyfreeze report
+  # on 2024-04-15 (circular NSE/FAOP/61157).
+  #   freeze_quantity -- an order above the contract's freeze limit is refused;
+  #     the risk desk's own exits are split into allowed sizes instead.
+  #   price_band -- a LIMIT price outside the session's range is refused, only
+  #     when the file is for today and the live price is still inside it.
+  # as-of: 2026-11-25   confidence: CONFIRMED (file, ids), INTERPRETED (an
+  #   order must be BELOW MaxTradQty: 1801 listed for NIFTY's 1,800 limit)
+  freeze_quantity: true
+  price_band: true

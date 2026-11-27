@@ -49,6 +49,12 @@ from src.strategies.services.strategy_registry import get_strategy_registry
 
 logger = get_logger("orders.service")
 
+# Dhan's product types, for the modules that offer the choice. See
+# `submit_paper_order(product=...)`.
+PRODUCT_INTRADAY = "INTRADAY"
+PRODUCT_CARRYFORWARD = "CARRYFORWARD"
+PRODUCTS = (PRODUCT_INTRADAY, PRODUCT_CARRYFORWARD)
+
 MONEY_QUANTUM = Decimal("0.01")
 PRICE_QUANTUM = Decimal("0.0001")
 
@@ -215,6 +221,7 @@ class OrderService:
         portfolio_id: Optional[int] = None,
         reason: Optional[str] = None,
         strategy_key: Optional[str] = None,
+        product: Optional[str] = None,
     ) -> Order:
         """Submit a paper order into one portfolio.
 
@@ -243,8 +250,21 @@ class OrderService:
         module passes its own key; a discretionary order on an unambiguous
         contract passes nothing and is resolved from the instrument as before.
         An ambiguous instrument with no key is refused, never guessed.
+
+        `product` is Dhan's product type, INTRADAY or CARRYFORWARD, for the
+        modules that offer the choice (the Options Trader). None means the
+        strategy does not choose one, which is every module before it. An
+        order whose product differs from the open position it would ADD to is
+        refused: Dhan keeps the two apart, and merging them here would let the
+        15:25 square-off close a carry-forward holding.
         """
         side = str(side).upper()
+        if product is not None:
+            product = str(product).strip().upper() or None
+            if product is not None and product not in PRODUCTS:
+                raise OrderValidationError(
+                    f"product must be one of {', '.join(PRODUCTS)}, got {product!r}"
+                )
         order_type = str(order_type).upper()
 
         logger.debug(
@@ -332,6 +352,28 @@ class OrderService:
         if quantity <= 0:
             raise OrderValidationError("Order quantity must be positive")
 
+        # A REDUCING order is not a fresh position whatever the client called
+        # it: a plain SELL against an open long closes it. The two rules that
+        # refuse only NEW positions (the 15:23 Intraday cut-off and Dhan's
+        # expiry-day rule) must not trap a trader in one.
+        # WHICH LINE. Intraday and Carry-forward positions in one contract are
+        # separate lines (Dhan's model). An order that names no product on a
+        # strategy that has products is resolved from the lines that exist:
+        # one line -> that line; two -> refused, because closing "the"
+        # position would have to guess which.
+        product = await self._resolve_product(strategy.key, portfolio.id, instrument, product, is_close_order)
+        reduces = is_close_order or await self._reduces_open_position(
+            portfolio.id, instrument.security_id, side, quantity, product
+        )
+        if product == PRODUCT_INTRADAY and not reduces:
+            self._check_intraday_cutoff(strategy.key)
+        if not reduces:
+            await self._check_expiry_day(strategy.key, instrument)
+        # The exchange's own limits apply to EVERY order, a close included:
+        # NSE does not care why an order is large. Exits the application makes
+        # by itself are split into allowed sizes before they get here.
+        self._check_exchange_limits(strategy.key, instrument, quantity, order_type, limit_price)
+
         # Funds, in the validation block with every other rule rather than
         # scattered. Priced off the limit where there is one and off the live
         # mark otherwise: an estimate, because what a market order actually
@@ -353,6 +395,7 @@ class OrderService:
                 strategy_key=strategy.key,
                 lot_size=int(instrument.lot_size),
                 is_close_order=is_close_order,
+                security_id=str(instrument.security_id),
             )
             if refusal:
                 logger.warning(
@@ -384,6 +427,7 @@ class OrderService:
             filled_quantity=0,
             average_fill_price=None,
             is_close_order=is_close_order,
+            product=product,
             placed_at=now,
             last_event_at=now,
         )
@@ -409,6 +453,187 @@ class OrderService:
 
         await self._attempt_initial_fill(order, instrument)
         return order
+
+    async def record_off_market_fill(
+        self,
+        *,
+        instrument,
+        portfolio_id: int,
+        strategy_key: str,
+        side: str,
+        quantity: int,
+        price: Decimal,
+        reason: str,
+        is_close_order: bool,
+        order_type: str,
+        charges: Optional[tuple] = None,
+        product: Optional[str] = None,
+    ) -> Order:
+        """A fill that did NOT come from the market: expiry settlement and
+        physical delivery (OPTIONS_TRADER_PLAN.md section 4.5).
+
+        It is an ordinary `orders` row with one fill at a STATED price --
+        intrinsic value, zero for an option that expired worthless, or the
+        strike for shares delivered -- so positions, the cash ledger and the
+        P&L replay (`pnl_service`) treat it exactly like any other trade and
+        agree by construction. It never touches the book or the fill
+        simulator: there is no market to cross at settlement.
+
+        `charges` is `(turnover, [ChargeComponent], rates_version)` when the
+        settlement's charges are not a normal order's (STT on exercise, the
+        broker's exercise fee); None charges it on the strategy's own card.
+        `order_type` is a short label ("EXPIRY", "DELIVERY") so the order
+        history says what it was.
+        """
+        now = utc_now()
+        order = Order(
+            client_order_id=uuid.uuid4().hex,
+            strategy_key=strategy_key,
+            portfolio_id=int(portfolio_id),
+            security_id=instrument.security_id,
+            trading_symbol=instrument.trading_symbol,
+            expiry_date=instrument.expiry_date,
+            strike_price=instrument.strike_price,
+            option_type=instrument.option_type,
+            lot_size=int(instrument.lot_size),
+            side=str(side).upper(),
+            order_type=str(order_type)[:8],
+            lots=max(1, int(quantity) // max(int(instrument.lot_size), 1)),
+            quantity=int(quantity),
+            limit_price=None,
+            status=OrderStatus.PENDING.value,
+            filled_quantity=0,
+            average_fill_price=None,
+            is_close_order=is_close_order,
+            product=product,
+            placed_at=now,
+            last_event_at=now,
+        )
+        self.orders.session.add(order)
+        await self.orders.session.flush()
+        await self.orders.add_event(
+            order, "PLACED", OrderStatus.PENDING.value, now,
+            price=Decimal(str(price)), quantity=int(quantity), message=reason[:255],
+        )
+        if charges is not None:
+            if not hasattr(self, "_charge_overrides"):
+                self._charge_overrides = {}
+            self._charge_overrides[order.id] = charges
+        fill = fill_simulator.SimulatedFill(
+            price=Decimal(str(price)), quantity=int(quantity), book_level=0,
+            slippage_ticks=0, reference_price=Decimal(str(price)),
+        )
+        await self._apply_fills(order, fill_simulator.FillResult(fills=[fill]))
+        await self._finalise(
+            order, OrderStatus.FILLED.value, OrderStatus.PARTIALLY_FILLED.value,
+            terminal_when_incomplete=True, message=reason[:255],
+        )
+        return order
+
+    def _check_exchange_limits(self, strategy_key, instrument, quantity, order_type, limit_price) -> None:
+        """Freeze quantity and price range (OPTIONS_TRADER_PLAN.md D6)."""
+        from src.core.time_utils import ist_now
+        from src.options.services import contract_limits
+        from src.options.services.option_margin_service import card_for, uses_span
+
+        if not uses_span(strategy_key) or not instrument.option_type:
+            return
+        card = card_for(strategy_key)
+        if not (card.enforce_freeze_quantity or card.enforce_price_band):
+            return
+        reason = contract_limits.refusal(
+            instrument, quantity, order_type, limit_price, ist_now().date(), book=self.book,
+            check_freeze=card.enforce_freeze_quantity, check_band=card.enforce_price_band,
+        )
+        if reason:
+            raise OrderValidationError(reason)
+
+    async def _resolve_product(self, strategy_key, portfolio_id, instrument, product, is_close_order=False):
+        from src.options.services.option_margin_service import uses_span
+        from src.positions.database.db_operations.position_repository import (
+            PositionRepository,
+        )
+
+        if not uses_span(strategy_key) or not instrument.option_type:
+            return product
+        lines = await PositionRepository(self.orders.session).list_open_lines(
+            int(portfolio_id), str(instrument.security_id)
+        )
+        products = {line.product for line in lines}
+        if product is not None:
+            # A CLOSE names a line that must exist; otherwise "close" would
+            # quietly open a new position on the other product.
+            if is_close_order and products and product not in products:
+                held = " and ".join(sorted(str(one).title() for one in products))
+                raise OrderValidationError(
+                    f"No {product.title()} position in {instrument.trading_symbol} "
+                    f"to close: it is open as {held}."
+                )
+            return product
+        if len(products) > 1:
+            raise OrderValidationError(
+                f"{instrument.trading_symbol} is open as both Intraday and "
+                f"Carry-forward in this portfolio. Say which: send the order "
+                f"with product INTRADAY or CARRYFORWARD."
+            )
+        return next(iter(products)) if products else None
+
+    async def _reduces_open_position(
+        self, portfolio_id: int, security_id, side: str, quantity: int, product: Optional[str] = None
+    ) -> bool:
+        """True when this order only shrinks the open position on ITS line."""
+        from src.positions.database.db_operations.position_repository import (
+            PositionRepository,
+        )
+
+        position = await PositionRepository(self.orders.session).get_open_for_security(
+            int(portfolio_id), str(security_id), product
+        )
+        net = int(position.net_quantity or 0) if position is not None else 0
+        if not net:
+            return False
+        opposite = (net > 0 and side == OrderSide.SELL.value) or (net < 0 and side == OrderSide.BUY.value)
+        return opposite and int(quantity) <= abs(net)
+
+    async def _check_expiry_day(self, strategy_key: str, instrument) -> None:
+        """Dhan: no fresh stock-option position of any product on expiry day."""
+        from src.core.time_utils import ist_now
+        from src.options.services.expiry_service import ExpiryService
+        from src.options.services.option_margin_service import card_for, uses_span
+
+        if not uses_span(strategy_key):
+            return
+        refusal = ExpiryService(self.orders.session, card_for(strategy_key), book=self._book).check_fresh_position(
+            instrument, ist_now().date()
+        )
+        if refusal:
+            raise OrderValidationError(refusal)
+
+    @staticmethod
+    def _check_intraday_cutoff(strategy_key: str) -> None:
+        """No NEW Intraday position in the last minutes before the risk desk's
+        square-off. Dhan: orders in the 2 minutes before its 15:25 square-off
+        may be rejected (dhan.co/risk-management-policy, read 2026-11-24). The
+        times are the margin card's, so they are configuration."""
+        from src.core.time_utils import ist_now
+        from src.options.services.option_margin_service import card_for, uses_span
+
+        if not uses_span(strategy_key):
+            return
+        from src.strategies.services.strategy_registry import get_strategy_registry
+
+        card = card_for(strategy_key)
+        close = get_strategy_registry().require(strategy_key).market_hours.close
+        # Only between the cut-off and the session's close: outside the
+        # session nothing fills anyway, and a refusal at 23:00 for an order
+        # meant for tomorrow would be the cut-off misreading its own rule.
+        if card.intraday_entry_cutoff_at <= ist_now().time() <= close:
+            raise OrderValidationError(
+                f"New Intraday F&O positions are not accepted from "
+                f"{card.intraday_entry_cutoff_at:%H:%M} IST: the risk desk squares "
+                f"Intraday positions off at {card.intraday_square_off_at:%H:%M}. "
+                f"Place it as Carry-forward, or exit instead."
+            )
 
     @staticmethod
     def _align_to_tick(price: Decimal, instrument) -> Decimal:
@@ -551,6 +776,8 @@ class OrderService:
                 strategy_key=order.strategy_key,
                 lot_size=int(order.lot_size),
                 is_close_order=bool(order.is_close_order),
+                security_id=str(order.security_id),
+                exclude_order_id=order.id,
             )
             if refusal:
                 # REJECTED, not partially filled to fit. Filling what fits
@@ -583,8 +810,19 @@ class OrderService:
         price: Decimal,
         strategy_key: str,
         lot_size: int,
+        portfolio_id: Optional[int] = None,
+        security_id: Optional[str] = None,
     ) -> Decimal:
         """What this execution would take out of a portfolio.
+
+        For a strategy on `margin.model: nse_span` this is EXACT rather than a
+        flat proxy: how much less the portfolio could spend after the fill
+        than before it -- charges, plus premium paid (or minus premium
+        received), plus the change in SPAN-blocked money for the WHOLE
+        portfolio. That is what makes a hedge cheap: a short call whose long
+        call has already filled moves the portfolio's SPAN by the spread's
+        risk, not by a naked short's. It can be NEGATIVE, which is a closing
+        order releasing margin.
 
         A BUY costs the premium plus charges. A SELL to open RECEIVES premium
         but ties up margin, and the margin estimate is larger than the credit
@@ -611,6 +849,33 @@ class OrderService:
             )
         )
 
+        if portfolio_id is not None and security_id is not None:
+            from src.options.services.option_margin_service import (
+                OptionMarginService,
+                card_for,
+                uses_span,
+            )
+
+            if uses_span(strategy_key):
+                signed = quantity if str(side).upper() == OrderSide.BUY.value else -quantity
+                card = card_for(strategy_key)
+                before, after = await OptionMarginService(
+                    self.orders.session, book=self._book
+                ).with_changes(int(portfolio_id), [(str(security_id), signed)], card)
+                # Premium PAID is required up front. Premium RECEIVED counts
+                # only if the card says so: Dhan does not count it against
+                # margin, so a sell must fit as if the credit had not arrived.
+                if signed > 0:
+                    premium_flow = consideration
+                elif card.count_premium_received:
+                    premium_flow = -consideration
+                else:
+                    premium_flow = Decimal("0")
+                change = Decimal(str(round(after.blocked - before.blocked, 2)))
+                return (charges + premium_flow + change).quantize(
+                    MONEY_QUANTUM, rounding=ROUND_HALF_UP
+                )
+
         if str(side).upper() == OrderSide.BUY.value:
             return consideration + charges
 
@@ -634,33 +899,53 @@ class OrderService:
         strategy_key: str,
         lot_size: int,
         is_close_order: bool,
+        security_id: Optional[str] = None,
+        exclude_order_id: Optional[int] = None,
     ) -> Optional[str]:
         """None if affordable, otherwise why not, naming the shortfall.
 
-        A CLOSING order is never refused for funds. Closing a long releases
-        money and closing a short releases margin; refusing it would trap a
-        trader in a position precisely when they most need out of it.
+        A CLOSING order is never refused for funds -- with ONE exception, Dhan's
+        "Hedge Break Alert" (OPTIONS_TRADER_PLAN.md section 4.4). On SPAN,
+        exiting the LONG leg of a hedge can RAISE margin, because the short it
+        was protecting becomes naked. If the portfolio cannot carry that, the
+        exit is refused and says to cover the short first, or use Exit all.
+        Every other close -- closing a long on its own, closing a short --
+        releases money and is never refused, so nobody is trapped in a
+        position when they most need out of it.
         """
-        if is_close_order:
+        from src.options.services.option_margin_service import uses_span
+
+        span = uses_span(strategy_key) and security_id is not None
+        if is_close_order and not span:
             return None
 
         from src.portfolios.services.balance_service import BalanceService
 
         required = await self._estimated_debit(
-            side, quantity, price, strategy_key, lot_size
+            side, quantity, price, strategy_key, lot_size,
+            portfolio_id=portfolio_id, security_id=security_id,
         )
         if required <= 0:
             return None
 
         available = await BalanceService(
             self.orders.session, book=self._book
-        ).available_balance(portfolio_id)
+        ).available_balance(portfolio_id, exclude_order_id)
         if required <= available:
             return None
 
         shortfall = (required - available).quantize(
             MONEY_QUANTUM, rounding=ROUND_HALF_UP
         )
+        if is_close_order:
+            # Dhan's own wording for the case, so the message reads the way
+            # the broker's does.
+            return (
+                f"Hedge Break Alert: exiting this leg leaves a short position "
+                f"unhedged, raising margin by {required} against {available} "
+                f"available -- short by {shortfall}. Exit the short leg first, "
+                f"or use Exit all, which covers shorts before their hedges."
+            )
         return (
             f"Insufficient funds: this would need {required} but only "
             f"{available} is available -- short by {shortfall}."
@@ -725,7 +1010,7 @@ class OrderService:
             incremental_charges,
         )
 
-        await self.positions.apply_fill(
+        position, _ = await self.positions.apply_fill(
             strategy_key=order.strategy_key,
             portfolio_id=order.portfolio_id,
             security_id=order.security_id,
@@ -738,6 +1023,7 @@ class OrderService:
             strike_price=order.strike_price,
             option_type=order.option_type,
             charges=incremental_charges,
+            product=order.product,
             # The enrichment the trade alert wants and the position row cannot
             # know: which order this was, and WHY it was placed. The reason is
             # already on the PLACED event (`submit_paper_order(reason=...)`),
@@ -747,6 +1033,10 @@ class OrderService:
                 "reason": await self._placed_reason(order),
             },
         )
+        # A position is stamped with the product it was OPENED under, once.
+        # Covers a flip too: `apply_fill` returns the fresh residual row.
+        if order.product and position is not None and position.is_open and not position.product:
+            position.product = order.product
 
         await self._record_cash_effect(
             order,
@@ -834,6 +1124,21 @@ class OrderService:
         order takes.
         """
         import json
+
+        override = getattr(self, "_charge_overrides", {}).get(order.id)
+        if override is not None:
+            turnover, components, version = override
+            total = sum((component.amount for component in components), Decimal("0"))
+            await self.orders.upsert_charges(
+                order,
+                {
+                    "turnover": turnover,
+                    "total_charges": total,
+                    "rates_version": version,
+                    "breakdown_json": json.dumps([component.as_dict() for component in components]),
+                },
+            )
+            return total
 
         engine = ChargesEngine.for_strategy_key(order.strategy_key)
         breakdown = engine.compute_order_charges_for_quantity(
@@ -1104,6 +1409,7 @@ class OrderService:
         required = await self._estimated_debit(
             side, quantity, Decimal(str(price)), strategy.key,
             int(instrument.lot_size),
+            portfolio_id=int(portfolio_id), security_id=str(instrument.security_id),
         )
         return {
             "portfolioId": int(portfolio_id),

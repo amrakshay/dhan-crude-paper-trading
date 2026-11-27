@@ -28,6 +28,7 @@ class PositionResponse(BaseModel):
     average_price: Decimal = Field(alias="averagePrice")
     realized_pnl: Decimal = Field(alias="realizedPnl")
     total_charges: Decimal = Field(alias="totalCharges")
+    product: Optional[str] = None
     is_open: bool = Field(alias="isOpen")
     opened_at: datetime = Field(alias="openedAt")
     closed_at: Optional[datetime] = Field(None, alias="closedAt")

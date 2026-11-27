@@ -14,6 +14,7 @@ import NightsStayIcon from '@mui/icons-material/NightsStay';
 import HubIcon from '@mui/icons-material/Hub';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import CompressIcon from '@mui/icons-material/Compress';
+import CandlestickChartIcon from '@mui/icons-material/CandlestickChart';
 
 /**
  * Every page the app has. Which of them a given role actually sees is decided
@@ -33,6 +34,9 @@ export const navigationItems = [
   // declares, so switching that strategy off takes this out of the sidebar.
   { path: '/live', label: 'Crude Oil', icon: ShowChartIcon },
   { path: '/chain', label: 'Option Chain', icon: TableChartIcon },
+  // NSE index and stock options, any underlying. Granted by the
+  // `options-trader` capability, which only the NSE Options Trader declares.
+  { path: '/options', label: 'Options Trader', icon: CandlestickChartIcon },
   { path: '/positions', label: 'Positions', icon: AccountBalanceWalletIcon },
   { path: '/orders', label: 'Order History', icon: ReceiptLongIcon },
   { path: '/portfolios', label: 'Portfolios', icon: AccountBalanceIcon },

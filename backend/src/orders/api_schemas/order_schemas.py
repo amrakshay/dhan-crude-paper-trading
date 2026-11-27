@@ -29,6 +29,13 @@ class PlaceOrderRequest(BaseModel):
             "active; with one, it is unambiguous and may be omitted."
         ),
     )
+    product: Optional[str] = Field(
+        None,
+        description=(
+            "INTRADAY or CARRYFORWARD, for modules that offer Dhan's product "
+            "choice (the Options Trader). Omitted by every other caller."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -125,6 +132,7 @@ class OrderResponse(BaseModel):
     average_fill_price: Optional[Decimal] = Field(None, alias="averageFillPrice")
     rejection_reason: Optional[str] = Field(None, alias="rejectionReason")
     is_close_order: bool = Field(False, alias="isCloseOrder")
+    product: Optional[str] = None
     placed_at: datetime = Field(alias="placedAt")
     last_event_at: datetime = Field(alias="lastEventAt")
     completed_at: Optional[datetime] = Field(None, alias="completedAt")

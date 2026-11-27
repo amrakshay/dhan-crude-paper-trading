@@ -1,0 +1,124 @@
+# ---------------------------------------------------------------------------
+# STRATEGY MODULE: NSE Options Trader.
+#
+# Buy and sell options on any NSE index or F&O stock, in any number of
+# portfolios. DISCRETIONARY: there is no `automation` block, so it can never be
+# armed and every order comes from a person. See OPTIONS_TRADER_PLAN.md at the
+# repository root for the whole design; this file is Phase 1 of it.
+#
+# The margin, risk-desk and expiry machinery that later phases add is a SHARED
+# ENGINE (`src/options/`) serving every NSE option position, whichever strategy
+# holds it. This module is the first user of that engine, not its owner.
+# ---------------------------------------------------------------------------
+
+key: "nse-options-trader"
+label: "NSE Options Trader"
+description: >-
+  Buy and sell NSE index and stock options from a live chain, in as many
+  portfolios as you like. Discretionary: every order is yours.
+# Ships OFF, like every module added after the first. Switching it on is a
+# click on the Strategies & Features page, followed by an instrument refresh.
+enabled_by_default: false
+
+underlying:
+  # A universe module has no single underlying; these name the segment its
+  # TRADED rows live in. Spot prices come from the option chain endpoint
+  # (indices) or the stock's own NSE_EQ row (stocks).
+  symbol: "NSEFNO"
+  exchange_segment: "NSE_FNO"
+  exchange_segment_code: 2          # numeric code used by the binary feed
+  exchange_id: "NSE"
+
+universe:
+  # Every NSE stock with listed options. Written by
+  # scripts/make_fno_universe.py from the instrument master; refresh it when
+  # NSE changes the F&O list, and commit the diff.
+  name: "nse-fno-stocks"
+  file: "universes/nse-fno-stocks.csv"
+
+instrument_sets:
+  # Index options. NSE publishes real lot sizes (NIFTY 65, BANKNIFTY 30,
+  # verified against the master on 2026-11-24), so the master is trusted.
+  - instrument_type: "OPTIDX"
+    exchange_segment: "NSE_FNO"
+    exchange_segment_code: 2
+    symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"]
+    lot_size_source: "master"
+    max_days_to_expiry: 70
+    role: "index_options"
+  # Stock options: two monthly expiries is what anybody trades.
+  - instrument_type: "OPTSTK"
+    exchange_segment: "NSE_FNO"
+    exchange_segment_code: 2
+    symbols: "universe"
+    lot_size_source: "master"
+    max_days_to_expiry: 70
+    role: "stock_options"
+  # The stocks themselves, for their spot price. MUST stay identical to the
+  # swing rotation's EQUITY set -- same series filter, lot-size source and
+  # trading-symbol source -- or the instrument refresh refuses the shared
+  # names, correctly, because the row would depend on who loaded first.
+  - instrument_type: "EQUITY"
+    exchange_segment: "NSE_EQ"
+    exchange_segment_code: 1
+    symbols: "universe"
+    lot_size_source: "master"
+    series: ["EQ", "BE"]
+    trading_symbol_source: "underlying_symbol"
+    role: "stock_spot"
+
+contract_specs:
+  # NSE publishes tick size in paise, the same as MCX (verified for equities
+  # by the rotation on 2026-09-18).
+  tick_size_divisor: 100
+
+market_hours:
+  timezone: "Asia/Kolkata"
+  open: "09:15"
+  close: "15:30"
+  trading_days: [0, 1, 2, 3, 4]     # Mon-Fri (Python weekday numbering)
+
+subscription:
+  # What is HELD, plus what the page PINS: the strike window around the one
+  # chain somebody is looking at. Nothing else is on the feed.
+  kind: "positions"
+
+greeks:
+  # Not polled by the strategy-wide greeks poller: the Options Trader page
+  # fetches the chain it is showing, on demand (src/options/).
+  expiries_to_poll: 0
+
+charges:
+  rate_card: "nse-equity-options"
+
+margin:
+  # NSE SPAN from the exchange's own daily risk-parameter file, plus exposure
+  # margin, computed per PORTFOLIO by the options engine (src/options/). The
+  # card holds what the file does not: exposure-margin rates, the expiry-day
+  # add-on and the labelled fallback. An ESTIMATE -- every surface says so --
+  # but built from the same file a broker starts from (OPTIONS_TRADER_PLAN.md
+  # section 5). Replaced the Phase 1 percent-of-premium placeholder 2026-11-24.
+  model: "nse_span"
+  card: "nse-span"
+
+capabilities:
+  - "options-trader"
+  - "trade-notes"
+  - "pnl-reports"
+
+# Read by src/options/ (the engine), never by the framework.
+options:
+  # The IDX_I security id Dhan's option chain wants for each index. NOT the
+  # master's UNDERLYING_SECURITY_ID on the option rows: that is 26000 for
+  # NIFTY, and /optionchain answers 26000 with "813 Invalid SecurityId".
+  # Verified live on 2026-11-24. The ids match the master's INDEX rows.
+  index_underlyings:
+    NIFTY: 13
+    BANKNIFTY: 25
+    FINNIFTY: 27
+    NIFTYNXT50: 38
+    MIDCPNIFTY: 442
+  # Strikes either side of ATM pinned to the feed while a chain is open.
+  strike_window: 15
+  # How long a pinned chain stays subscribed after the page last asked for it.
+  view_ttl_seconds: 90

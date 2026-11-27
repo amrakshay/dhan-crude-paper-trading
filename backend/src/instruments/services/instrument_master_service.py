@@ -310,6 +310,14 @@ class InstrumentMasterService:
         # which of them won -- a lot size from the master against one from
         # config, or a ticker against a company name -- and "whichever was
         # loaded first" is not an answer.
+        #
+        # Keyed on the INSTRUMENT TYPE too, since 2026-11-24. Before that the
+        # key was (exchange, symbol), so the Options Trader claiming RELIANCE's
+        # OPTSTK rows was read as disagreeing with the rotation about how to
+        # ingest RELIANCE's EQUITY row -- two different families of rows that
+        # can never produce the same `instruments` row, refused as if they
+        # could. Two strategies claiming the SAME family of the same name with
+        # different rules is still refused, which is the case this exists for.
         symbol_owner: Dict[tuple, tuple] = {}
         needs_series = False
         claimed_symbols: Dict[str, set] = {}
@@ -331,7 +339,8 @@ class InstrumentMasterService:
                 signature = instrument_set.ingestion_signature()
                 for symbol in symbols:
                     owner_key, owner_signature = symbol_owner.get(
-                        (strategy.exchange_id, symbol), (None, None)
+                        (strategy.exchange_id, instrument_set.instrument_type, symbol),
+                        (None, None),
                     )
                     if owner_key is not None and owner_key != strategy.key:
                         if owner_signature != signature:
@@ -350,7 +359,9 @@ class InstrumentMasterService:
                         # Same name, same rules: harmless, and the row is
                         # ingested once rather than twice.
                     else:
-                        symbol_owner[(strategy.exchange_id, symbol)] = (
+                        symbol_owner[
+                            (strategy.exchange_id, instrument_set.instrument_type, symbol)
+                        ] = (
                             strategy.key,
                             signature,
                         )
@@ -431,6 +442,13 @@ class InstrumentMasterService:
 
                 if not instrument_set.accepts_series(record.get(COL_SERIES)):
                     continue
+
+                if instrument_set.max_days_to_expiry is not None:
+                    expiry = _parse_date(record.get(COL_EXPIRY))
+                    if expiry is not None and (
+                        expiry - refreshed_at.date()
+                    ).days > instrument_set.max_days_to_expiry:
+                        continue
 
                 security_id = record.get(COL_SECURITY_ID, "").strip()
                 if not security_id:
@@ -608,8 +626,16 @@ class InstrumentMasterService:
 
         # The universe file's own security ids are not used to trade, but a
         # divergence from the master is worth saying out loud.
+        #
+        # Only CASH rows are compared. A universe file lists each stock's own
+        # security id, and since the Options Trader claims a stock's options
+        # through the same universe, the first row for RELIANCE may now be one
+        # of its option contracts -- reported as 217 bogus "divergences" the
+        # first time both were ingested together (2026-11-24).
         by_symbol: Dict[str, str] = {}
         for row in rows:
+            if row["expiry_date"] is not None or row["option_type"] is not None:
+                continue
             by_symbol.setdefault(row["underlying_symbol"], row["security_id"])
         for strategy in strategies:
             if strategy.universe is None:

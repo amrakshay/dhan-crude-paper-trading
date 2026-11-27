@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Options Trader mock</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --brand:#354bbb;--brandHover:#2438b8;--brandSoft:#E6E9FB;--secondary:#FC5439;--error:#E10101;
+  --text:#172538;--text2:#41546F;--base:#F5F7FB;--surface:#fff;--border:#D8DBDE;--borderSubtle:#E0E0E0;
+  --hover:#F5F5F5;--chip:#EBEDF1;--muted:#797C80;
+  --up:#0B8A5B;--down:#D13438;--upSoft:rgba(11,138,91,.10);--downSoft:rgba(209,52,56,.10);
+  --atm:rgba(53,75,187,.10);--itm:rgba(255,196,0,.09);--warn:#B26A00;--warnSoft:#FFF4E0;
+  --mono:'Roboto Mono',Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,Roboto,Arial,sans-serif;background:var(--base);color:var(--text);font-size:13px}
+button{font-family:inherit;font-size:13px;cursor:pointer}
+.mockbar{background:#172538;color:#fff;padding:8px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:50}
+.mockbar b{font-weight:600}
+.mockbar .tabs{display:flex;gap:4px;flex-wrap:wrap}
+.mockbar .tabs button{background:transparent;border:1px solid #41546F;color:#cfd6e4;border-radius:6px;padding:5px 10px}
+.mockbar .tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.mockbar .note{margin-left:auto;color:#FFB74D;font-size:12px}
+.app{display:flex;min-height:calc(100vh - 44px)}
+.side{width:232px;background:var(--surface);border-right:1px solid var(--border);padding:12px 8px;flex-shrink:0}
+.side .grp{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:14px 10px 6px}
+.side a{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;color:var(--text2);text-decoration:none;cursor:pointer}
+.side a.on{background:var(--brandSoft);color:var(--brand);font-weight:600}
+.side a .new{margin-left:auto;font-size:10px;background:var(--secondary);color:#fff;border-radius:4px;padding:1px 5px}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.appbar{height:57px;background:var(--surface);box-shadow:0 8px 40px rgba(0,0,0,.08);display:flex;align-items:center;padding:0 24px;gap:16px}
+.appbar h1{font-size:17px;margin:0;font-weight:600}
+.pf{margin-left:auto;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:#fff}
+.pf small{color:var(--muted)}
+.feed{display:flex;align-items:center;gap:6px;color:var(--up);font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--up)}
+.content{padding:24px;flex:1}
+.screen{display:none}.screen.on{display:block}
+.card{background:var(--surface);border:1px solid var(--borderSubtle);border-radius:8px}
+.card h3{margin:0;font-size:14px;font-weight:600}
+.card .hd{padding:12px 16px;border-bottom:1px solid var(--borderSubtle);display:flex;align-items:center;gap:10px}
+.card .bd{padding:16px}
+.row{display:flex;gap:16px}
+.grow{flex:1;min-width:0}
+.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}
+.t2{color:var(--text2)}
+.up{color:var(--up)}.down{color:var(--down)}
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--chip);border-radius:12px;padding:3px 10px;font-size:12px;border:1px solid transparent}
+.chip.on{background:var(--brandSoft);color:var(--brand);border-color:var(--brand);font-weight:600}
+.chip.click{cursor:pointer}
+.phase{font-size:10px;font-weight:600;border-radius:4px;padding:1px 5px;background:#EEF0FF;color:var(--brand);border:1px solid #c9cff3;vertical-align:middle}
+.btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:7px 14px;color:var(--text)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+.btn.primary:hover{background:var(--brandHover)}
+.btn.danger{background:var(--down);border-color:var(--down);color:#fff}
+.btn.sm{padding:3px 8px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+table{border-collapse:collapse;width:100%}
+th{background:var(--hover);font-weight:600;color:var(--text2);font-size:12px;text-align:right;padding:7px 8px;white-space:nowrap}
+td{padding:6px 8px;border-top:1px solid var(--borderSubtle);text-align:right;white-space:nowrap}
+th.l,td.l{text-align:left}
+.badge{font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;display:inline-block}
+.b-buy{background:var(--upSoft);color:var(--up)}.b-sell{background:var(--downSoft);color:var(--down)}
+.b-ok{background:var(--upSoft);color:var(--up)}.b-bad{background:var(--downSoft);color:var(--down)}
+.b-warn{background:var(--warnSoft);color:var(--warn)}.b-info{background:var(--brandSoft);color:var(--brand)}
+.b-grey{background:var(--chip);color:var(--text2)}
+.banner{border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start}
+.banner.warn{background:var(--warnSoft);border:1px solid #f0c27a}
+.banner.bad{background:#FDECEC;border:1px solid #f1b3b3}
+.banner.info{background:var(--brandSoft);border:1px solid #c9cff3}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px}
+.kv .k{color:var(--text2)}.kv .v{text-align:right;font-family:var(--mono)}
+.big{font-size:20px;font-weight:600}
+/* chain */
+.chain td{font-family:var(--mono);font-size:12px;position:relative}
+.chain .strike{text-align:center;font-weight:600;background:#FAFBFD;font-family:var(--mono)}
+.chain tr.atm td{background:var(--atm)}
+.chain td.itm{background:var(--itm)}
+.chain tr:hover td{background:#F0F3FF}
+.bs{display:none;gap:3px;position:absolute;top:3px}
+.bs.c{left:4px}.bs.p{right:4px}
+.chain tr:hover .bs{display:flex}
+.bs button{border:0;border-radius:4px;color:#fff;font-weight:700;font-size:11px;width:22px;height:20px}
+.bs .b{background:var(--up)}.bs .s{background:var(--down)}
+.oi{height:4px;border-radius:2px;margin-top:2px}
+/* basket */
+.basket{width:430px;flex-shrink:0;position:sticky;top:60px;align-self:flex-start;max-height:calc(100vh - 80px);overflow:auto}
+.leg{display:grid;grid-template-columns:auto 1fr auto auto auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--borderSubtle)}
+.leg:first-child{border-top:0}
+.stepper{display:flex;align-items:center;border:1px solid var(--border);border-radius:6px}
+.stepper button{border:0;background:none;width:22px;height:24px}
+.stepper span{min-width:22px;text-align:center;font-family:var(--mono)}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:4px 9px;font-size:12px;color:var(--text2)}
+.seg button.on{background:var(--brand);color:#fff}
+.x{border:0;background:none;color:var(--muted);font-size:16px}
+.margin{background:#FAFBFD;border:1px solid var(--borderSubtle);border-radius:8px;padding:12px}
+.overlay{position:fixed;inset:0;background:rgba(23,37,56,.45);display:none;align-items:center;justify-content:center;z-index:100}
+.overlay.on{display:flex}
+.dialog{background:#fff;border-radius:10px;width:560px;max-width:calc(100vw - 32px);box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.dialog .hd{padding:16px 20px;border-bottom:1px solid var(--borderSubtle);font-weight:600;font-size:15px}
+.dialog .bd{padding:16px 20px}
+.dialog .ft{padding:12px 20px;border-top:1px solid var(--borderSubtle);display:flex;justify-content:flex-end;gap:8px}
+/* flow */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.step{background:#fff;border:1px solid var(--borderSubtle);border-radius:10px;padding:14px;cursor:pointer;position:relative}
+.step:hover{border-color:var(--brand);box-shadow:0 4px 16px rgba(53,75,187,.12)}
+.step .n{width:24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;margin-right:6px}
+.step h4{margin:0 0 6px;font-size:14px;display:flex;align-items:center}
+.step p{margin:0;color:var(--text2);line-height:1.45}
+.step.auto{border-style:dashed;background:#FFFBF4}
+.step.auto .n{background:var(--warn)}
+.lane{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:22px 0 10px}
+.gauge{height:10px;background:var(--chip);border-radius:5px;position:relative;overflow:hidden}
+.gauge i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.gauge .mark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--down)}
+.tl{border-left:2px solid var(--borderSubtle);margin-left:8px;padding-left:16px}
+.tl .ev{position:relative;padding:0 0 16px}
+.tl .ev:before{content:"";position:absolute;left:-23px;top:3px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid var(--brand)}
+.tl .ev.r:before{border-color:var(--down)}.tl .ev.w:before{border-color:var(--warn)}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{padding:14px 16px}
+.stat .l{color:var(--text2);font-size:12px}
+.stat .v{font-family:var(--mono);font-size:18px;font-weight:600;margin-top:4px}
+.stat .s{font-size:11px;color:var(--muted);margin-top:2px}
+.search{border:1px solid var(--border);border-radius:8px;padding:7px 10px;width:260px;font-family:inherit}
+.sugg{position:absolute;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);width:260px;z-index:20;display:none}
+.sugg div{padding:7px 10px;cursor:pointer;display:flex;justify-content:space-between}
+.sugg div:hover{background:var(--hover)}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--text2);flex-wrap:wrap}
+.legend span:before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:var(--c)}
+.toast{position:fixed;bottom:20px;right:20px;background:#172538;color:#fff;padding:10px 16px;border-radius:8px;display:none;z-index:200;max-width:420px}
+@media (max-width:1250px){#s-chain>.row{flex-direction:column}.basket{width:100%;position:static;max-height:none}}
+@media (max-width:1100px){.flow{grid-template-columns:repeat(2,1fr)}.grid4{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <b>Options Trader: mock</b>
+  <div class="tabs" id="tabs"></div>
+  <span class="note">Illustrative numbers. The margin here is a toy formula, not SPAN. <span class="phase">P1</span>–<span class="phase">P5</span> tags show which build phase ships each piece.</span>
+</div>
+
+<div class="app">
+  <nav class="side">
+    <div class="grp">Trading</div>
+    <a class="on" data-go="chain">📈 Options Trader <span class="new">NEW</span></a>
+    <a data-go="positions">💼 Positions</a>
+    <a>🧾 Order History</a>
+    <a data-go="funds">🏦 Portfolios</a>
+    <a>📊 P&amp;L Reports</a>
+    <a>📝 Trade Notes</a>
+    <div class="grp">Strategies</div>
+    <a>⏱ Swing Momentum</a><a>🌙 BTST Overnight</a><a>🗜 VCP Swing</a>
+    <div class="grp">Admin</div>
+    <a data-go="setup">🎛 Strategies &amp; Features</a>
+    <a>🔌 Connections</a><a>❤️ System Health</a>
+  </nav>
+
+  <div class="main">
+    <div class="appbar">
+      <h1 id="pageTitle">Options Trader</h1>
+      <div class="feed"><span class="dot"></span>LIVE · SPAN 20-Nov EOD</div>
+      <div class="pf">💼 <b id="pfName">Options Book A</b> <small>· NSE Options Trader</small> ▾</div>
+    </div>
+
+    <div class="content">
+
+<!-- ============ FLOW ============ -->
+<section class="screen" id="s-flow">
+  <div class="card"><div class="bd">
+    <h3 style="font-size:16px;margin-bottom:4px">The user journey</h3>
+    <div class="t2">Click any box to open that screen. Solid boxes are things you do; dashed boxes are things the system does on its own, the way Dhan's risk desk would.</div>
+
+    <div class="lane">Set up (once)</div>
+    <div class="flow">
+      <div class="step" data-go="setup"><h4><span class="n">1</span>Enable the module <span class="phase">P1</span></h4><p>Strategies &amp; Features → switch on <b>NSE Options Trader</b>. It can't be armed: you place every order yourself.</p></div>
+      <div class="step" data-go="setup"><h4><span class="n">2</span>Create portfolios <span class="phase">P1</span></h4><p>Portfolios → New: "Options Book A" ₹10L, "Hedged Writing" ₹5L, and so on. Each one keeps its own cash, positions and P&amp;L.</p></div>
+      <div class="step" data-go="chain"><h4><span class="n">3</span>Pick the active portfolio <span class="phase">P1</span></h4><p>The header picker decides which book the next orders go to, as on every other page.</p></div>
+    </div>
+
+    <div class="lane">Trade</div>
+    <div class="flow">
+      <div class="step" data-go="chain"><h4><span class="n">4</span>Choose an underlying and expiry <span class="phase">P1</span></h4><p>Search NIFTY, BANKNIFTY or any F&amp;O stock. The chain streams live; only the strikes on screen are subscribed.</p></div>
+      <div class="step" data-go="chain"><h4><span class="n">5</span>Build a basket <span class="phase">P2</span></h4><p>Hover a strike, click <b>B</b> or <b>S</b>. Legs collect on the right with lots, Intraday or Carry-forward, and MKT or LMT.</p></div>
+      <div class="step" data-go="chain"><h4><span class="n">6</span>Review margin and payoff <span class="phase">P2</span></h4><p>Overall vs final margin and the hedge benefit, charges, payoff at expiry, max profit and loss, breakevens.</p></div>
+      <div class="step" data-go="exec"><h4><span class="n">7</span>Place → per-leg result <span class="phase">P2</span></h4><p>Buys go first, then sells. Each leg fills, part-fills or is rejected with its reason, as in Dhan's order book.</p></div>
+    </div>
+
+    <div class="lane">Manage</div>
+    <div class="flow">
+      <div class="step" data-go="positions"><h4><span class="n">8</span>Watch positions <span class="phase">P2</span></h4><p>Grouped by underlying and expiry, with live P&amp;L and the SPAN/exposure split for each group.</p></div>
+      <div class="step" data-go="positions"><h4><span class="n">9</span>Exit <span class="phase">P2</span></h4><p>Exit one leg or <b>Exit all</b>, which covers the shorts first. Exiting a hedge leg first may trigger a <b>Hedge Break Alert</b>.</p></div>
+      <div class="step" data-go="funds"><h4><span class="n">10</span>Check funds <span class="phase">P2</span></h4><p>Available, SPAN, exposure, delivery margin, premium and MTM, per portfolio.</p></div>
+      <div class="step" data-go="funds"><h4><span class="n">11</span>Review P&amp;L <span class="phase">P1</span></h4><p>The existing P&amp;L Reports and Trade Notes work unchanged, filtered by portfolio.</p></div>
+    </div>
+
+    <div class="lane">The system acts on its own (RMS and expiry)</div>
+    <div class="flow">
+      <div class="step auto" data-go="risk"><h4><span class="n">A</span>Intraday square-off <span class="phase">P3</span></h4><p>At 15:25 IST every Intraday position is closed with market orders, shorts first. You get an alert.</p></div>
+      <div class="step auto" data-go="risk"><h4><span class="n">B</span>MTM loss ≥ 80% <span class="phase">P3</span></h4><p>When a portfolio's loss reaches 80% of its blocked margin, its option positions are squared off.</p></div>
+      <div class="step auto" data-go="risk"><h4><span class="n">C</span>Margin shortfall <span class="phase">P3</span></h4><p>A new SPAN file can raise margin overnight. If the book is short, the biggest margin consumer is cut first.</p></div>
+      <div class="step auto" data-go="risk"><h4><span class="n">D</span>Expiry and delivery <span class="phase">P4</span></h4><p>Index options cash-settle at intrinsic value. ITM stock options become a share buy or sell; delivery margin ramps from E-4.</p></div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ CHAIN + BASKET ============ -->
+<section class="screen" id="s-chain">
+  <div class="row">
+    <div class="grow">
+      <div class="card" style="margin-bottom:12px"><div class="bd" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <div style="position:relative">
+          <input class="search" id="search" placeholder="Search underlying: NIFTY, RELIANCE…" autocomplete="off">
+          <div class="sugg" id="sugg"></div>
+        </div>
+        <div>
+          <div class="big mono" id="spotLine">NIFTY 24,350.00</div>
+          <div class="up" id="spotChg">+112.40 (+0.46%) · Spot · Lot 65</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap" id="expiries"></div>
+      </div></div>
+
+      <div class="card">
+        <div class="hd">
+          <h3>Option chain</h3>
+          <span class="chip" id="dteChip">6 days to expiry</span>
+          <span class="muted" style="font-size:12px">Hover a row → <b class="up">B</b>/<b class="down">S</b> adds a leg</span>
+          <div class="legend" style="margin-left:auto"><span style="--c:rgba(255,196,0,.35)">ITM</span><span style="--c:rgba(53,75,187,.3)">ATM</span></div>
+        </div>
+        <div style="overflow:auto;max-height:calc(100vh - 290px)">
+        <table class="chain">
+          <thead><tr>
+            <th>OI (L)</th><th>Δ</th><th>IV</th><th>Bid / Ask</th><th>LTP</th>
+            <th style="text-align:center">Strike</th>
+            <th>LTP</th><th>Bid / Ask</th><th>IV</th><th>Δ</th><th>OI (L)</th>
+          </tr>
+          <tr><th colspan="5" style="text-align:center;background:var(--upSoft);color:var(--up)">CALLS</th><th style="background:#FAFBFD"></th><th colspan="5" style="text-align:center;background:var(--downSoft);color:var(--down)">PUTS</th></tr>
+          </thead>
+          <tbody id="chainBody"></tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- basket -->
+    <div class="basket card">
+      <div class="hd"><h3>Basket</h3><span class="phase">P2</span>
+        <span class="muted" id="legCount" style="margin-left:auto">0 legs</span>
+        <button class="btn sm" id="clearBtn">Clear</button></div>
+      <div class="bd">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          <span class="muted" style="font-size:12px;align-self:center">Templates <span class="phase">P5</span></span>
+          <span class="chip click" data-tpl="bullcall">Bull call spread</span>
+          <span class="chip click" data-tpl="strangle">Short strangle</span>
+          <span class="chip click" data-tpl="condor">Iron condor</span>
+          <span class="chip click" data-tpl="straddle">Long straddle</span>
+        </div>
+        <div id="legs"><div class="muted" style="padding:20px 0;text-align:center">No legs yet. Hover a strike in the chain and click B or S.</div></div>
+
+        <div style="display:flex;gap:10px;align-items:center;margin:10px 0">
+          <span class="t2">Product</span>
+          <div class="seg" id="prod"><button class="on" data-v="NRML">Carry-forward</button><button data-v="MIS">Intraday</button></div>
+          <span class="muted" style="font-size:11px" id="prodNote">held until you exit or expiry</span>
+        </div>
+
+        <div class="margin" id="marginBox"></div>
+
+        <div style="margin-top:12px">
+          <div style="display:flex;align-items:center;margin-bottom:4px"><b>Payoff at expiry</b><span class="muted" style="margin-left:auto;font-size:11px">x: underlying · y: P&amp;L ₹</span></div>
+          <svg id="payoff" viewBox="0 0 400 170" style="width:100%;height:170px;background:#FAFBFD;border:1px solid var(--borderSubtle);border-radius:8px"></svg>
+          <div class="kv" style="margin-top:8px" id="payoffStats"></div>
+        </div>
+
+        <button class="btn primary" style="width:100%;margin-top:14px;padding:10px" id="placeBtn" disabled>Place basket</button>
+        <div class="muted" style="font-size:11px;margin-top:6px;text-align:center">Execution order: all BUY legs first, then SELL legs, each sent as its own paper order</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ EXECUTION RESULT ============ -->
+<section class="screen" id="s-exec">
+  <div class="banner warn" style="margin-bottom:14px">⚠️ <div><b>Basket #B-0042 partly executed: 3 of 4 legs.</b><br>
+    <span class="t2">Leg 4 was rejected because the portfolio's margin after legs 1–3 could not cover it. Legs 1–3 are live. This is how a Dhan basket behaves; nothing was rolled back.</span></div></div>
+  <div class="card">
+    <div class="hd"><h3>Basket #B-0042 · NIFTY 25-Nov iron condor · Options Book A</h3><span class="phase">P2</span><span class="muted" style="margin-left:auto">placed 10:42:07 IST</span></div>
+    <table>
+      <thead><tr><th class="l">#</th><th class="l">Sent</th><th class="l">Leg</th><th>Lots</th><th>Type</th><th>Filled</th><th>Avg price</th><th class="l">Status</th><th class="l">Reason / note</th></tr></thead>
+      <tbody>
+        <tr><td class="l">1</td><td class="l mono">10:42:07.112</td><td class="l"><span class="badge b-buy">BUY</span> NIFTY 24900 CE</td><td>2</td><td>MKT</td><td class="mono">130/130</td><td class="mono">14.35</td><td class="l"><span class="badge b-ok">FILLED</span></td><td class="l muted">Ask 14.30 + 1 tick slippage</td></tr>
+        <tr><td class="l">2</td><td class="l mono">10:42:07.140</td><td class="l"><span class="badge b-buy">BUY</span> NIFTY 23800 PE</td><td>2</td><td>MKT</td><td class="mono">130/130</td><td class="mono">18.90</td><td class="l"><span class="badge b-ok">FILLED</span></td><td class="l muted">Walked 2 depth levels</td></tr>
+        <tr><td class="l">3</td><td class="l mono">10:42:07.171</td><td class="l"><span class="badge b-sell">SELL</span> NIFTY 24700 CE</td><td>2</td><td>MKT</td><td class="mono">130/130</td><td class="mono">41.55</td><td class="l"><span class="badge b-ok">FILLED</span></td><td class="l muted">Hedged by leg 1: final margin ₹38,120</td></tr>
+        <tr><td class="l">4</td><td class="l mono">10:42:07.198</td><td class="l"><span class="badge b-sell">SELL</span> NIFTY 24000 PE</td><td>2</td><td>MKT</td><td class="mono">0/130</td><td class="mono">–</td><td class="l"><span class="badge b-bad">REJECTED</span></td><td class="l">Insufficient margin: needs ₹41,600, available ₹22,480</td></tr>
+      </tbody>
+    </table>
+    <div class="bd" style="display:flex;gap:10px;align-items:center;border-top:1px solid var(--borderSubtle)">
+      <span class="t2">Now:</span>
+      <button class="btn primary" data-go="positions">View positions</button>
+      <button class="btn">Retry leg 4</button>
+      <button class="btn">Exit the filled legs</button>
+      <span class="muted" style="margin-left:auto;font-size:12px">Charges: ₹60 brokerage (3 × ₹20) + ₹31.40 taxes · alert sent to Telegram</span>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px"><div class="bd t2" style="line-height:1.6">
+    <b style="color:var(--text)">Other outcomes you could see on this screen</b><br>
+    • <span class="badge b-warn">PARTIAL</span> a leg filled 65 of 130 because visible depth ran out; the remainder stays OPEN as a resting order.<br>
+    • <span class="badge b-info">OPEN</span> a LMT leg rests until the market trades through its price, and blocks its margin meanwhile.<br>
+    • <span class="badge b-bad">REJECTED</span> "Market closed", "Intraday orders not accepted after 15:18", or "Insufficient margin".
+  </div></div>
+</section>
+
+<!-- ============ POSITIONS ============ -->
+<section class="screen" id="s-positions">
+  <div class="grid4" style="margin-bottom:14px">
+    <div class="card stat"><div class="l">Open P&amp;L (MTM)</div><div class="v down">−₹6,842</div><div class="s">3 groups · 7 legs</div></div>
+    <div class="card stat"><div class="l">Realised today</div><div class="v up">+₹2,315</div><div class="s">net of ₹412 charges</div></div>
+    <div class="card stat"><div class="l">Blocked margin</div><div class="v">₹2,84,900</div><div class="s">SPAN ₹2,41,300 · Exp ₹43,600</div></div>
+    <div class="card stat"><div class="l">MTM loss vs margin</div><div class="v">2.4%</div><div class="gauge" style="margin-top:6px"><i style="width:2.4%;background:var(--up)"></i><span class="mark" style="left:80%"></span></div><div class="s">square-off at 80%</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div class="hd"><h3>NIFTY · 25-Nov-2026 (weekly)</h3><span class="badge b-grey">Carry-forward</span><span class="badge b-info">Hedged · iron-condor shape (3 legs)</span>
+      <span style="margin-left:auto" class="mono down">−₹1,248</span>
+      <span class="muted">SPAN ₹31,900 · Exp ₹6,220</span>
+      <button class="btn sm danger" data-dlg="exitAll">Exit all</button></div>
+    <table>
+      <thead><tr><th class="l">Contract</th><th>Net qty</th><th>Avg</th><th>LTP</th><th>P&amp;L</th><th>Δ</th><th class="l"></th></tr></thead>
+      <tbody>
+        <tr><td class="l"><span class="badge b-buy">LONG</span> 24900 CE</td><td class="mono">+130</td><td class="mono">14.35</td><td class="mono">12.10</td><td class="mono down">−292.50</td><td class="mono">+0.09</td><td class="l"><button class="btn sm" data-dlg="hedge">Exit</button></td></tr>
+        <tr><td class="l"><span class="badge b-buy">LONG</span> 23800 PE</td><td class="mono">+130</td><td class="mono">18.90</td><td class="mono">16.40</td><td class="mono down">−325.00</td><td class="mono">−0.11</td><td class="l"><button class="btn sm" data-dlg="hedge">Exit</button></td></tr>
+        <tr><td class="l"><span class="badge b-sell">SHORT</span> 24700 CE</td><td class="mono">−130</td><td class="mono">41.55</td><td class="mono">46.40</td><td class="mono down">−630.50</td><td class="mono">−0.28</td><td class="l"><button class="btn sm">Exit</button></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div class="hd"><h3>BANKNIFTY · 30-Dec-2026 (monthly)</h3><span class="badge b-warn">Intraday · squares off 15:25</span><span class="badge b-bad">Naked short</span>
+      <span style="margin-left:auto" class="mono down">−₹5,980</span><span class="muted">SPAN ₹1,58,400 · Exp ₹31,700</span>
+      <button class="btn sm danger">Exit all</button></div>
+    <table><tbody>
+      <tr><td class="l"><span class="badge b-sell">SHORT</span> 56000 PE</td><td class="mono">−60</td><td class="mono">312.00</td><td class="mono">411.65</td><td class="mono down">−5,979.00</td><td class="mono">+0.46</td><td class="l"><button class="btn sm">Exit</button></td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h3>RELIANCE · 30-Dec-2026 (monthly)</h3><span class="badge b-grey">Carry-forward</span><span class="badge b-warn">Physically settled · delivery margin from 23-Dec</span>
+      <span style="margin-left:auto" class="mono up">+₹386</span><span class="muted">SPAN ₹51,000 · Exp ₹5,680</span>
+      <button class="btn sm danger">Exit all</button></div>
+    <table><tbody>
+      <tr><td class="l"><span class="badge b-sell">SHORT</span> 1600 CE</td><td class="mono">−500</td><td class="mono">18.20</td><td class="mono">17.40</td><td class="mono up">+400.00</td><td class="mono">−0.21</td><td class="l"><button class="btn sm">Exit</button></td></tr>
+      <tr><td class="l"><span class="badge b-buy">LONG</span> 1650 CE</td><td class="mono">+500</td><td class="mono">7.05</td><td class="mono">7.02</td><td class="mono down">−14.00</td><td class="mono">+0.09</td><td class="l"><button class="btn sm" data-dlg="hedge">Exit</button></td></tr>
+    </tbody></table>
+  </div>
+</section>
+
+<!-- ============ FUNDS ============ -->
+<section class="screen" id="s-funds">
+  <div class="row" style="margin-bottom:14px;align-items:center">
+    <span class="chip on">Options Book A</span><span class="chip click">Hedged Writing</span><span class="chip click">Expiry Scalps</span>
+    <span class="muted" style="margin-left:8px">The same strategy in three portfolios. Their books never mix.</span>
+  </div>
+  <div class="grid4" style="margin-bottom:14px">
+    <div class="card stat"><div class="l">Cash (ledger)</div><div class="v">₹10,03,915</div><div class="s">deposits + realised − charges − premium paid + premium received</div></div>
+    <div class="card stat"><div class="l">Blocked margin</div><div class="v">₹2,84,900</div><div class="s">estimate from NSE SPAN</div></div>
+    <div class="card stat"><div class="l">Available</div><div class="v up">₹7,19,015</div><div class="s">for new orders and withdrawals</div></div>
+    <div class="card stat"><div class="l">Equity</div><div class="v">₹9,97,073</div><div class="s">cash + MTM</div></div>
+  </div>
+  <div class="row">
+    <div class="card grow"><div class="hd"><h3>Margin breakdown</h3><span class="phase">P2</span></div><div class="bd">
+      <div class="kv">
+        <span class="k">SPAN (worst of 16 scenarios, netted per underlying)</span><span class="v">2,41,300</span>
+        <span class="k">Exposure margin on shorts (2% index / 3.5% stock)</span><span class="v">43,600</span>
+        <span class="k">Expiry-day add-on (+2% on shorts expiring today)</span><span class="v">0</span>
+        <span class="k">Delivery margin (stock options, last 4 days)</span><span class="v">0</span>
+        <span class="k">Pending orders' margin</span><span class="v">0</span>
+        <span class="k"><b>Total blocked</b></span><span class="v"><b>2,84,900</b></span>
+        <span class="k muted">Hedge benefit currently enjoyed</span><span class="v up">1,72,450</span>
+      </div>
+      <div class="banner info" style="margin-top:14px">ℹ️ <div class="t2">Computed from <b>nsccl.20261120.s.spn</b> (NSE Clearing, loaded 18:42 IST) at live prices. <b>Estimate.</b> Dhan's own figure may differ slightly.</div></div>
+      <div class="banner warn" style="margin-top:8px">⚠️ <div class="t2"><b>When no fresh SPAN file is available</b> this card shows: "SPAN unavailable: scenario estimate". The figures fall back to a Black-76 grid and an alert is sent.</div></div>
+    </div></div>
+    <div class="card" style="width:380px"><div class="hd"><h3>Premium and MTM</h3></div><div class="bd">
+      <div class="kv">
+        <span class="k">Premium paid (longs)</span><span class="v down">−8,402</span>
+        <span class="k">Premium received (shorts)</span><span class="v up">+33,226</span>
+        <span class="k">Open MTM</span><span class="v down">−6,842</span>
+        <span class="k">Realised today</span><span class="v up">+2,315</span>
+        <span class="k">Charges today</span><span class="v down">−412</span>
+      </div>
+      <div style="margin-top:14px"><b>Risk meter</b>
+        <div class="gauge" style="margin-top:6px"><i style="width:2.4%;background:var(--up)"></i><span class="mark" style="left:80%"></span></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">MTM loss is 2.4% of blocked margin. RMS squares off this portfolio at 80%.</div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px"><button class="btn">Deposit</button><button class="btn">Withdraw</button></div>
+    </div></div>
+  </div>
+</section>
+
+<!-- ============ RISK & EXPIRY ============ -->
+<section class="screen" id="s-risk">
+  <div class="row">
+    <div class="card grow"><div class="hd"><h3>Risk desk (RMS) activity</h3><span class="phase">P3</span><span class="muted" style="margin-left:auto">Options Book A · today</span></div><div class="bd">
+      <div class="tl">
+        <div class="ev w"><b>15:25:00</b> <span class="badge b-warn">INTRADAY SQUARE-OFF</span><br><span class="t2">Covered BANKNIFTY 30-Dec 56000 PE ×60 at 418.20 (MKT, crossed the spread). Realised −₹6,372. Telegram alert sent.</span></div>
+        <div class="ev w"><b>15:18:00</b> <span class="badge b-grey">CUT-OFF</span><br><span class="t2">New Intraday orders are refused from here on. Carry-forward orders are still accepted until 15:30.</span></div>
+        <div class="ev r"><b>11:02:41</b> <span class="badge b-bad">MTM 80% · Hedged Writing</span><br><span class="t2">MTM loss ₹1,21,800 reached 81% of blocked margin ₹1,50,300. Squared off 4 legs, shorts first. Realised −₹1,24,100.</span></div>
+        <div class="ev r"><b>09:15:03</b> <span class="badge b-bad">MARGIN SHORTFALL · Expiry Scalps</span><br><span class="t2">The new SPAN file raised margin to ₹3,12,000 against ₹2,95,000 cash. Cut NIFTY 24500 CE ×65 (the largest consumer). Shortfall cleared.</span></div>
+        <div class="ev"><b>Yesterday 18:42</b> <span class="badge b-info">SPAN LOADED</span><br><span class="t2">nsccl.20261120.s.zip · 9.9 MB · 4,812 contracts with risk arrays.</span></div>
+      </div>
+    </div></div>
+
+    <div class="card" style="width:460px"><div class="hd"><h3>Upcoming expiries</h3><span class="phase">P4</span></div><div class="bd">
+      <div style="margin-bottom:12px"><b>NIFTY 25-Nov (tomorrow)</b> <span class="badge b-info">cash-settled</span>
+        <div class="t2" style="margin-top:4px;line-height:1.5">At the close, every open leg settles at intrinsic value against NIFTY's closing value. OTM legs expire at ₹0. STT on exercise is 0.15% of intrinsic, plus ₹20 per exercised contract. On expiry day, short legs carry an extra 2% exposure margin.</div>
+      </div>
+      <div><b>RELIANCE 30-Dec</b> <span class="badge b-warn">physically settled</span>
+        <div class="t2" style="margin:4px 0 8px">Delivery margin on positions that could deliver (ITM, or a short near the money):</div>
+        <table><thead><tr><th class="l">Day</th><th>Date</th><th>Delivery margin</th><th>For this book</th></tr></thead><tbody>
+          <tr><td class="l">E-4</td><td>23-Dec</td><td>10%</td><td class="mono">₹80,000</td></tr>
+          <tr><td class="l">E-3</td><td>24-Dec</td><td>25%</td><td class="mono">₹2,00,000</td></tr>
+          <tr><td class="l">E-2</td><td>26-Dec</td><td>45%</td><td class="mono">₹3,60,000</td></tr>
+          <tr><td class="l">E-1</td><td>29-Dec</td><td>70%</td><td class="mono">₹5,60,000</td></tr>
+          <tr><td class="l"><b>Expiry</b></td><td>30-Dec</td><td><b>100%</b></td><td class="mono"><b>₹8,00,000</b></td></tr>
+        </tbody></table>
+        <div class="banner warn" style="margin-top:10px">⚠️ <div class="t2">If the short 1600 CE is ITM at expiry, you must <b>sell 500 RELIANCE shares</b> at ₹1,600. This portfolio holds none, so the RMS will <b>square it off on expiry day</b> rather than create a short delivery.</div></div>
+        <div class="banner info" style="margin-top:8px">ℹ️ <div class="t2">A long ITM call or short ITM put <b>buys</b> the shares into this portfolio, charged under the equity-delivery card plus Dhan's 0.10% physical-delivery charge. They then appear under Positions as a cash holding.</div></div>
+      </div>
+    </div></div>
+  </div>
+</section>
+
+<!-- ============ SETUP ============ -->
+<section class="screen" id="s-setup">
+  <div class="card" style="margin-bottom:14px">
+    <div class="hd"><h3>Strategies &amp; Features</h3><span class="phase">P1</span></div>
+    <table>
+      <thead><tr><th class="l">Strategy</th><th class="l">Segment</th><th class="l">Enabled</th><th class="l">Armed</th><th class="l">Capabilities</th></tr></thead>
+      <tbody>
+        <tr style="background:#F7F8FF"><td class="l"><b>NSE Options Trader</b> <span class="new" style="font-size:10px;background:var(--secondary);color:#fff;border-radius:4px;padding:1px 5px">NEW</span><div class="muted" style="font-size:11px">Buy and sell NSE index and stock options, single legs or baskets</div></td><td class="l">NSE_FNO</td><td class="l"><span class="badge b-ok">ON</span></td><td class="l"><span class="muted">Not armable (discretionary)</span></td><td class="l"><span class="chip">option-chain</span> <span class="chip">greeks</span> <span class="chip">option-baskets</span> <span class="chip">pnl-reports</span> <span class="chip">trade-notes</span></td></tr>
+        <tr><td class="l">MCX Crude Options</td><td class="l">MCX_COMM</td><td class="l"><span class="badge b-grey">OFF</span></td><td class="l muted">Not armable</td><td class="l muted">unchanged</td></tr>
+        <tr><td class="l">NSE Swing Momentum</td><td class="l">NSE_EQ</td><td class="l"><span class="badge b-ok">ON</span></td><td class="l"><span class="badge b-ok">ARMED</span></td><td class="l muted">unchanged</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="row">
+    <div class="card grow"><div class="hd"><h3>Portfolios</h3><button class="btn primary sm" style="margin-left:auto" data-dlg="newpf">+ New portfolio</button></div>
+      <table><thead><tr><th class="l">Portfolio</th><th class="l">Strategy</th><th>Cash</th><th>Blocked</th><th>Available</th><th>Open legs</th></tr></thead><tbody>
+        <tr><td class="l"><b>Options Book A</b></td><td class="l">NSE Options Trader</td><td class="mono">10,03,915</td><td class="mono">2,84,900</td><td class="mono">7,19,015</td><td>6</td></tr>
+        <tr><td class="l"><b>Hedged Writing</b></td><td class="l">NSE Options Trader</td><td class="mono">3,75,900</td><td class="mono">0</td><td class="mono">3,75,900</td><td>0</td></tr>
+        <tr><td class="l"><b>Expiry Scalps</b></td><td class="l">NSE Options Trader</td><td class="mono">2,95,000</td><td class="mono">2,41,800</td><td class="mono">53,200</td><td>2</td></tr>
+        <tr><td class="l">Swing Live</td><td class="l">NSE Swing Momentum</td><td class="mono">…</td><td class="mono">0</td><td class="mono">…</td><td>12</td></tr>
+      </tbody></table></div>
+  </div>
+</section>
+
+    </div>
+  </div>
+</div>
+
+<!-- dialogs -->
+<div class="overlay" id="dlg-confirm"><div class="dialog">
+  <div class="hd">Place basket: Options Book A</div>
+  <div class="bd">
+    <div class="t2" style="margin-bottom:10px">The legs are sent as separate paper orders <b>in this order</b>. A leg can fill, part-fill or be rejected independently.</div>
+    <table id="confirmTable"></table>
+    <div class="kv" style="margin-top:12px" id="confirmKv"></div>
+  </div>
+  <div class="ft"><button class="btn" data-close>Cancel</button><button class="btn primary" id="confirmGo">Place basket</button></div>
+</div></div>
+
+<div class="overlay" id="dlg-hedge"><div class="dialog">
+  <div class="hd" style="color:var(--down)">⚠️ Hedge Break Alert</div>
+  <div class="bd t2" style="line-height:1.55">
+    Exiting <b>LONG NIFTY 24900 CE ×130</b> would leave <b>SHORT 24700 CE ×130</b> unhedged.<br><br>
+    <div class="kv"><span class="k">Margin with hedge</span><span class="v">38,120</span><span class="k">Margin after this exit</span><span class="v down">1,46,900</span><span class="k">Available</span><span class="v">22,480</span><span class="k"><b>Shortfall</b></span><span class="v down"><b>1,24,420</b></span></div>
+    <br>This exit was <b>not sent</b>. Exit the short leg first, or use <b>Exit all</b>, which covers the shorts before the hedges.
+  </div>
+  <div class="ft"><button class="btn" data-close>Close</button><button class="btn danger" data-dlg="exitAll">Exit all (shorts first)</button></div>
+</div></div>
+
+<div class="overlay" id="dlg-exitAll"><div class="dialog">
+  <div class="hd">Exit all: NIFTY 25-Nov</div>
+  <div class="bd">
+    <table><thead><tr><th class="l">Order</th><th class="l">Leg</th><th>Qty</th><th>Type</th></tr></thead><tbody>
+      <tr><td class="l">1</td><td class="l"><span class="badge b-buy">BUY</span> to cover 24700 CE</td><td>130</td><td>MKT</td></tr>
+      <tr><td class="l">2</td><td class="l"><span class="badge b-sell">SELL</span> 24900 CE</td><td>130</td><td>MKT</td></tr>
+      <tr><td class="l">3</td><td class="l"><span class="badge b-sell">SELL</span> 23800 PE</td><td>130</td><td>MKT</td></tr>
+    </tbody></table>
+    <div class="muted" style="margin-top:10px;font-size:12px">Shorts are covered first, so the margin never spikes mid-exit. Closing orders are never refused for funds, apart from the hedge-break case.</div>
+  </div>
+  <div class="ft"><button class="btn" data-close>Cancel</button><button class="btn danger" data-close data-toast="Exit all sent: 3 orders, shorts first">Exit all</button></div>
+</div></div>
+
+<div class="overlay" id="dlg-newpf"><div class="dialog">
+  <div class="hd">New portfolio</div>
+  <div class="bd"><div class="kv" style="grid-template-columns:140px 1fr;gap:10px">
+    <span class="k">Name</span><input class="search" style="width:100%" value="Weekly Writing">
+    <span class="k">Strategy</span><select class="search" style="width:100%"><option>NSE Options Trader</option><option>NSE Swing Momentum</option></select>
+    <span class="k">Opening deposit</span><input class="search" style="width:100%" value="₹5,00,000">
+  </div></div>
+  <div class="ft"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close data-toast="Portfolio “Weekly Writing” created with ₹5,00,000">Create</button></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- navigation ----------
+const SCREENS=[['flow','0 · Flow'],['setup','1 · Setup'],['chain','2 · Chain + Basket'],['exec','3 · Basket result'],['positions','4 · Positions'],['funds','5 · Funds & margin'],['risk','6 · RMS & expiry']];
+const TITLES={flow:'User journey',setup:'Strategies & Portfolios',chain:'Options Trader',exec:'Order result',positions:'Positions',funds:'Portfolio funds',risk:'Risk desk & expiry'};
+const tabs=document.getElementById('tabs');
+SCREENS.forEach(([k,l])=>{const b=document.createElement('button');b.textContent=l;b.dataset.go=k;tabs.appendChild(b)});
+function go(k){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id==='s-'+k));
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===k));
+  document.querySelectorAll('.side a').forEach(a=>a.classList.toggle('on',a.dataset.go===k||(k==='exec'&&a.dataset.go==='chain')));
+  document.getElementById('pageTitle').textContent=TITLES[k];
+  window.scrollTo(0,0);
+}
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-go]'); if(g){closeAll();go(g.dataset.go);return}
+  const d=e.target.closest('[data-dlg]'); if(d){closeAll();document.getElementById('dlg-'+d.dataset.dlg).classList.add('on');return}
+  const c=e.target.closest('[data-close]'); if(c){closeAll(); if(c.dataset.toast) toast(c.dataset.toast);}
+  if(e.target.classList.contains('overlay')) closeAll();
+});
+function closeAll(){document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('on'))}
+function toast(t){const el=document.getElementById('toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',2600)}
+
+// ---------- market model (toy) ----------
+const UND={
+  NIFTY:{spot:24350,step:50,lot:65,iv:.13,chg:'+112.40 (+0.46%)',kind:'Index',exp:['25-Nov (W)','02-Dec (W)','09-Dec (W)','30-Dec (M)','27-Jan (M)'],dte:[1,8,15,36,64],elm:.02},
+  BANKNIFTY:{spot:56180,step:100,lot:30,iv:.15,chg:'−84.10 (−0.15%)',kind:'Index',exp:['30-Dec (M)','27-Jan (M)','24-Feb (M)'],dte:[36,64,92],elm:.02},
+  FINNIFTY:{spot:26310,step:50,lot:60,iv:.14,chg:'+40.25 (+0.15%)',kind:'Index',exp:['30-Dec (M)','27-Jan (M)'],dte:[36,64],elm:.02},
+  RELIANCE:{spot:1582.4,step:10,lot:500,iv:.22,chg:'+9.80 (+0.62%)',kind:'Stock · physically settled',exp:['30-Dec (M)','27-Jan (M)','24-Feb (M)'],dte:[36,64,92],elm:.035},
+  HDFCBANK:{spot:1012.6,step:10,lot:550,iv:.19,chg:'−3.15 (−0.31%)',kind:'Stock · physically settled',exp:['30-Dec (M)','27-Jan (M)'],dte:[36,64],elm:.035},
+  TCS:{spot:3140,step:20,lot:175,iv:.21,chg:'+22.00 (+0.71%)',kind:'Stock · physically settled',exp:['30-Dec (M)','27-Jan (M)'],dte:[36,64],elm:.035},
+};
+let cur='NIFTY', expIdx=0, legs=[], product='NRML';
+const N=x=>{const t=1/(1+.2316419*Math.abs(x)),d=.3989423*Math.exp(-x*x/2);let p=d*t*(.3193815+t*(-.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return x>0?1-p:p};
+function bs(S,K,T,v,call){if(T<=0)return Math.max(call?S-K:K-S,0);const d1=(Math.log(S/K)+v*v*T/2)/(v*Math.sqrt(T)),d2=d1-v*Math.sqrt(T);return call?S*N(d1)-K*N(d2):K*N(-d2)-S*N(-d1)}
+function delta(S,K,T,v,call){const d1=(Math.log(S/K)+v*v*T/2)/(v*Math.sqrt(T));return call?N(d1):N(d1)-1}
+const tick=p=>Math.max(.05,Math.round(p*20)/20);
+const fmt=(n,d=2)=>n.toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
+const rs=n=>(n<0?'−':'')+'₹'+fmt(Math.abs(n),0);
+function seed(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))|0;return()=>{h=(h*1103515245+12345)|0;return ((h>>>8)&0xffff)/0xffff}}
+
+function chainRows(){
+  const u=UND[cur],T=u.dte[expIdx]/365,atm=Math.round(u.spot/u.step)*u.step,rows=[],rnd=seed(cur+expIdx);
+  for(let i=-10;i<=10;i++){
+    const K=atm+i*u.step,skew=1+Math.abs(i)*.012;
+    const ivc=u.iv*skew*(i<0?1.03:1),ivp=u.iv*skew*(i>0?.98:1.05);
+    const c=tick(bs(u.spot,K,T,ivc,true)),p=tick(bs(u.spot,K,T,ivp,false));
+    rows.push({K,c,p,ivc,ivp,dc:delta(u.spot,K,T,ivc,true),dp:delta(u.spot,K,T,ivp,false),
+      oic:Math.round((40+rnd()*80)*Math.exp(-Math.abs(i-3)/5)*10)/10,oip:Math.round((40+rnd()*80)*Math.exp(-Math.abs(i+3)/5)*10)/10});
+  }
+  return {rows,atm};
+}
+function spr(p){return p<5?.05:p<50?.1:p<200?.3:.6}
+function renderChain(){
+  const u=UND[cur],{rows,atm}=chainRows();
+  document.getElementById('spotLine').textContent=cur+' '+fmt(u.spot);
+  document.getElementById('spotChg').textContent=u.chg+' · '+u.kind+' · Lot '+u.lot;
+  document.getElementById('spotChg').className=u.chg.startsWith('+')?'up':'down';
+  document.getElementById('dteChip').textContent=u.dte[expIdx]+(u.dte[expIdx]===1?' day':' days')+' to expiry';
+  const ex=document.getElementById('expiries');ex.innerHTML='';
+  u.exp.forEach((e,i)=>{const s=document.createElement('span');s.className='chip click'+(i===expIdx?' on':'');s.textContent=e;s.onclick=()=>{expIdx=i;renderChain()};ex.appendChild(s)});
+  const maxOi=Math.max(...rows.flatMap(r=>[r.oic,r.oip]));
+  document.getElementById('chainBody').innerHTML=rows.map(r=>{
+    const ci=r.K<u.spot?'itm':'',pi=r.K>u.spot?'itm':'';
+    return `<tr class="${r.K===atm?'atm':''}">
+      <td class="${ci}"><span class="bs c"><button class="b" onclick="addLeg('BUY','CE',${r.K})">B</button><button class="s" onclick="addLeg('SELL','CE',${r.K})">S</button></span>${fmt(r.oic,1)}<div class="oi" style="background:var(--up);opacity:.35;width:${r.oic/maxOi*100}%;margin-left:auto"></div></td>
+      <td class="${ci}">${r.dc.toFixed(2)}</td><td class="${ci}">${(r.ivc*100).toFixed(1)}</td>
+      <td class="${ci} muted">${fmt(Math.max(.05,r.c-spr(r.c)))} / ${fmt(r.c+spr(r.c))}</td><td class="${ci}"><b>${fmt(r.c)}</b></td>
+      <td class="strike">${fmt(r.K,r.K%1?1:0)}</td>
+      <td class="${pi}"><b>${fmt(r.p)}</b></td><td class="${pi} muted">${fmt(Math.max(.05,r.p-spr(r.p)))} / ${fmt(r.p+spr(r.p))}</td>
+      <td class="${pi}">${(r.ivp*100).toFixed(1)}</td><td class="${pi}">${r.dp.toFixed(2)}</td>
+      <td class="${pi}">${fmt(r.oip,1)}<div class="oi" style="background:var(--down);opacity:.35;width:${r.oip/maxOi*100}%"></div><span class="bs p"><button class="b" onclick="addLeg('BUY','PE',${r.K})">B</button><button class="s" onclick="addLeg('SELL','PE',${r.K})">S</button></span></td></tr>`}).join('');
+}
+function priceOf(type,K){const r=chainRows().rows.find(x=>x.K===K);return r?(type==='CE'?r.c:r.p):0}
+function addLeg(side,type,K){
+  const u=UND[cur];
+  if(legs.length&&legs[0].und!==cur){legs=[];toast('Basket cleared: a basket holds one underlying')}
+  legs.push({side,type,K,lots:1,ord:'MKT',und:cur,lot:u.lot,exp:u.exp[expIdx],price:priceOf(type,K)});
+  renderBasket();
+}
+window.addLeg=addLeg;
+
+// toy margin: SPAN-proxy = worst expiry loss over ±(scan) moves, using current premia; ELM on short notional
+function payoffAt(S){return legs.reduce((a,l)=>{const iv=Math.max(l.type==='CE'?S-l.K:l.K-S,0);const q=l.lots*l.lot;return a+(l.side==='BUY'?(iv-l.price):(l.price-iv))*q},0)}
+function legAloneMargin(l){const u=UND[l.und],q=l.lots*l.lot;if(l.side==='BUY')return l.price*q;
+  const scan=u.kind==='Index'?.09:.15;let worst=0;for(let m=-1;m<=1;m+=.125){const S=u.spot*(1+m*scan),iv=Math.max(l.type==='CE'?S-l.K:l.K-S,0);worst=Math.max(worst,(iv-l.price)*q)}
+  return Math.max(worst,u.spot*q*.03)+u.spot*q*u.elm}
+function basketMargin(){if(!legs.length)return{overall:0,final:0,span:0,elm:0,prem:0};
+  const u=UND[cur],scan=u.kind==='Index'?.09:.15;let worst=0;for(let m=-1;m<=1;m+=.0625){worst=Math.max(worst,-payoffAt(u.spot*(1+m*scan)))}
+  const shortQ=legs.filter(l=>l.side==='SELL').reduce((a,l)=>a+l.lots*l.lot,0);
+  const prem=legs.filter(l=>l.side==='BUY').reduce((a,l)=>a+l.price*l.lots*l.lot,0);
+  const credit=legs.filter(l=>l.side==='SELL').reduce((a,l)=>a+l.price*l.lots*l.lot,0);
+  const span=shortQ?Math.max(worst+credit-prem,u.spot*shortQ*.01):0;
+  const elm=u.spot*shortQ*u.elm*(shortQ?1:0)*(legs.some(l=>l.side==='BUY')?.5:1);
+  const final=span+elm+prem;const overall=legs.reduce((a,l)=>a+legAloneMargin(l),0);
+  return{overall,final:Math.min(final,overall),span,elm,prem,credit}}
+function charges(){let b=legs.length*20,t=0;legs.forEach(l=>{const v=l.price*l.lots*l.lot;t+=v*.0003553;if(l.side==='SELL')t+=v*.0015;else t+=v*.00003});return{b,t:t+(b+t*.3)*.18}}
+
+function renderBasket(){
+  const el=document.getElementById('legs');document.getElementById('legCount').textContent=legs.length+(legs.length===1?' leg':' legs');
+  document.getElementById('placeBtn').disabled=!legs.length;
+  if(!legs.length){el.innerHTML='<div class="muted" style="padding:20px 0;text-align:center">No legs yet. Hover a strike in the chain and click B or S.</div>'}
+  else el.innerHTML=legs.map((l,i)=>`<div class="leg">
+    <span class="badge ${l.side==='BUY'?'b-buy':'b-sell'}" style="cursor:pointer" title="flip side" onclick="flip(${i})">${l.side==='BUY'?'B':'S'}</span>
+    <div><b>${l.und} ${fmt(l.K,l.K%1?1:0)} ${l.type}</b><div class="muted" style="font-size:11px">${l.exp} · ₹${fmt(l.price)} · ${l.lots*l.lot} qty</div></div>
+    <div class="stepper"><button onclick="lots(${i},-1)">−</button><span>${l.lots}</span><button onclick="lots(${i},1)">+</button></div>
+    <div class="seg"><button class="${l.ord==='MKT'?'on':''}" onclick="ord(${i},'MKT')">MKT</button><button class="${l.ord==='LMT'?'on':''}" onclick="ord(${i},'LMT')">LMT</button></div>
+    <button class="x" onclick="rm(${i})">×</button></div>`).join('');
+  const m=basketMargin(),c=charges(),hb=m.overall-m.final;
+  document.getElementById('marginBox').innerHTML=legs.length?`
+    <div class="kv">
+      <span class="k">Overall margin <span class="muted">(each leg alone)</span></span><span class="v">${rs(m.overall)}</span>
+      <span class="k">Hedge benefit</span><span class="v up">−${rs(hb)}</span>
+      <span class="k"><b>Final margin required</b></span><span class="v"><b>${rs(m.final)}</b></span>
+      <span class="k muted" style="font-size:12px">↳ SPAN ${rs(m.span)} · Exposure ${rs(m.elm)} · Premium ${rs(m.prem)}</span><span></span>
+      <span class="k">Premium ${m.credit>m.prem?'received':'paid'} (net)</span><span class="v ${m.credit>m.prem?'up':'down'}">${rs(Math.abs(m.credit-m.prem))}</span>
+      <span class="k">Charges <span class="muted">(₹${c.b} brokerage + taxes)</span></span><span class="v">${rs(c.b+c.t)}</span>
+      <span class="k">Available in Options Book A</span><span class="v">₹7,19,015</span>
+    </div>
+    ${m.final>719015?'<div class="banner bad" style="margin-top:8px">⛔ Final margin exceeds available. The SELL legs would be rejected.</div>':''}
+    <div class="muted" style="font-size:11px;margin-top:6px">Estimate from NSE SPAN (20-Nov EOD) at live prices. The mock uses a toy formula.</div>`
+   :'<div class="muted" style="text-align:center">Margin, hedge benefit and charges appear here</div>';
+  drawPayoff();
+}
+window.flip=i=>{legs[i].side=legs[i].side==='BUY'?'SELL':'BUY';renderBasket()};
+window.lots=(i,d)=>{legs[i].lots=Math.max(1,legs[i].lots+d);renderBasket()};
+window.ord=(i,o)=>{legs[i].ord=o;renderBasket()};
+window.rm=i=>{legs.splice(i,1);renderBasket()};
+document.getElementById('clearBtn').onclick=()=>{legs=[];renderBasket()};
+document.querySelectorAll('#prod button').forEach(b=>b.onclick=()=>{product=b.dataset.v;document.querySelectorAll('#prod button').forEach(x=>x.classList.toggle('on',x===b));
+  document.getElementById('prodNote').textContent=product==='MIS'?'auto square-off at 15:25 IST':'held until you exit or expiry'});
+
+function drawPayoff(){
+  const svg=document.getElementById('payoff'),st=document.getElementById('payoffStats');
+  if(!legs.length){svg.innerHTML='<text x="200" y="88" text-anchor="middle" fill="#797C80" font-size="12">Add legs to see the payoff</text>';st.innerHTML='';return}
+  const u=UND[cur],lo=u.spot*.92,hi=u.spot*1.08,n=160,pts=[];
+  for(let i=0;i<=n;i++){const S=lo+(hi-lo)*i/n;pts.push([S,payoffAt(S)])}
+  const ys=pts.map(p=>p[1]),ymax=Math.max(...ys,1),ymin=Math.min(...ys,-1),pad=12;
+  const X=S=>pad+(S-lo)/(hi-lo)*(400-2*pad),Y=v=>pad+(ymax-v)/(ymax-ymin)*(170-2*pad);
+  let area='',line='';pts.forEach(([S,v],i)=>{line+=(i?'L':'M')+X(S).toFixed(1)+','+Y(v).toFixed(1)});
+  const z=Y(0);
+  svg.innerHTML=`<defs><clipPath id="cu"><rect x="0" y="0" width="400" height="${z}"/></clipPath><clipPath id="cd"><rect x="0" y="${z}" width="400" height="${170-z}"/></clipPath></defs>
+   <path d="${line}L${X(hi)},${z}L${X(lo)},${z}Z" fill="rgba(11,138,91,.15)" clip-path="url(#cu)"/>
+   <path d="${line}L${X(hi)},${z}L${X(lo)},${z}Z" fill="rgba(209,52,56,.15)" clip-path="url(#cd)"/>
+   <line x1="0" x2="400" y1="${z}" y2="${z}" stroke="#B0B8C8"/>
+   <line x1="${X(u.spot)}" x2="${X(u.spot)}" y1="0" y2="170" stroke="#354bbb" stroke-dasharray="3 3"/>
+   <text x="${X(u.spot)+4}" y="12" font-size="10" fill="#354bbb">spot ${fmt(u.spot,0)}</text>
+   <path d="${line}" fill="none" stroke="#172538" stroke-width="1.6"/>
+   <text x="${pad}" y="166" font-size="10" fill="#797C80">${fmt(lo,0)}</text><text x="${400-pad}" y="166" font-size="10" fill="#797C80" text-anchor="end">${fmt(hi,0)}</text>`;
+  const be=[];for(let i=1;i<pts.length;i++){if(Math.sign(pts[i][1])!==Math.sign(pts[i-1][1]))be.push(fmt(pts[i][0],0))}
+  const unb=(a,b)=>Math.abs(payoffAt(u.spot*b)-payoffAt(u.spot*a))>1&&(payoffAt(u.spot*b)-payoffAt(u.spot*a));
+  const hiSlope=payoffAt(u.spot*3)-payoffAt(u.spot*2.9),loSlope=payoffAt(u.spot*.01)-payoffAt(u.spot*.02);
+  const mp=hiSlope>1?'Unlimited':rs(Math.max(...ys)),ml=hiSlope<-1?'Unlimited':rs(Math.min(...ys,payoffAt(u.spot*.01)));
+  st.innerHTML=`<span class="k">Max profit</span><span class="v up">${mp}</span><span class="k">Max loss</span><span class="v down">${ml}</span><span class="k">Breakeven${be.length>1?'s':''}</span><span class="v">${be.join(' · ')||'–'}</span>`;
+}
+
+// templates
+document.querySelectorAll('[data-tpl]').forEach(t=>t.onclick=()=>{
+  const u=UND[cur],a=Math.round(u.spot/u.step)*u.step,s=u.step;legs=[];
+  const T={bullcall:[['BUY','CE',a],['SELL','CE',a+4*s]],strangle:[['SELL','CE',a+6*s],['SELL','PE',a-6*s]],
+    condor:[['BUY','CE',a+10*s],['BUY','PE',a-10*s],['SELL','CE',a+6*s],['SELL','PE',a-6*s]],straddle:[['BUY','CE',a],['BUY','PE',a]]}[t.dataset.tpl];
+  T.forEach(x=>addLeg(...x));});
+
+// search
+const search=document.getElementById('search'),sugg=document.getElementById('sugg');
+search.oninput=()=>{const q=search.value.toUpperCase();const m=Object.keys(UND).filter(k=>k.includes(q));
+  sugg.innerHTML=m.map(k=>`<div data-u="${k}"><b>${k}</b><span class="muted">${UND[k].kind.split(' ')[0]}</span></div>`).join('')+(q&&!m.length?'<div class="muted">No F&amp;O underlying matches</div>':'');sugg.style.display='block'};
+search.onfocus=search.oninput;
+sugg.onclick=e=>{const d=e.target.closest('[data-u]');if(!d)return;cur=d.dataset.u;expIdx=0;search.value='';sugg.style.display='none';renderChain()};
+document.addEventListener('click',e=>{if(!e.target.closest('#search')&&!e.target.closest('#sugg'))sugg.style.display='none'});
+
+// place
+document.getElementById('placeBtn').onclick=()=>{
+  const ordered=[...legs.filter(l=>l.side==='BUY'),...legs.filter(l=>l.side==='SELL')];const m=basketMargin(),c=charges();
+  document.getElementById('confirmTable').innerHTML='<thead><tr><th class="l">Order</th><th class="l">Leg</th><th>Qty</th><th>Type</th><th>Price</th></tr></thead><tbody>'+
+    ordered.map((l,i)=>`<tr><td class="l">${i+1}</td><td class="l"><span class="badge ${l.side==='BUY'?'b-buy':'b-sell'}">${l.side}</span> ${l.und} ${l.K} ${l.type} <span class="muted">${l.exp}</span></td><td>${l.lots*l.lot}</td><td>${l.ord}</td><td class="mono">${l.ord==='MKT'?'market':fmt(l.price)}</td></tr>`).join('')+'</tbody>';
+  document.getElementById('confirmKv').innerHTML=`<span class="k">Product</span><span class="v">${product==='MIS'?'Intraday (square-off 15:25)':'Carry-forward'}</span><span class="k">Final margin</span><span class="v">${rs(m.final)}</span><span class="k">Charges (est.)</span><span class="v">${rs(c.b+c.t)}</span>`;
+  document.getElementById('dlg-confirm').classList.add('on')};
+document.getElementById('confirmGo').onclick=()=>{closeAll();go('exec')};
+
+renderChain();renderBasket();go('flow');
+</script>
+</body>
+</html>

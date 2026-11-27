@@ -198,6 +198,9 @@ class PositionController:
                 # position it closes -- never the caller's active one, which
                 # could be a different book entirely.
                 portfolio_id=position.portfolio_id,
+                # ...and the same LINE: closing the Intraday row must not net
+                # against a Carry-forward row in the same contract.
+                product=position.product,
             )
         except OrderValidationError as exc:
             logger.warning(

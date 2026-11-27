@@ -48,6 +48,12 @@ class Position(TimestampedModel):
     buy_value = Column(Money, nullable=False, default=0)
     sell_value = Column(Money, nullable=False, default=0)
 
+    # The product the position was OPENED under (see orders.product). Dhan
+    # keeps Intraday and Carry-forward positions in the same contract apart;
+    # this simulator refuses an order whose product differs from the open
+    # position's rather than merging two things a broker would not.
+    product = Column(String(16), nullable=True)
+
     is_open = Column(Boolean, nullable=False, default=True, index=True)
     opened_at = Column(PreciseDateTime, nullable=False)
     closed_at = Column(PreciseDateTime, nullable=True)

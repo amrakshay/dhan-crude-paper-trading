@@ -41,11 +41,15 @@
     "over the network -- the Dhan credentials, and the Telegram bot that",
     "carries alerts out and commands in. Admin-only, like /settings and",
     "/health, and NOT strategy-gated: it is how you fix the credentials the",
-    "strategies run on, so a toggle must never be able to hide it."
+    "strategies run on, so a toggle must never be able to hide it.",
+    "",
+    "/options is the NSE Options Trader page (2026-11-24), granted by the",
+    "options-trader CAPABILITY, so it leaves the sidebar with that module."
   ],
   "pages": [
     "/live",
     "/chain",
+    "/options",
     "/positions",
     "/orders",
     "/portfolios",
@@ -69,6 +73,7 @@
       "pages": [
         "/live",
         "/chain",
+        "/options",
         "/positions",
         "/orders",
         "/portfolios",
@@ -92,6 +97,7 @@
       "pages": [
         "/live",
         "/chain",
+        "/options",
         "/positions",
         "/orders",
         "/portfolios",
