@@ -158,7 +158,7 @@ const StrikeRow = memo(function StrikeRow({ row, liveCall, livePut, isAtm, spot,
   );
 });
 
-function Chain({ chain, onTrade }) {
+function Chain({ chain, onTrade, beside = false }) {
   const theme = useTheme();
   const { getRow, version } = useMarketFeed();
   const live = useMemo(() => {
@@ -182,12 +182,31 @@ function Chain({ chain, onTrade }) {
     // well, which on a laptop meant two scrollbars. Its two heading rows now
     // stick together under the app bar (fixed, 65px) as the PAGE scrolls; on
     // a narrow screen the table may still scroll SIDEWAYS, never up and down.
-    <TableContainer sx={{ overflowX: { xs: 'auto', lg: 'visible' }, overflowY: 'visible' }}>
-      <Table size="small" stickyHeader sx={{ overflow: { lg: 'visible' } }}>
+    //
+    // `beside`: the basket panel is open next to the chain. The full table is
+    // wider than what is left, and with overflow visible it spilled UNDER the
+    // panel. So the cells tighten and the chain scrolls sideways inside its own
+    // box -- every column still reachable. A sideways-scrolling box cannot
+    // also let its header stick to the page, so the header stops sticking
+    // while the panel is open (the panel itself still sticks).
+    <TableContainer
+      sx={{
+        overflowX: beside ? 'auto' : { xs: 'auto', lg: 'visible' },
+        overflowY: beside ? 'hidden' : 'visible',
+      }}
+    >
+      <Table
+        size="small"
+        stickyHeader
+        sx={{
+          overflow: beside ? undefined : { lg: 'visible' },
+          ...(beside && { '& td, & th': { px: 0.75 } }),
+        }}
+      >
         <TableHead
           sx={{
-            position: { lg: 'sticky' },
-            top: { lg: APP_BAR_HEIGHT },
+            position: beside ? 'static' : { lg: 'sticky' },
+            top: beside ? undefined : { lg: APP_BAR_HEIGHT },
             zIndex: 2,
             '& th': { position: 'static' },
           }}
@@ -241,7 +260,7 @@ export default function OptionsTraderPage() {
   const [legs, setLegs] = useState([]);
   const [placedCount, setPlacedCount] = useState(0);
   const [notice, setNotice] = useState(null);
-  // The basket and template panel takes 440px from the chain, so it is
+  // The basket and template panel takes 380px from the chain, so it is
   // HIDDEN until it is wanted: it opens itself when a leg is added (B / S),
   // and the button above the chain shows or hides it.
   const [panelOpen, setPanelOpen] = useState(false);
@@ -436,7 +455,7 @@ export default function OptionsTraderPage() {
         sx={{
           display: 'grid',
           gap: 2,
-          gridTemplateColumns: { xs: '1fr', lg: panelOpen ? 'minmax(0, 1fr) 440px' : '1fr' },
+          gridTemplateColumns: { xs: '1fr', lg: panelOpen ? 'minmax(0, 1fr) 380px' : '1fr' },
           alignItems: 'start',
         }}
       >
@@ -446,7 +465,7 @@ export default function OptionsTraderPage() {
               <CircularProgress size={24} />
             </Box>
           ) : chain ? (
-            <Chain chain={chain} onTrade={onTrade} />
+            <Chain chain={chain} onTrade={onTrade} beside={panelOpen} />
           ) : null}
           {chain ? (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', p: 1 }}>
