@@ -947,3 +947,38 @@ average and P&L, and the 15:25 square-off closes only the Intraday one.
 
 **Unverified:** that Dhan's own RMS nets the two products in one contract for
 margin, as the exchange does.
+
+## 16. Future plans (noted 2026-11-27, not started)
+
+Proposed after Phase 5 as the features a trader would miss next. Nothing here
+is built or decided; the order is the suggested build order.
+
+1. **Payoff chart and what-if for a basket.** Payoff at expiry and at today's
+   date, breakevens, max profit / max loss, return on margin, and sliders for
+   spot %, IV points and days passed. Same view for open positions.
+2. **Positions grouped by strategy, with net Greeks.** Regroup legs into the
+   basket they came from: one P&L per strategy, net delta / theta / vega per
+   underlying and per portfolio. Shares the maths with item 1.
+3. **Strategy-level stop and target.** Exit the whole basket on its combined
+   MTM, watched server-side like `chart_trading/services/bracket_monitor.py`.
+   Combined, not per leg: the Sunshine straddle test measured per-leg stops
+   whipsawing.
+4. **One-click adjustments.** Roll a leg to the next strike or expiry, or add a
+   hedge wing; each generates a basket preview with the margin change and cost.
+5. **F&O ban list.** NSE bars fresh positions in stocks above 95% of MWPL and a
+   real broker refuses them; not enforced here (unverified — check before
+   building). Small daily NSE file, same shape as the contract-limits work;
+   a new NSE URL must go through `nse_span_client.py` and the outbound-hosts
+   test.
+6. **Liquidity warning and depth-aware fills.** Warn on wide spreads / thin OI;
+   fill large orders by walking the five depth levels instead of one tick worse
+   than the touch. Matters most for stock options.
+7. **Chain analytics.** OI change, PCR, max pain, IV percentile, ATM straddle
+   chart.
+8. **Telegram alerts for options.** Spot level, strategy P&L threshold, margin
+   utilisation, expiry-day reminder for ITM stock options. Uses the existing
+   alert outbox.
+9. **Journal by strategy type.** Win rate, return on margin and charges as a
+   share of gross P&L per template, to show which structures pay after costs.
+
+Suggested start: 1 and 2 together, then 3, then 5.
