@@ -20,6 +20,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import { ApiError, api } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 
 const MarketFeedContext = createContext(null);
 
@@ -32,6 +34,7 @@ export function MarketFeedProvider({ children }) {
   const reconnectRef = useRef(RECONNECT_INITIAL_MS);
   const reconnectTimerRef = useRef(null);
   const closedByUsRef = useRef(false);
+  const { refresh: refreshSession } = useAuth();
 
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState(null);
@@ -57,8 +60,10 @@ export function MarketFeedProvider({ children }) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws/market`);
     socketRef.current = socket;
+    let opened = false;
 
     socket.onopen = () => {
+      opened = true;
       reconnectRef.current = RECONNECT_INITIAL_MS;
       setConnectionState('CONNECTED');
     };
@@ -89,11 +94,25 @@ export function MarketFeedProvider({ children }) {
       socketRef.current = null;
       if (closedByUsRef.current) return;
       setConnectionState('RECONNECTING');
+      // The server refuses an expired session BEFORE accepting the socket, so
+      // the browser sees only a failed handshake (1006), never the 4401 it
+      // sends. A handshake that never opened is therefore asked about: a 401
+      // from /auth/me means the login expired, and refreshing the session
+      // drops the user on the login screen instead of retrying a dead login
+      // every 15 s forever. Anything else -- the server restarting, the
+      // network -- is a real disconnect and keeps reconnecting.
+      if (!opened) {
+        api.get('/auth/me').catch((error) => {
+          if (error instanceof ApiError && error.status === 401) {
+            refreshSession();
+          }
+        });
+      }
       const delay = reconnectRef.current;
       reconnectRef.current = Math.min(delay * 2, RECONNECT_MAX_MS);
       reconnectTimerRef.current = window.setTimeout(connect, delay);
     };
-  }, [applyRows]);
+  }, [applyRows, refreshSession]);
 
   useEffect(() => {
     connect();
